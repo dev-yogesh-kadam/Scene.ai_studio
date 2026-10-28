@@ -110,12 +110,12 @@ def test_a_question_needs_two_options():
 
 def test_a_model_named_earlier_in_the_conversation_stays_offered(client, monkeypatch):
     register(client)
-    monkeypatch.setattr(client.app.state.settings, "default_workflow", "video/h3_master")   # as on the studio PC
+    monkeypatch.setattr(client.app.state.settings, "default_workflow", "video/h3_all_in_one")   # as on the studio PC
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "looks good, next step", "direction": "Models: video H3 Director, image Z-Image Turbo."})
+    client.post("/api/agent/plan", json={"instruction": "looks good, next step", "direction": "Models: video LTX-2.5, image FLUX.2 Klein 9B."})
     offered = seen[-1][1]["content"]
-    assert '"video/h3_director"' in offered            # named in the notes, so still offered
-    assert '"video/video_minimax_h3_i2v"' not in offered  # never named: left for the Create page
+    assert '"video/video_ltx2_5_t2v"' in offered       # named in the notes, so still offered
+    assert '"video/video_wan_animate2"' not in offered    # never named: left for the Create page
 
 
 def test_the_tools_work_is_streamed_while_the_model_thinks(client, monkeypatch):

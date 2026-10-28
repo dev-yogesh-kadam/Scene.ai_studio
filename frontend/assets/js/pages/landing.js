@@ -23,7 +23,7 @@ const STEPS = [
 ];
 
 // The camera's readouts for each scene: lens and stop, sensitivity and shutter, colour temperature.
-const READOUT = { rooftop: ['35mm · T2.0', 'ISO 800 · 1/48', '3200K'], neon: ['24mm · T1.4', 'ISO 1600 · 1/48', '5600K'],
+export const READOUT = { rooftop: ['35mm · T2.0', 'ISO 800 · 1/48', '3200K'], neon: ['24mm · T1.4', 'ISO 1600 · 1/48', '5600K'],
   desert: ['85mm · T5.6', 'ISO 100 · 1/96', '6500K'], deep: ['18mm · T2.8', 'ISO 3200 · 1/48', '4300K'] };
 
 // Four takes of one shot for the take report: what each was, and the one that was kept.
@@ -40,7 +40,7 @@ function picture(name, cls = '', sketch = false) {
 }
 
 // The frame counter of the camera: hours, minutes, seconds and frames at 24 a second, from one hour in.
-function timecode(frames) {
+export function timecode(frames) {
   const two = (n) => String(n).padStart(2, '0');
   return `${two(Math.floor(frames / 86400) % 24)}:${two(Math.floor(frames / 1440) % 60)}:${two(Math.floor(frames / 24) % 60)}:${two(frames % 24)}`;
 }

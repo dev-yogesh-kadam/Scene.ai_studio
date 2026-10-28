@@ -4,6 +4,7 @@
 import { api } from '../api.js';
 import { go, here, linkClicks } from '../nav.js';
 import { el, field, icon, segmented } from '../dom.js';
+import { signInSet } from '../pages/auth.js';
 import { session } from './session.js';
 import { overview } from './overview.js';
 import { users, jobs, library, credits, system, audit, settings } from './sections.js';
@@ -60,16 +61,17 @@ function showSignIn(message) {
   if (here() !== '/signin') history.replaceState(null, '', '/signin');
   let second = null;   // {email, password} once the password was right and a code is asked for
 
-  const page = (...card) => root.replaceChildren(el('div', { class: 'auth' },
-    el('div', { class: 'auth-hero' },
-      el('div', { class: 'auth-frame', 'aria-hidden': 'true' }),
-      el('span', { class: 'brand' }, el('img', { src: '/assets/img/logo.svg?v=clapper', alt: '' }), 'Scene.ai'),
-      el('div', {},
-        el('h2', {}, 'Admin console.'),
-        el('p', {}, 'The queue, the render server, users, credits and pricing of the studio. For its admins only.')),
-      el('div', { class: 'auth-points' }, ['Its own address, apart from the studio', 'Its own sign-in', 'Every change goes into the audit log']
-        .map((p) => el('div', {}, icon('check'), p)))),
-    el('div', { class: 'auth-side' }, el('div', { class: 'auth-card' }, ...card))));
+  let set = null;
+  const page = (tag, ...card) => {
+    if (!set || !set.node.isConnected) {
+      set = signInSet({ scene: 'deep', heading: ['Admin', el('br'), el('b', {}, 'console.')],
+        sub: 'The queue, the render server, users, credits and pricing of the studio. For its admins only.',
+        points: ['Its own address, apart from the studio', 'Its own sign-in', 'Every change goes into the audit log'] });
+      root.replaceChildren(set.node);
+    }
+    set.tag.textContent = tag;
+    set.card.replaceChildren(...card);
+  };
 
   const signIn = async (body, error, submit) => {
     submit.disabled = true;
@@ -92,7 +94,7 @@ function showSignIn(message) {
     const password = el('input', { type: 'password', autocomplete: 'current-password', required: true, placeholder: 'Your password' });
     const error = el('p', { class: 'error notice' }, message || '');
     const submit = el('button', { class: 'btn primary block', type: 'submit' }, 'Sign in');
-    page(el('h1', {}, 'Admin sign-in'),
+    page('Admin sign-in', el('h1', {}, 'Admin sign-in'),
       el('p', { class: 'muted' }, 'With the email and password of an admin account of the studio.'),
       el('form', { onsubmit: (e) => { e.preventDefault(); signIn({ email: email.value, password: password.value }, error, submit); } },
         field('Email', email), field('Password', password), error, submit));
@@ -103,7 +105,7 @@ function showSignIn(message) {
     const code = el('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', required: true, maxlength: 20, placeholder: '123456' });
     const error = el('p', { class: 'error notice' });
     const submit = el('button', { class: 'btn primary block', type: 'submit' }, 'Sign in');
-    page(el('h1', {}, 'Two-step sign-in'),
+    page('Two-step', el('h1', {}, 'Two-step sign-in'),
       el('p', { class: 'muted' }, 'Enter the 6-digit code your authenticator app shows for Scene.ai, or one of your recovery codes.'),
       el('form', { onsubmit: (e) => { e.preventDefault(); signIn({ ...second, code: code.value }, error, submit); } },
         field('Code', code), error, submit),

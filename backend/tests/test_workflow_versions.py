@@ -86,26 +86,26 @@ def test_a_workflow_can_be_tried_by_admins_before_users_see_it(client):
     desk = console(client)
     report = desk.get("/api/admin/workflows").json()
     assert report["since"] and report["drops"] == []
-    h3 = next(w for w in report["workflows"] if w["id"] == "video/h3_master")
+    h3 = next(w for w in report["workflows"] if w["id"] == "video/h3_all_in_one")
     assert h3["audience"] == "everyone" and h3["versions"] == 1 and h3["example"] > 0 and isinstance(h3["missing"], dict)
-    assert desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_master", "audience": "nobody"}).status_code == 400
-    assert desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_master", "audience": "admins"}).json()["audience"] == "admins"
+    assert desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_all_in_one", "audience": "nobody"}).status_code == 400
+    assert desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_all_in_one", "audience": "admins"}).json()["audience"] == "admins"
     ids = lambda: [w["id"] for w in client.get("/api/workflows").json()["workflows"]]
-    assert "video/h3_master" in ids()                                # the admin sees it
+    assert "video/h3_all_in_one" in ids()                                # the admin sees it
     assert post_job(client).status_code == 200
     client.post("/api/auth/logout")
     client.post("/api/auth/register", json=BOB)
-    assert "video/h3_master" not in ids()                            # a user does not, and can't use it
+    assert "video/h3_all_in_one" not in ids()                            # a user does not, and can't use it
     assert post_job(client).status_code == 400
-    desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_master", "audience": "everyone"})
-    assert "video/h3_master" in ids()
-    desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_master", "audience": "off"})
-    assert "video/h3_master" not in ids()
-    pricing = next(w for w in desk.get("/api/admin/pricing").json()["workflows"] if w["id"] == "video/h3_master")
+    desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_all_in_one", "audience": "everyone"})
+    assert "video/h3_all_in_one" in ids()
+    desk.put("/api/admin/workflows/audience", json={"workflow": "video/h3_all_in_one", "audience": "off"})
+    assert "video/h3_all_in_one" not in ids()
+    pricing = next(w for w in desk.get("/api/admin/pricing").json()["workflows"] if w["id"] == "video/h3_all_in_one")
     assert pricing["enabled"] is False and pricing["admins_only"] is False
     assert desk.put("/api/admin/workflows/settings", json={"new_admins_only": True}).json() == {"new_admins_only": True}
     assert desk.get("/api/admin/workflows").json()["new_admins_only"] is True
-    assert [v["change"] for v in desk.get("/api/admin/workflows/history", params={"workflow": "video/h3_master"}).json()["versions"]] == ["first"]
+    assert [v["change"] for v in desk.get("/api/admin/workflows/history", params={"workflow": "video/h3_all_in_one"}).json()["versions"]] == ["first"]
 
 
 def test_a_test_run_is_free_first_in_the_queue_and_runs_under_maintenance(client):
@@ -115,7 +115,7 @@ def test_a_test_run_is_free_first_in_the_queue_and_runs_under_maintenance(client
     post_job(client)
     credits = client.get("/api/auth/me").json()["credits"]
     desk.put("/api/admin/maintenance", json={"on": True})
-    test = desk.post("/api/admin/workflows/test", json={"workflow": "video/h3_master"})
+    test = desk.post("/api/admin/workflows/test", json={"workflow": "video/h3_all_in_one"})
     assert test.status_code == 200 and test.json()["name"].startswith("Test · ")
     job = client.app.state.db.one("SELECT * FROM jobs WHERE id = ?", (test.json()["id"],))
     assert job["user_id"] == me["id"] and job["cost"] == 0 and job["priority"] == 100 and job["status"] == "queued"

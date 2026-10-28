@@ -24,7 +24,9 @@ app = create_app(settings)
 sockets = [listen(settings.host, settings.port)]
 print("Scene.ai is running at http://localhost:{}".format(settings.port))
 if app.state.console is not None:
-    sockets.append(listen(settings.console_host, settings.console_port))
-    shown = "localhost" if settings.console_host in ("127.0.0.1", "::1", "0.0.0.0", "::") else settings.console_host
-    print("The admin console is at http://{}:{}".format(shown, settings.console_port))
+    # console_host may name several addresses, comma-separated: this PC's own and its Tailscale one, say.
+    for host in [h.strip() for h in settings.console_host.split(",") if h.strip()]:
+        sockets.append(listen(host, settings.console_port))
+        shown = "localhost" if host in ("127.0.0.1", "::1", "0.0.0.0", "::") else host
+        print("The admin console is at http://{}:{}".format(shown, settings.console_port))
 uvicorn.Server(uvicorn.Config(Doors(app), log_level="warning")).run(sockets=sockets)

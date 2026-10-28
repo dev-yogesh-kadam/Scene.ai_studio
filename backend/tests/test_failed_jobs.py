@@ -5,7 +5,7 @@ from test_api import JOB, console, post_job, register
 
 
 def test_seeds_stay_below_two_to_the_32(client):
-    wf = __import__("asyncio").run(client.app.state.catalog.load("video/h3_master"))
+    wf = __import__("asyncio").run(client.app.state.catalog.load("video/h3_all_in_one"))
     seeds = {workflows.build_prompt(wf, dict(JOB, seed_mode="random", clips=1))[1]["seed"] for _ in range(40)}
     assert all(0 <= s < 2 ** 32 for s in seeds) and len(seeds) > 30
     schema = workflows.describe(wf)

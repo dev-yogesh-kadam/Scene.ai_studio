@@ -1,5 +1,6 @@
 {
   "title": "Wan Animate 2",
+  "replaces": ["video/video_wan_animate2_distilled"],
   "description": "Character animation: your character (a picture) performs the motion of a driving video. The background and camera come from the prompt.",
   "output_name": "292.filename_prefix",
   "labels": {

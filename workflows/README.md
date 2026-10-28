@@ -5,7 +5,7 @@ the studio without a restart.
 
 ```
 image/       6 picture workflows
-video/      20 video workflows
+video/      10 video workflows
 audio/       4 sound workflows (music, voice split, transcripts)
 upscaler/    1 video upscaler (its own action in the studio, not on the Create page)
 archive/    retired workflows and old handovers: never read

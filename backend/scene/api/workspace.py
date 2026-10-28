@@ -1542,7 +1542,7 @@ async def _shown_step(state, schema, settings, menu, uses, start, after, why="")
             "shape": agent.shape_of(schema, settings, ctx), "why": why, "keep": settings.get("keep"),
             # What the card offers: the other workflows of the same kind, and this one's shapes, sizes and lengths.
             "menu": {"workflows": [w for w in menu if w["kind"] == kind],
-                     "shapes": bool(schema.get("size") or aspect), "resolutions": resolutions,
+                     "shapes": bool(schema.get("size") or aspect or agent.orientation_option(schema)), "resolutions": resolutions,
                      "durations": SHOT_LENGTHS if "duration" in roles else []},
             "current": {"orientation": _orientation(schema, settings, ctx), "resolution": ctx.get("resolution"),
                         "duration": int(ctx["duration"]) if ctx.get("duration") else None}}

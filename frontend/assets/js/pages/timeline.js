@@ -204,7 +204,7 @@ export function render(view) {
   async function load() {
     try {
       const [projects, library, board] = await Promise.all([api('/api/projects'),
-        api('/api/library?kind=video' + (project ? '&project=' + project : '')), api('/api/boards/timeline?project=' + project)]);
+        api('/api/library?kind=video&all=1' + (project ? '&project=' + project : '')), api('/api/boards/timeline?project=' + project)]);
       {
         const here = projects.projects.find((p) => p.id === project);
         picker.textContent = here ? (here.parent_name ? `${here.parent_name} › ${here.name}` : here.name) : 'All work';
@@ -250,7 +250,7 @@ export function render(view) {
   window.addEventListener('resize', onResize);
   const unsubscribe = subscribe((change) => {
     if (change !== 'library') return;
-    api('/api/library?kind=video' + (project ? '&project=' + project : '')).then((library) => {
+    api('/api/library?kind=video&all=1' + (project ? '&project=' + project : '')).then((library) => {
       if (!videos.length) return load();
       videos = library.items;
       drawBin();

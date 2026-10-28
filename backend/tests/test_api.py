@@ -55,27 +55,28 @@ def test_admin_can_close_signups(client):
 def test_workflow_catalog_and_form(client):
     client.post("/api/auth/register", json=ADMIN)
     catalog = client.get("/api/workflows").json()
-    assert "video/h3_master" in [w["id"] for w in catalog["workflows"]]
-    form = client.get("/api/workflows/video/h3_master").json()
-    assert form["title"] == "MiniMax H3" and len(form["refs"]) == 11
-    assert [(o["id"], o["label"], o.get("top", False)) for o in form["options"]] == [("engine", "Mode", True), ("mode", "Speed", False), ("quality", "Quality", False)]
+    assert "video/h3_all_in_one" in [w["id"] for w in catalog["workflows"]]
+    form = client.get("/api/workflows/video/h3_all_in_one").json()
+    assert form["title"] == "H3 All In One" and len(form["refs"]) == 13
+    assert [(o["id"], o.get("top", False)) for o in form["options"]] == [("engine", True), ("quality", False), ("shape", False), ("sound", False),
+                                                                          ("keyframes", False), ("upscale", False)]
     # the reference images, the motion video and the voice sample belong to reference mode; the rest to both modes
     assert [r["id"] for r in form["refs"] if r.get("when") == {"engine": "reference"}] == [
         "201:image", "202:image", "203:image", "204:image", "205:image", "206:image", "207:video", "208:audio"]
-    assert [r["id"] for r in form["refs"] if "when" not in r] == ["209:image", "210:image", "211:audio"] and form["chain"] is True
-    estimate = client.post("/api/estimate", json={"workflow": "video/h3_master"}).json()
-    assert estimate["text"] == "about 2.3 min"
+    assert [r["id"] for r in form["refs"] if "when" not in r] == ["209:image", "210:image", "211:audio", "401:image", "402:image"] and form["chain"] is True
+    estimate = client.post("/api/estimate", json={"workflow": "video/h3_all_in_one"}).json()
+    assert estimate["text"] == "no estimate yet (it appears after the first run)"   # it has no table of minutes
 
 
 def test_a_job_with_an_empty_prompt_is_refused(client):
     client.post("/api/auth/register", json=ADMIN)
-    response = client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_master"}'})
+    response = client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_all_in_one"}'})
     assert response.status_code == 400 and response.json()["detail"] == "The prompt is empty."
 
 
 def test_users_only_see_their_own_jobs(client):
     client.post("/api/auth/register", json=ADMIN)
-    settings = '{"workflow": "video/h3_master", "values": {"100:value": "She waves."}}'
+    settings = '{"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}}'
     job_id = client.post("/api/jobs", data={"settings": settings}).json()["id"]
     assert [j["id"] for j in client.get("/api/jobs").json()["jobs"]] == [job_id]
     client.post("/api/auth/logout")
@@ -116,7 +117,7 @@ def made_by(client, response):
     return next(i for i in client.get("/api/library").json()["items"] if i["job_id"] == job["id"])
 
 
-JOB = {"workflow": "video/h3_master", "values": {"100:value": "She waves."}, "options": {"mode": "fast", "quality": "high"}}   # high: priced at the rate itself (credits.FACTORS)
+JOB = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"mode": "fast", "quality": "high"}}   # high: priced at the rate itself (credits.FACTORS)
 
 
 def post_job(client, **extra):
@@ -158,8 +159,8 @@ def test_a_long_video_costs_per_clip_and_needs_a_chain_workflow(client):
     register(client)
     single = client.post("/api/estimate", json=JOB).json()
     chained = client.post("/api/estimate", json={**JOB, "clips": 3}).json()
-    assert chained["minutes"] == single["minutes"] * 3 and chained["seconds"] == 15 and chained["credits"] == 300
-    assert client.get("/api/workflows/video/h3_master").json()["chain"] is True
+    assert chained["seconds"] == 15 and chained["credits"] == 300 and chained["credits"] == single["credits"] * 3
+    assert client.get("/api/workflows/video/h3_all_in_one").json()["chain"] is True
     assert client.post("/api/estimate", json={**JOB, "clips": 99}).status_code == 400
 
 
@@ -169,7 +170,7 @@ def test_projects_and_search(client):
     db = client.app.state.db
     for name, prompt, project_id in (("street", "She waves on a sunny street", project["id"]), ("cafe", "He drinks coffee", None)):
         db.run("INSERT INTO generations (user_id, project_id, workflow, kind, name, filename, settings, context, created) "
-               "VALUES (?, ?, 'video/h3_master', 'video', ?, 'x.mp4', ?, '{}', 1)",
+               "VALUES (?, ?, 'video/h3_all_in_one', 'video', ?, 'x.mp4', ?, '{}', 1)",
                (me["id"], project_id, name, '{"values": {"100:value": "%s"}}' % prompt))
     names = lambda query: [i["name"] for i in client.get("/api/library" + query).json()["items"]]
     assert sorted(names("")) == ["cafe", "street"]
@@ -275,7 +276,7 @@ def test_admin_overview_jobs_credit_log_and_workflows(client):
     reasons = [e["reason"] for e in console(client).get("/api/admin/credits").json()["events"]]
     assert "welcome" in reasons and "generation" in reasons
     report = {w["id"]: w for w in console(client).get("/api/admin/workflows").json()["workflows"]}
-    assert report["video/h3_master"]["presets"] is True and report["video/h3_master"]["jobs"] == 1
+    assert report["video/h3_all_in_one"]["presets"] is True and report["video/h3_all_in_one"]["jobs"] == 1
 
 
 def test_admin_can_disable_a_user_reset_a_password_and_cancel_their_job(client):
@@ -319,7 +320,7 @@ def test_admin_library_and_csv_export(client):
     (folder / "x.mp4").write_bytes(b"video")
     item = client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, size, created) "
-        "VALUES (?, 'video/h3_master', 'video', '=street', 'x.mp4', '{}', '{}', 5, 1)", (me["id"],))
+        "VALUES (?, 'video/h3_all_in_one', 'video', '=street', 'x.mp4', '{}', '{}', 5, 1)", (me["id"],))
     listing = console(client).get("/api/admin/library?q=ada").json()
     assert listing["total"] == 1 and listing["items"][0]["user_email"] == ADMIN["email"]
     assert console(client).get("/api/admin/library/%d/file" % item).content == b"video"
@@ -373,7 +374,7 @@ def test_timeline_export_joins_clips_into_a_new_library_video(client):
                                   *sound, "-pix_fmt", "yuv420p", folder / "clip{}.mp4".format(i)))
         client.app.state.db.run(
             "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
-            "VALUES (?, 'video/h3_master', 'video', ?, ?, '{}', '{}', 1)", (me["id"], "clip%d" % i, "clip%d.mp4" % i))
+            "VALUES (?, 'video/h3_all_in_one', 'video', ?, ?, '{}', '{}', 1)", (me["id"], "clip%d" % i, "clip%d.mp4" % i))
     first, second = sorted(i["id"] for i in client.get("/api/library").json()["items"])
     assert client.post("/api/timeline/export", json={"clips": []}).status_code == 400
     assert client.post("/api/timeline/export", json={"clips": [{"id": 999}]}).status_code == 404
@@ -396,7 +397,7 @@ def test_video_thumbnails_are_small_posters_the_browser_keeps(client):
     (folder / "broken.mp4").write_bytes(b"video")
     ids = [client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
-        "VALUES (?, 'video/h3_master', 'video', ?, ?, '{}', '{}', 1)", (me["id"], name, name + ".mp4")) for name in ("clip", "broken")]
+        "VALUES (?, 'video/h3_all_in_one', 'video', ?, ?, '{}', '{}', 1)", (me["id"], name, name + ".mp4")) for name in ("clip", "broken")]
     poster = client.get("/api/library/%d/poster" % ids[0])
     assert poster.headers["content-type"] == "image/jpeg" and poster.content[:2] == b"\xff\xd8"
     again = client.get("/api/library/%d/poster" % ids[0], headers={"If-None-Match": poster.headers["etag"]})
@@ -414,16 +415,16 @@ def test_agent_plans_are_checked_and_priced_and_nothing_is_queued(client, monkey
     async def fake_ask(system, message, workflow_ids, history=()):
         asked.update(message=message, ids=workflow_ids, history=history)
         return {"reply": "Two shots.", "steps": [
-            {"workflow": "video/h3_master", "name": "Street walk", "prompt": "She walks down a wet street.", "duration": 99, "resolution": 123},
+            {"workflow": "video/h3_all_in_one", "name": "Street walk", "prompt": "She walks down a wet street.", "duration": 99, "resolution": 123},
             {"workflow": "video/does_not_exist", "name": "Bad", "prompt": "x"},
-            {"workflow": "video/h3_master", "name": "No prompt", "prompt": "  "}]}
+            {"workflow": "video/h3_all_in_one", "name": "No prompt", "prompt": "  "}]}
 
     monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
     assert client.post("/api/agent/plan", json={"instruction": " "}).status_code == 400
     earlier = [{"instruction": "hi", "reply": "Hello. What are we making?", "steps": []}, "junk", {"instruction": "", "reply": "x"}]
     plan = client.post("/api/agent/plan", json={"instruction": "Make a street shot", "history": earlier}).json()
     assert "oldest first:\nUser: hi\nYou: Hello. What are we making?\n\n" in asked["message"]      # junk and empty turns are left out
-    assert "Project brief" not in asked["message"] and "video/h3_master" in asked["ids"]
+    assert "Project brief" not in asked["message"] and "video/h3_all_in_one" in asked["ids"]
     assert [s["name"] for s in plan["steps"]] == ["Street walk"]      # the unknown workflow and the empty prompt are dropped
     step = plan["steps"][0]
     assert step["credits"] > 0 and plan["total"] == step["credits"] and plan["balance"] == 500
@@ -510,13 +511,13 @@ def test_agent_edits_selected_videos_instead_of_generating(client, monkeypatch):
                                   "-pix_fmt", "yuv420p", folder / (name + ".mp4")))
         ids.append(client.app.state.db.run(
             "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
-            "VALUES (?, 'video/h3_master', 'video', ?, ?, '', '{}', '{}', 1, 1, 1)", (me["id"], name, name + ".mp4")))
+            "VALUES (?, 'video/h3_all_in_one', 'video', ?, ?, '', '{}', '{}', 1, 1, 1)", (me["id"], name, name + ".mp4")))
     asked = {}
     answers = [
         {"reply": "A dog.", "steps": []},
         {"reply": "The first half.", "steps": [{"tool": "trim", "source": ids[0], "start": 0, "end": 1, "parts": 1},     # a small model's
                                                {"tool": "trim", "source": ids[0], "start": 1, "end": 2, "parts": 1}]},  # idea of a split
-        {"reply": "Two halves.", "steps": [{"tool": "split", "workflow": "video/h3_master", "source": ids[0], "parts": 2, "prompt": ""}]},
+        {"reply": "Two halves.", "steps": [{"tool": "split", "workflow": "video/h3_all_in_one", "source": ids[0], "parts": 2, "prompt": ""}]},
         {"reply": "Trimmed and joined.", "steps": [
             {"tool": "trim", "source": ids[1], "start": 0.5, "end": 99, "name": "Tail"},
             {"tool": "trim", "source": 999, "start": 0, "end": 1},        # not a selected video
@@ -558,7 +559,7 @@ def test_agent_puts_attached_items_into_the_slots_named_for_them(client, monkeyp
 
     async def fake_ask(system, message, workflow_ids, history=()):
         return {"reply": "One shot.", "steps": [{
-            "tool": "generate", "workflow": "video/h3_master", "name": "Reading", "prompt": "She opens a book.", "start_from": ids["Library"],
+            "tool": "generate", "workflow": "video/h3_all_in_one", "name": "Reading", "prompt": "She opens a book.", "start_from": ids["Library"],
             "uses": [{"item": ids["Mira"], "slot": "201:image"}, {"item": ids["Library"], "slot": "205"},      # a shortened slot id
                      {"item": ids["Walk"], "slot": "207:video"}, {"item": ids["Voice"], "slot": "206:image"},   # a sound is not an image
                      {"item": ids["Mira"], "slot": "201:image"}, {"item": 999, "slot": "204:image"}, "junk"]}]}
@@ -574,7 +575,7 @@ def test_agent_puts_attached_items_into_the_slots_named_for_them(client, monkeyp
 
 def test_a_step_can_start_on_what_an_earlier_step_makes(client, monkeypatch):
     register(client)
-    shot = {"tool": "generate", "workflow": "video/h3_master", "prompt": "She waits.", "start_from": 0, "uses": []}
+    shot = {"tool": "generate", "workflow": "video/h3_all_in_one", "prompt": "She waits.", "start_from": 0, "uses": []}
 
     async def fake_ask(system, message, workflow_ids, history=(), model=None):
         return {"reply": "Three shots.", "steps": [
@@ -598,7 +599,7 @@ def test_a_shot_takes_the_shape_of_the_picture_it_starts_on(client, monkeypatch)
     tall = client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
         "VALUES (?, 'x/y', 'image', 'Tall', 'missing', '', '{}', '{\"width\": 768, \"height\": 1344}', 1, 1, 1)", (me["id"],))
-    shot = {"tool": "generate", "workflow": "video/h3_master", "uses": []}
+    shot = {"tool": "generate", "workflow": "video/h3_all_in_one", "uses": []}
 
     async def fake_ask(system, message, workflow_ids, history=(), model=None):
         return {"reply": "Two.", "steps": [dict(shot, name="From it", prompt="It moves.", start_from=tall, orientation="landscape", after=0),
@@ -606,7 +607,7 @@ def test_a_shot_takes_the_shape_of_the_picture_it_starts_on(client, monkeypatch)
 
     monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
     steps = client.post("/api/agent/plan", json={"instruction": "animate this", "selection": [tall]}).json()["steps"]
-    assert [s["settings"]["orientation"] for s in steps] == ["portrait", "portrait"]       # the picture's shape wins, down the chain
+    assert [s["settings"]["options"]["shape"] for s in steps] == ["portrait", "portrait"]  # the picture's shape wins, down the chain
     assert steps[0]["shape"][0] < steps[0]["shape"][1]
     # a workflow that takes an aspect ratio gets the nearest one
     schema = {"size": None, "controls": [{"id": "9:aspect_ratio", "input": "aspect_ratio", "choices": ["16:9 (Widescreen)", "9:16 (Portrait Widescreen)", "1:1 (Square)"]}]}
@@ -665,7 +666,7 @@ def test_a_hosted_model_is_listed_beside_the_local_ones_and_asked_over_its_api(m
     assert brain.hosted() == [{"id": "kimi", "name": "Kimi"}, {"id": "gemini", "name": "Gemini"}]
     asyncio.run(brain.ask("You plan.", "hi", [], model="gemini/gemini-flash"))
     assert sent.pop()["url"] == "https://g.example.com/openai/chat/completions" and sent.pop()["auth"] == "Bearer g-key"
-    answer = asyncio.run(brain.ask("You plan.", "hi", ["video/h3_master"], model="kimi/kimi-k2.6"))
+    answer = asyncio.run(brain.ask("You plan.", "hi", ["video/h3_all_in_one"], model="kimi/kimi-k2.6"))
     assert answer == {"thought": "", "reply": "Hello.", "steps": [], "model": "kimi/kimi-k2.6", "direction": "", "question": None,
                       "tokens": {"prompt": 0, "cached": 0, "answer": 0}}
     assert [s["url"] for s in sent] == ["https://api.example.com/v1/chat/completions"] * 2 and sent[0]["auth"] == "Bearer secret-key"
@@ -781,7 +782,7 @@ def test_a_job_and_an_edit_remember_the_item_they_were_made_from(client):
     asyncio_run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=1:r=24", "-pix_fmt", "yuv420p", folder / "a.mp4"))
     source = client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
-        "VALUES (?, 'video/h3_master', 'video', 'a', 'a.mp4', '', '{}', '{}', 1, 1, 1)", (me["id"],))
+        "VALUES (?, 'video/h3_all_in_one', 'video', 'a', 'a.mp4', '', '{}', '{}', 1, 1, 1)", (me["id"],))
     post_job(client, parent=source)
     post_job(client, parent=source + 50)        # not an item of this user
     post_job(client)
@@ -839,7 +840,7 @@ def test_agent_plans_a_motion_graphics_video_as_scenes_of_words(client, monkeypa
 
     async def fake_ask(system, message, workflow_ids, history=()):
         return {"reply": "A short intro.", "steps": [{
-            "tool": "motion", "workflow": "video/h3_master", "name": "Intro", "prompt": "", "orientation": "portrait", "look": "warm",
+            "tool": "motion", "workflow": "video/h3_all_in_one", "name": "Intro", "prompt": "", "orientation": "portrait", "look": "warm",
             "scenes": [{"kind": "title", "heading": "Scene.ai", "text": "A studio", "items": [], "seconds": 0},
                        {"kind": "list", "heading": "What it makes", "text": "", "items": ["Images", "<b>Video</b>", "", 7], "seconds": 99},
                        {"kind": "nonsense", "heading": "", "text": "One sentence here", "items": [], "seconds": 0.1},
@@ -941,14 +942,14 @@ def test_admin_sets_rates_workflow_pricing_packages_and_servers(client):
     assert quote().json()["credits"] == 50
     assert console(client).put("/api/admin/pricing", json={"rates": {"video": "lots"}}).status_code == 400
 
-    own = {"workflow": "video/h3_master", "credits_per_second": 4, "base_credits": 6, "quality_multiplier": 2}
+    own = {"workflow": "video/h3_all_in_one", "credits_per_second": 4, "base_credits": 6, "quality_multiplier": 2}
     listed = {w["id"]: w for w in console(client).put("/api/admin/pricing/workflow", json=own).json()["workflows"]}
-    assert listed["video/h3_master"]["example"] == 52 and quote().json()["credits"] == 52            # (6 + 4 × 5) × 2
+    assert listed["video/h3_all_in_one"]["example"] == 52 and quote().json()["credits"] == 52            # (6 + 4 × 5) × 2
     assert listed["audio/audio_minimax_music_3"]["per_second"] == 5                                    # the others follow their kind
-    console(client).put("/api/admin/pricing/workflow", json={"workflow": "video/h3_master", "enabled": False})
+    console(client).put("/api/admin/pricing/workflow", json={"workflow": "video/h3_all_in_one", "enabled": False})
     assert quote().status_code == 400 and post_job(client).status_code == 400
-    assert "video/h3_master" not in [w["id"] for w in client.get("/api/workflows").json()["workflows"]]
-    console(client).put("/api/admin/pricing/workflow", json={"workflow": "video/h3_master"})                  # nothing of its own again
+    assert "video/h3_all_in_one" not in [w["id"] for w in client.get("/api/workflows").json()["workflows"]]
+    console(client).put("/api/admin/pricing/workflow", json={"workflow": "video/h3_all_in_one"})                  # nothing of its own again
     assert quote().json()["credits"] == 50
     assert console(client).put("/api/admin/pricing/workflow", json={"workflow": "video/nope"}).status_code == 404
 
@@ -1053,12 +1054,12 @@ def test_economics_show_what_each_workflow_earned_and_what_its_electricity_cost(
     now = time.time()
     add = lambda job, status, started, cost: client.app.state.db.run(
         "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, cost, seconds_requested, server, created, started, finished) "
-        "VALUES (?, ?, 'x', 'video/h3_master', 'video', '{}', ?, ?, 5, 'Zoro', ?, ?, ?)", (job, me["id"], status, cost, now - 10, started, now))
+        "VALUES (?, ?, 'x', 'video/h3_all_in_one', 'video', '{}', ?, ?, 5, 'Zoro', ?, ?, ?)", (job, me["id"], status, cost, now - 10, started, now))
     add("a", "done", now - 3600, 100)       # an hour on Zoro: 0.95 kW at 8 a unit
     add("b", "failed", now - 1800, 100)     # half an hour that made nothing
     report = console(client).get("/api/admin/economics?days=7").json()
     row = report["workflows"][0]
-    assert (row["id"], row["title"], row["done"], row["failed"], row["credits"], row["refunded"]) == ("video/h3_master", "MiniMax H3", 1, 1, 100, 100)
+    assert (row["id"], row["title"], row["done"], row["failed"], row["credits"], row["refunded"]) == ("video/h3_all_in_one", "H3 All In One", 1, 1, 100, 100)
     assert row["revenue_inr"] == 10 and round(row["electricity_inr"], 2) == 11.4 and round(row["margin_inr"], 2) == -1.4
     assert row["runs_per_success"] == 2 and row["success_rate"] == 50 and row["avg_seconds"] == 3600 and row["render_ratio"] == 720
     assert report["totals"]["failure_rate"] == 50 and report["unmeasured"] == ["Lufi"] and report["days"] == 7
@@ -1160,14 +1161,11 @@ def test_every_workflow_is_listed_in_the_section_of_its_kind(client):
     listed = {w["id"]: w for w in client.get("/api/workflows").json()["workflows"]}
     assert not [w for w in listed.values() if w["kind"] == "video" and w.get("error")]   # the fixture has the video nodes only
     assert {w for w in listed if w.startswith("video/")} == {
-        "video/h3_master", "video/h3_director", "video/video_minimax_h3_i2v", "video/video_minimax_h3_r2v", "video/ai_influencer",
-        "video/MiniMax_H3_AI_Influencer", "video/MiniMax_H3_AI_Influencer_v2", "video/ref2va_vsa_4step_rtx4090_v2", "video/comfy_plus_codex",
-        "video/h3_chunk", "video/video_lipsync",
-        # the render PC's workflows of 22 October
-        "video/character_video_master", "video/h3_15s_720p", "video/h3_all_in_one", "video/model_router", "video/product_ad_studio",
-        "video/talking_head_narration", "video/video_ltx2_5_t2v", "video/video_wan_animate2", "video/video_wan_animate2_distilled"}
+        "video/h3_all_in_one", "video/h3_15s_720p", "video/h3_chunk", "video/talking_head_narration", "video/video_lipsync",
+        "video/video_ltx2_5_t2v", "video/video_wan_animate2", "video/video_v2v_ltx23_iclora", "video/video_v2v_wan22_fun_control",
+        "video/video_v2v_wan_vace"}
     assert {w["kind"] for w in listed.values()} == {"video", "image", "audio", "upscaler"}
-    assert client.get("/api/workflows/video/h3_director").json()["id"] == "video/h3_director"
+    assert client.get("/api/workflows/video/h3_director").json()["id"] == "video/h3_all_in_one"   # gone: served by what replaced it
 
 
 def test_work_made_with_a_replaced_workflow_goes_to_the_one_that_replaced_it(client, monkeypatch, tmp_path):
@@ -1176,21 +1174,21 @@ def test_work_made_with_a_replaced_workflow_goes_to_the_one_that_replaced_it(cli
     from conftest import ROOT
     register(client)
     state = client.app.state
-    # A workflow folder where h3_master has taken the place of h3_director, whose file has gone.
+    # A workflow folder where h3_all_in_one has taken the place of h3_director, whose file has gone.
     (tmp_path / "flows" / "video").mkdir(parents=True)
-    shutil.copy(ROOT / "workflows" / "video" / "h3_master.json", tmp_path / "flows" / "video")
-    profile = json.loads((ROOT / "workflows" / "video" / "h3_master.studio.json").read_text(encoding="utf-8"))
-    (tmp_path / "flows" / "video" / "h3_master.studio.json").write_text(json.dumps(dict(profile, replaces=["video/h3_director"])), encoding="utf-8")
+    shutil.copy(ROOT / "workflows" / "video" / "h3_all_in_one.json", tmp_path / "flows" / "video")
+    profile = json.loads((ROOT / "workflows" / "video" / "h3_all_in_one.studio.json").read_text(encoding="utf-8"))
+    (tmp_path / "flows" / "video" / "h3_all_in_one.studio.json").write_text(json.dumps(dict(profile, replaces=["video/h3_director"])), encoding="utf-8")
     monkeypatch.setattr(state.catalog, "directory", tmp_path / "flows")
     listed = {w["id"]: w for w in client.get("/api/workflows").json()["workflows"]}
-    assert list(listed) == ["video/h3_master"] and listed["video/h3_master"]["replaces"] == ["video/h3_director"]
+    assert list(listed) == ["video/h3_all_in_one"] and listed["video/h3_all_in_one"]["replaces"] == ["video/h3_director"]
     # an old id (a saved default, a re-run, a job still waiting) is served by the workflow that took its place
-    assert client.get("/api/workflows/video/h3_director").json()["id"] == "video/h3_master"
+    assert client.get("/api/workflows/video/h3_director").json()["id"] == "video/h3_all_in_one"
     monkeypatch.setattr(state.settings, "default_workflow", "video/h3_director")
-    assert client.get("/api/workflows").json()["default"] == "video/h3_master"
+    assert client.get("/api/workflows").json()["default"] == "video/h3_all_in_one"
     job = client.post("/api/jobs", data={"settings": json.dumps({"workflow": "video/h3_director", "values": {"100:value": "She waves."}})}).json()["id"]
     row = state.db.one("SELECT workflow, settings FROM jobs WHERE id = ?", (job,))
-    assert row["workflow"] == "video/h3_master" and json.loads(row["settings"])["workflow"] == "video/h3_master"
+    assert row["workflow"] == "video/h3_all_in_one" and json.loads(row["settings"])["workflow"] == "video/h3_all_in_one"
     assert client.get("/api/workflows/video/never_existed").status_code == 400
 
 
@@ -1208,7 +1206,7 @@ def test_a_file_for_a_slot_the_mode_does_not_read_is_not_sent(client, monkeypatc
 
     def queued(engine):
         del sent[:]
-        settings = {"workflow": "video/h3_master", "values": {"100:value": "She waves."}, "options": {"engine": engine}}
+        settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"engine": engine}}
         job = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files=files).json()["id"]
         refs = json.loads(client.app.state.db.one("SELECT settings FROM jobs WHERE id = ?", (job,))["settings"])["refs"]
         return sorted(refs), len(sent)
@@ -1222,7 +1220,7 @@ def test_a_step_can_be_changed_on_its_approval_card(client, monkeypatch):
 
     async def fake_ask(system, message, workflow_ids, history=()):
         asked.update(message=message)
-        return {"reply": "One shot.", "steps": [{"tool": "generate", "workflow": "video/h3_master", "name": "Street walk",
+        return {"reply": "One shot.", "steps": [{"tool": "generate", "workflow": "video/h3_all_in_one", "name": "Street walk",
                                                  "prompt": "She walks down a wet street.", "duration": 6, "resolution": 480, "orientation": "portrait"}]}
 
     monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
@@ -1234,7 +1232,7 @@ def test_a_step_can_be_changed_on_its_approval_card(client, monkeypatch):
 
     assert step["current"] == {"orientation": "portrait", "resolution": 480, "duration": 6}
     assert step["menu"]["durations"][0] == 4 and 720 in step["menu"]["resolutions"] and step["menu"]["shapes"]
-    assert {"video/h3_master", "video/h3_director"} <= {w["id"] for w in step["menu"]["workflows"]}
+    assert {"video/h3_all_in_one", "video/h3_15s_720p"} <= {w["id"] for w in step["menu"]["workflows"]}
     assert all(w["kind"] == "video" for w in step["menu"]["workflows"])
     quality = step["settings"]["options"]["quality"]
 
@@ -1244,12 +1242,12 @@ def test_a_step_can_be_changed_on_its_approval_card(client, monkeypatch):
     assert changed["credits"] >= step["credits"]
     edited = client.post("/api/agent/step", json={"step": changed, "change": {"prompt": "He runs up a dry street."}}).json()
     assert edited["prompt"] == "He runs up a dry street." and edited["current"]["duration"] == 10
-    other = client.post("/api/agent/step", json={"step": edited, "change": {"workflow": "video/comfy_plus_codex"}}).json()
-    assert other["settings"]["workflow"] == "video/comfy_plus_codex" and other["prompt"] == "He runs up a dry street."
+    other = client.post("/api/agent/step", json={"step": edited, "change": {"workflow": "video/video_ltx2_5_t2v"}}).json()
+    assert other["settings"]["workflow"] == "video/video_ltx2_5_t2v" and other["prompt"] == "He runs up a dry street."
     # what can't be: another kind of workflow, an empty prompt, a workflow that needs files the step doesn't have
     assert client.post("/api/agent/step", json={"step": step, "change": {"workflow": "image/image_t2i_hunyuan_image_21"}}).status_code == 400
     assert client.post("/api/agent/step", json={"step": step, "change": {"prompt": "  "}}).status_code == 400
-    assert client.post("/api/agent/step", json={"step": step, "change": {"workflow": "video/video_minimax_h3_r2v"}}).status_code == 400
+    assert client.post("/api/agent/step", json={"step": step, "change": {"workflow": "video/video_wan_animate2"}}).status_code == 400
     assert client.get("/api/jobs").json()["jobs"] == []   # nothing is queued or charged
 
 
@@ -1330,3 +1328,17 @@ def test_a_project_holds_modules_that_share_its_kit(client):
     assert len(client.get("/api/library?project=%d" % film).json()["items"]) == 1
     assert client.get("/api/projects/%d" % film).json()["modules"][1:] == []
     assert client.get("/project?id=%d" % film).status_code == 200
+
+
+def test_the_canvas_gets_every_item_not_the_newest_500(client):
+    # The canvas drops from its saved layout what the list leaves out: a cut-off list lost the places of older work.
+    import time
+    me = register(client)
+    now = time.time()
+    for n in range(501):
+        client.app.state.db.run(
+            "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) VALUES (?, 'image/x', 'image', ?, ?, '{}', '{}', ?)",
+            (me["id"], "Frame {}".format(n), "f{}.png".format(n), now + n))
+    assert len(client.get("/api/library").json()["items"]) == 500
+    every = client.get("/api/library?all=1").json()["items"]
+    assert len(every) == 501 and every[-1]["name"] == "Frame 0"

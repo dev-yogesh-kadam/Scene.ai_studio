@@ -1,0 +1,23 @@
+{
+  "title": "Restyle Video: Wan VACE",
+  "description": "A video given a new look: the motion and camera of your video are kept, the look comes from a reference picture and the prompt (Wan VACE).",
+  "output_name": "69.filename_prefix",
+  "labels": {
+    "900:value": "Describe the new look (the motion comes from the video)",
+    "902:value": "Length in frames (4n+1; 81 is 3.4 s at 24 fps)",
+    "299:file": "Source video (its motion and camera are kept)",
+    "73:image": "Style frame or reference (the new look)"
+  },
+  "required_refs": [
+    "299:file",
+    "73:image"
+  ],
+  "hide": [
+    "107",
+    "108"
+  ],
+  "hints": [
+    "The reference sets the look: a restyled first frame of the video, or a picture of the style you want.",
+    "The length is in frames: 4n+1, such as 49, 81 or 121."
+  ]
+}

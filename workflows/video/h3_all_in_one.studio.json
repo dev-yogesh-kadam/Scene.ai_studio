@@ -1,5 +1,6 @@
 {
   "title": "H3 All In One",
+  "replaces": ["video/h3_master", "video/h3_director"],
   "description": "Every MiniMax H3 job in one workflow: reference mode, first and last frame, keyframes built by Qwen Image Edit, a voice track, and an optional SeedVR2 upscale.",
   "output_name": "16.filename_prefix",
   "labels": {

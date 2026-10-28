@@ -14,7 +14,7 @@ def test_a_projects_spend_by_kind_and_module(client):
     assert post_job(client, project_id=film).status_code == 200
     client.app.state.credits.charge(me["id"], 3, "agent", note="local:9b", project_id=one)    # a message to the agent
     client.app.state.db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created, project_id) "
-                            "VALUES (?, 'video/h3_master', 'video', 'Shot', 'shot.mp4', '{}', '{}', ?, ?)", (me["id"], time.time(), one))
+                            "VALUES (?, 'video/h3_all_in_one', 'video', 'Shot', 'shot.mp4', '{}', '{}', ?, ?)", (me["id"], time.time(), one))
     found = client.get("/api/projects/{}/analytics?period=today".format(one)).json()   # a module's address shows its project
     assert found["project"] == {"id": film, "name": "Pocket"} and found["period"] == "today"
     assert found["spend"] == 203 and found["generations"] == 1 and found["contributors"] == 1 and found["change"] is None

@@ -53,7 +53,7 @@ def test_a_reference_file_of_another_user_cannot_be_used_or_seen(client, monkeyp
         return name
     monkeypatch.setattr(client.app.state.comfy, "upload", upload)
     account(client)
-    settings = {"workflow": "video/h3_master", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}}
+    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}}
     made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("face.png", PNG, "image/png")})
     assert made.status_code == 200
     mine = sent[0]

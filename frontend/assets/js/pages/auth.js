@@ -1,7 +1,9 @@
 // Sign in and create account.
 
 import { api } from '../api.js';
-import { el, field, icon } from '../dom.js';
+import { el, field } from '../dom.js';
+import * as scenes from './landing-scenes.js';
+import { READOUT, timecode } from './landing.js';
 
 const POINTS = [
   'Turn a prompt and a few reference images into video',
@@ -46,7 +48,7 @@ export async function renderAuth(root, onSignedIn, start = 'login') {
       field('Password', password),
       error, submit);
 
-    page(el('h1', {}, register ? (info.first_run ? 'Set up Scene.ai' : 'Create your account') : 'Welcome back'),
+    page(register ? 'New account' : 'Sign in', el('h1', {}, register ? (info.first_run ? 'Set up Scene.ai' : 'Create your account') : 'Welcome back'),
       el('p', { class: 'muted' }, !register ? 'Sign in to your studio.' : info.first_run
         ? 'Create the first account. It becomes the admin of this installation.'
         : 'It takes a few seconds.'),
@@ -75,7 +77,7 @@ export async function renderAuth(root, onSignedIn, start = 'login') {
         code.select();
       }
     } }, field('Code', code), error, submit);
-    page(el('h1', {}, 'Two-step sign-in'),
+    page('Two-step', el('h1', {}, 'Two-step sign-in'),
       el('p', { class: 'muted' }, 'Enter the 6-digit code your authenticator app shows for Scene.ai. Lost the phone? Use one of your recovery codes.'),
       form,
       el('div', { class: 'auth-switch muted' },
@@ -83,16 +85,54 @@ export async function renderAuth(root, onSignedIn, start = 'login') {
     code.focus();
   };
 
-  const page = (...card) => {
-    root.replaceChildren(el('div', { class: 'auth' },
-      el('div', { class: 'auth-hero' },
-        el('div', { class: 'auth-frame', 'aria-hidden': 'true' }),
-        el('a', { class: 'brand', href: '/', title: 'About Scene.ai' }, el('img', { src: '/assets/img/logo.svg?v=clapper', alt: '' }), 'Scene.ai'),
-        el('div', {},
-          el('h2', {}, 'Direct your scene.'),
-          el('p', {}, 'A studio for making videos and images with AI, without the node graphs.')),
-        el('div', { class: 'auth-points' }, POINTS.map((p) => el('div', {}, icon('check'), p)))),
-      el('div', { class: 'auth-side' }, el('div', { class: 'auth-card' }, ...card))));
+  let set = null;
+  const page = (tag, ...card) => {
+    if (!set || !set.node.isConnected) {
+      set = signInSet({ scene: 'desert', home: '/', heading: ['Direct', el('br'), 'your ', el('b', {}, 'scene.')],
+        sub: 'Write the shot. The studio makes the takes, keeps the same faces from shot to shot, and cuts them together.',
+        points: POINTS });
+      root.replaceChildren(set.node);
+    }
+    set.tag.textContent = tag;
+    set.card.replaceChildren(...card);
   };
   draw();
+}
+
+// The sign-in pages are the landing page's monitor held on one scene: its frame lines, the camera's readouts and a
+// running timecode, the headline at the lower left and, where the landing has the slate, the form. The admin
+// console's sign-in is drawn with it too. Returns the page, the slate's body to put the form in, and its tag.
+export function signInSet({ scene, home, heading, sub, points }) {
+  const frame = el('div', { class: 'la-frame', 'aria-hidden': 'true' });
+  frame.innerHTML = scenes.svg(scene);   // the page's own drawing, never anyone's input
+  const tc = el('span', { class: 'la-rec' }, '01:00:00:00');
+  const tag = el('span');
+  const card = el('div', { class: 'auth-card' });
+  const brand = [el('img', { src: '/assets/img/logo.svg?v=clapper', alt: '' }), 'Scene.ai'];
+  const node = el('div', { class: 'la auth-set' }, el('section', { class: 'la-monitor' },
+    frame, el('div', { class: 'la-grade' }), el('div', { class: 'la-grain' }),
+    el('div', { class: 'la-hud', 'aria-hidden': 'true' }, ['tl', 'tr', 'bl', 'br'].map((c) => el('i', { class: 'la-corner la-' + c })),
+      el('div', { class: 'la-thirds' }), el('div', { class: 'la-cross' })),
+    el('header', { class: 'la-top' },
+      home ? el('a', { class: 'la-brand', href: home, title: 'About Scene.ai' }, ...brand) : el('span', { class: 'la-brand' }, ...brand),
+      el('div', { class: 'la-readout la-mono', 'aria-hidden': 'true' }, tc, READOUT[scene].map((t) => el('span', {}, t))),
+      el('span', { class: 'auth-spacer' })),
+    el('div', { class: 'la-lower' },
+      el('div', {},
+        el('h2', { class: 'la-head' }, ...heading),
+        el('p', { class: 'la-sub' }, sub),
+        el('ul', { class: 'auth-points la-mono' }, points.map((p) => el('li', {}, p)))),
+      el('div', { class: 'la-slate auth-slate' }, el('header', { class: 'la-mono' }, tag, el('span', {}, 'Scene.ai')), card)),
+    el('div', { class: 'la-meters', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'))));
+
+  // The timecode runs at 24 frames a second, and stops once the page is left.
+  const started = performance.now();
+  const tick = () => {
+    if (!node.isConnected && node.dataset.placed) return;
+    if (node.isConnected) node.dataset.placed = '1';
+    tc.textContent = timecode(Math.floor((performance.now() - started) / (1000 / 24)) + 24 * 3600);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return { node, card, tag };
 }

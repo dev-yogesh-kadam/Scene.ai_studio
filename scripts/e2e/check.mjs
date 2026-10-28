@@ -43,7 +43,7 @@ const dog = await upload(`${OUT}/e2e_files/dog.png`, 'image/png');
 const cat = await upload(`${OUT}/e2e_files/cat.png`, 'image/png');
 
 const now = Date.now();
-const settings = { workflow: 'video/h3_master', clips: 1, options: { quality: 'medium' } };
+const settings = { workflow: 'video/h3_all_in_one', clips: 1, options: { quality: 'medium' } };
 const runs = [
   { instruction: 'make a clip from [clip]', parts: [{ text: 'make a short clip from ' }, { id: clip.id, name: clip.name, kind: 'video' }],
     reply: `Here is **the clip**, made from [[item:${clip.id}]].\n- 3 seconds\n- landscape`, chips: { [`item:${clip.id}`]: { name: clip.name, kind: 'video' } },

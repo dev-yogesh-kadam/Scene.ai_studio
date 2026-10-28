@@ -21,11 +21,11 @@ def made(client, user_id, name, kind="video", prompt="The girl walks home in the
     folder = client.app.state.outputs.folder(user_id)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / (name + ".mp4")).write_bytes(PNG)
-    settings = {"workflow": "video/h3_master", "values": {"100:value": prompt}, "options": {"engine": "reference"},
+    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": prompt}, "options": {"engine": "reference"},
                 "prompt": prompt, "refs": {}, "seed_mode": "fixed"}
     return client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
-        "VALUES (?, 'video/h3_master', ?, ?, ?, '', ?, '{}', 1, 1, 1)", (user_id, kind, name, name + ".mp4", json.dumps(settings)))
+        "VALUES (?, 'video/h3_all_in_one', ?, ?, ?, '', ?, '{}', 1, 1, 1)", (user_id, kind, name, name + ".mp4", json.dumps(settings)))
 
 
 def model_says(monkeypatch, client, answer, seen=None):

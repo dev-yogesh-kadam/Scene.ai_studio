@@ -91,7 +91,7 @@ const blocked503 = await (async () => {
   await studioPage.goto(STUDIO + '/projects', { waitUntil: 'networkidle2' });
   await wait(1500);
   const banner = await studioPage.$eval('.announce', (b) => b.textContent).catch(() => '');
-  const job = await studioPage.evaluate(async () => (await fetch('/api/jobs', { method: 'POST', body: new URLSearchParams({ settings: JSON.stringify({ workflow: 'video/h3_master', values: { '100:value': 'She waves.' }, options: { mode: 'fast', quality: 'low' } }) }) })).status);
+  const job = await studioPage.evaluate(async () => (await fetch('/api/jobs', { method: 'POST', body: new URLSearchParams({ settings: JSON.stringify({ workflow: 'video/h3_all_in_one', values: { '100:value': 'She waves.' }, options: { mode: 'fast', quality: 'low' } }) }) })).status);
   await studioPage.close();
   return { banner, job };
 })();

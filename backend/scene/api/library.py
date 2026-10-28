@@ -51,10 +51,11 @@ def _own_project(request, user, project_id, need="owner"):
 
 @router.get("/library")
 async def list_items(request: Request, kind: str = "", q: str = "", project: str = "", run: str = "", modules: int = 0,
-                     user: dict = Depends(current_user)):
+                     all: int = 0, user: dict = Depends(current_user)):
     """`project` is a project id, "none" for items in no project, or empty for everything; with `modules=1` a project's
     modules count as part of it. `run`: the working files of that run (slices, trims, references of a long skill), which
-    are otherwise left out."""
+    are otherwise left out. `all=1`: every item, not the newest 500. The canvas and the timeline ask for it: they drop
+    from their saved layout whatever the list leaves out, so a cut-off list would lose the places of older work."""
     # Each item comes with what its details panel shows: the job's cost and the project's name.
     # In a project: what everyone in it made (a shared project's members too), read once the user is found to be in it.
     # Anywhere else: the user's own items.
@@ -76,7 +77,7 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
         sql += " AND (g.name LIKE ? ESCAPE '\\' OR g.workflow LIKE ? ESCAPE '\\' OR g.summary LIKE ? ESCAPE '\\' OR g.settings LIKE ? ESCAPE '\\')"
         params += [like] * 4
     with as_everyone() if shared else contextlib.nullcontext():
-        items = request.app.state.db.all(sql + " ORDER BY g.created DESC LIMIT 500", params)
+        items = request.app.state.db.all(sql + " ORDER BY g.created DESC" + ("" if all else " LIMIT 500"), params)
     for item in items:
         item["settings"] = json.loads(item["settings"])
         item["context"] = json.loads(item["context"])

@@ -98,7 +98,7 @@ def test_the_agent_puts_a_saved_asset_it_knows_by_name_into_a_slot(client, monke
     async def fake_ask(system, message, workflow_ids, history=(), model=None):
         asked.update(system=system, message=message)
         return {"reply": "One shot.", "steps": [{
-            "tool": "generate", "workflow": "video/h3_master", "name": "Rain", "prompt": "The girl walks home in the rain.",
+            "tool": "generate", "workflow": "video/h3_all_in_one", "name": "Rain", "prompt": "The girl walks home in the rain.",
             "uses": [{"item": 0, "asset": meera, "slot": "201:image"}, {"item": 0, "asset": meera, "slot": "203:image"},   # once is enough
                      {"item": 0, "asset": 999, "slot": "204:image"},                                                       # not in the book
                      {"item": harbour, "asset": 0, "slot": "205:image"}]}]}   # a picture of the project, not attached
@@ -115,7 +115,7 @@ def test_the_agent_puts_a_saved_asset_it_knows_by_name_into_a_slot(client, monke
     assert "The asset book (the project's memory)" in asked["system"]
 
     # On Approve the browser sends the saved asset by its id, which the job takes as it is.
-    assert client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_master", "refs": {"201:image": {"asset_id": 999}}}'}).status_code == 400
+    assert client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_all_in_one", "refs": {"201:image": {"asset_id": 999}}}'}).status_code == 400
 
 
 def test_an_asset_saved_from_the_library_keeps_what_the_model_saw_and_notes_can_be_changed(client):
@@ -159,7 +159,7 @@ def test_a_file_dropped_into_a_job_is_kept_once_as_an_upload_of_its_project(clie
         return name
     monkeypatch.setattr(client.app.state.comfy, "upload", upload)
     project = client.post("/api/projects", json={"name": "Rain"}).json()["id"]
-    settings = {"workflow": "video/h3_master", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}, "project_id": project}
+    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}, "project_id": project}
     for _ in range(2):   # the same file twice is kept once
         made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("meera_face.png", PNG, "image/png")})
         assert made.status_code == 200

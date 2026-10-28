@@ -60,8 +60,8 @@ def test_a_step_on_them_takes_decimals_switches_and_words(client):
     assert settings["values"]["402:value"] == keep_sound               # a switch given nonsense keeps its default
     assert settings["options"]["quality"] == "final"
     assert (settings["resolution"], settings["orientation"]) == (480, "square")
-    whole = agent.settings_for(schema_of(client, "video/h3_master"), dict(step, duration=6.6), [], 0)[0]
-    assert isinstance(whole["values"][next(c["id"] for c in schema_of(client, "video/h3_master")["controls"] if c["role"] == "duration")], (int, float))
+    whole = agent.settings_for(schema_of(client, "video/h3_all_in_one"), dict(step, duration=6.6), [], 0)[0]
+    assert isinstance(whole["values"][next(c["id"] for c in schema_of(client, "video/h3_all_in_one")["controls"] if c["role"] == "duration")], (int, float))
     transcribe = schema_of(client, "audio/audio_transcribe")
     made = agent.settings_for(transcribe, {"name": "Listen", "prompt": "", "choices": [{"setting": "12:language", "value": "hi"},
                                                                                         {"setting": "10:value", "value": "EXT. ROOFTOP — DUSK"}]},
@@ -132,7 +132,7 @@ def test_a_sound_step_on_a_workflow_that_takes_a_sound_is_that_workflow(client, 
 
 def test_a_plan_that_cannot_be_put_right_goes_back_at_most_twice(client, monkeypatch):
     register(client)
-    bad = {"tool": "sound", "workflow": "video/h3_master", "name": "Nothing to put together", "prompt": ""}
+    bad = {"tool": "sound", "workflow": "video/h3_all_in_one", "name": "Nothing to put together", "prompt": ""}
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "Here.", "steps": [bad]})
     plan = client.post("/api/agent/plan", json={"instruction": "put music on it"}).json()
     assert len(seen) == 1 + agent.FIX_ROUNDS and plan["steps"] == []

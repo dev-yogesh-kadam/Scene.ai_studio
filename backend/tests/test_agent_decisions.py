@@ -2,7 +2,7 @@
 
 from test_api import register
 
-SHOT = {"tool": "generate", "workflow": "video/h3_master", "uses": [], "clips": 1, "start_from": 0, "after": 0}
+SHOT = {"tool": "generate", "workflow": "video/h3_all_in_one", "uses": [], "clips": 1, "start_from": 0, "after": 0}
 
 
 def plan(client, monkeypatch, *steps, instruction="an ad for Reels"):
@@ -34,17 +34,17 @@ def test_the_agent_sets_length_shape_resolution_and_the_workflows_own_settings(c
     register(client)
     step = plan(client, monkeypatch, dict(SHOT, name="Pour", prompt="Coffee pours into a cup.", duration=7, orientation="portrait",
                                           resolution=480, why="7 s for the pour; portrait for Reels; a draft",
-                                          choices=[{"setting": "quality", "value": "high"}, {"setting": "mode", "value": "normal"},
+                                          choices=[{"setting": "quality", "value": "high"}, {"setting": "sound", "value": "off"},
                                                    {"setting": "engine", "value": "first_frame"}, {"setting": "quality", "value": "ultra"},
                                                    {"setting": "made_up", "value": "x"}, "junk"]))[0]
     settings = step["settings"]
-    assert settings["values"]["102:value"] == 7 and settings["orientation"] == "portrait" and settings["resolution"] == 480
+    assert settings["values"]["102:value"] == 7 and settings["options"]["shape"] == "portrait" and settings["values"]["501:value"] == 480
     # "ultra" and the made-up setting are ignored, and first-frame mode needs a picture to start on, which this shot has not
-    assert settings["options"] == {"engine": "reference", "mode": "normal", "quality": "high"}
+    assert settings["options"] == {"engine": "reference", "quality": "high", "shape": "portrait", "sound": "off", "keyframes": "off", "upscale": "off"}
     assert step["why"] == "7 s for the pour; portrait for Reels; a draft"
     assert "7 s" in step["facts"]
     # What the model was told: the length it may choose and the settings it may set, with what each value means.
-    assert '"duration_seconds": "4 to 15' in plan.asked and '"setting": "quality"' in plan.asked and "40 steps" in plan.asked
+    assert '"duration_seconds": "4 to 15' in plan.asked and '"setting": "quality"' in plan.asked and '"setting": "shape"' in plan.asked
 
 
 def test_a_shot_is_long_enough_for_its_dialogue_and_stays_within_4_to_15_seconds(client, monkeypatch):
@@ -57,8 +57,8 @@ def test_a_shot_is_long_enough_for_its_dialogue_and_stays_within_4_to_15_seconds
                  dict(SHOT, name="Hero", prompt="The cup on the counter.", duration=8, resolution=1080))
     lengths = {s["name"]: s["settings"]["values"]["102:value"] for s in steps}
     assert lengths == {"Talk": 10, "Blink": 4, "Epic": 15, "Hero": 8}   # 20 words need 10 s; 2 s is raised to 4; 99 is cut to 15
-    sizes = {s["name"]: s["settings"]["resolution"] for s in steps}
-    assert sizes["Epic"] == 768 and sizes["Hero"] == 1080    # a shot over 10 s is not made at the largest size
+    sizes = {s["name"]: s["settings"]["values"]["501:value"] for s in steps}
+    assert sizes["Epic"] == 720 and sizes["Hero"] == 1080    # a shot over 10 s is not made larger than the workflow's own size
 
 
 def test_the_settings_offered_include_choice_lists_and_unknown_values_are_ignored():

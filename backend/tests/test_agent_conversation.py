@@ -8,7 +8,7 @@ from scene import agent, media, memory
 from scene.api import workspace
 from test_api import console, register
 
-STEP = {"tool": "generate", "workflow": "video/h3_master", "name": "Dog in the park", "prompt": "A dog runs across a park.",
+STEP = {"tool": "generate", "workflow": "video/h3_all_in_one", "name": "Dog in the park", "prompt": "A dog runs across a park.",
         "duration": 6, "resolution": 480, "orientation": "portrait"}
 
 

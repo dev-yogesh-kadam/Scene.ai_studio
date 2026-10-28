@@ -38,8 +38,8 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8080
     # The admin console is a site of its own, on its own port, with its own sign-in. It listens only where console_host
-    # says: 127.0.0.1 is this machine alone; a Tailscale address (100.x.y.z) lets your other machines in. Never point a
-    # public tunnel at it. console_port 0 turns it off.
+    # says: 127.0.0.1 is this machine alone; a Tailscale address (100.x.y.z) lets your other machines in; several, comma-separated,
+    # listen on each ("127.0.0.1,100.x.y.z"). Never point a public tunnel at it. console_port 0 turns it off.
     console_host: str = "127.0.0.1"
     console_port: int = 8090
     console_url: str = ""         # the console's address as an admin's browser reaches it, for the studio's link; empty = this host, console_port

@@ -19,7 +19,7 @@
   "port": 8080,
   "database_url": "",
   "database_owner_url": "",
-  "default_workflow": "video/h3_master",
+  "default_workflow": "video/h3_all_in_one",
   "allow_signup": true,
   "secure_cookies": false
 }

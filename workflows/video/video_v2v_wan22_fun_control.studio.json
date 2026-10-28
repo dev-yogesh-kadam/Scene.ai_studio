@@ -1,0 +1,24 @@
+{
+  "title": "Restyle Video: Wan 2.2 Fun Control",
+  "description": "A video given a new look: the motion and camera of your video are kept, the look comes from a style frame and the prompt (Wan 2.2 Fun Control).",
+  "output_name": "98.filename_prefix",
+  "labels": {
+    "900:value": "Describe the new look (the motion comes from the video)",
+    "902:value": "Length in frames (4n+1; 81 is 3.4 s at 24 fps)",
+    "158:file": "Source video (its motion and camera are kept)",
+    "145:image": "Style frame (its first frame with the new look)"
+  },
+  "required_refs": [
+    "158:file",
+    "145:image"
+  ],
+  "hide": [
+    "91",
+    "95",
+    "96"
+  ],
+  "hints": [
+    "Make the style frame from the video's first frame with a picture model, so the people and their places match.",
+    "The length is in frames: 4n+1, such as 49, 81 or 121."
+  ]
+}

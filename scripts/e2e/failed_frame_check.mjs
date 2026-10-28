@@ -23,7 +23,7 @@ const project = await page.evaluate(async () => (await fetch('/api/projects', { 
 await page.evaluate((id) => localStorage.setItem('scene.project', id), project.id);
 const post = () => page.evaluate(async (id) => {
   const form = new FormData();
-  form.append('settings', JSON.stringify({ workflow: 'video/h3_master', name: 'Dancing girl', values: { '100:value': 'a girl is dancing inside a bar' }, options: { mode: 'fast', quality: 'low' }, project_id: id, seed_mode: 'random' }));
+  form.append('settings', JSON.stringify({ workflow: 'video/h3_all_in_one', name: 'Dancing girl', values: { '100:value': 'a girl is dancing inside a bar' }, options: { mode: 'fast', quality: 'low' }, project_id: id, seed_mode: 'random' }));
   return (await fetch('/api/jobs', { method: 'POST', body: form })).json();
 }, project.id);
 await post();

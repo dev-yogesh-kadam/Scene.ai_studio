@@ -1560,6 +1560,10 @@ def shape_like(schema, settings, shape):
     ratio = shape[0] / shape[1]
     if schema.get("size"):
         settings["orientation"] = "landscape" if ratio > 1.15 else "portrait" if ratio < 0.87 else "square"
+    option = orientation_option(schema)
+    if option:   # a Shape option (16:9, 9:16) set by the workflow's own rules: its nearest choice
+        settings.setdefault("options", {})[option["id"]] = min((c["id"] for c in option["choices"]),
+                                                                key=lambda o: abs(math.log(ORIENTATION_RATIOS[o] / ratio)))
     for control in schema["controls"]:
         choices = [c for c in control.get("choices") or [] if _ratio(c)]
         if control["input"] == "aspect_ratio" and choices:
@@ -1573,7 +1577,21 @@ def shape_of(schema, settings, ctx):
     for control in schema["controls"]:
         if control["input"] == "aspect_ratio" and _ratio(settings["values"].get(control["id"])):
             return [round(1000 * _ratio(settings["values"][control["id"]])), 1000]
+    option = orientation_option(schema)
+    if option:
+        chosen = (settings.get("options") or {}).get(option["id"], option.get("default"))
+        if chosen in ORIENTATION_RATIOS:
+            return [round(1000 * ORIENTATION_RATIOS[chosen]), 1000]
     return None
+
+
+ORIENTATION_RATIOS = {"landscape": 16 / 9, "portrait": 9 / 16, "square": 1.0}
+
+
+def orientation_option(schema):
+    """The workflow's option whose choices are orientations (H3 All In One's Shape: landscape, portrait), or None."""
+    return next((o for o in schema.get("options", []) if len(o["choices"]) > 1
+                 and all(c["id"] in ORIENTATION_RATIOS for c in o["choices"])), None)
 
 
 EMPTY_SECTION = re.compile(r"^\s*[A-Z][A-Z &/-]{1,30}:\s*(none|n/a|-)?\s*$")
@@ -1609,7 +1627,12 @@ def settings_for(schema, step, selection_ids, project_id, filled=(), used_items=
         if "duration" in roles and values[roles["duration"]["id"]] > LONG_SHOT and resolution > schema["size"]["resolution"]:
             resolution = schema["size"]["resolution"]   # a long shot at the largest size may not fit in the render server's memory
     elif "resolution" in roles and step.get("resolution") in schema["resolutions"]:
-        values[roles["resolution"]["id"]] = step["resolution"]
+        resolution = step["resolution"]
+        usual = int(roles["resolution"]["default"] or 0)
+        if "duration" in roles and values[roles["duration"]["id"]] > LONG_SHOT and usual and resolution > usual:
+            resolution = usual   # as above: a long shot is not made larger than the workflow's own size
+        values[roles["resolution"]["id"]] = resolution
+        resolution = None
     first_frame = (schema.get("slots") or {}).get("first_frame")
     start = step.get("start_from") if first_frame and step.get("start_from") in selection_ids and not chained else None
     if start in used_items and any(r["id"] == first_frame and r["optional"] for r in schema["refs"]):

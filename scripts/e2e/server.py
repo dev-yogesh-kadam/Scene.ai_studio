@@ -31,7 +31,7 @@ asyncio.run(media._ffmpeg("-y", "-loglevel", "error", "-f", "lavfi", "-i", "mand
 
 settings = Settings(comfy_url="http://127.0.0.1:9", ollama_url="http://127.0.0.1:9", storage_dir=str(storage), signup_credits=500,
                     first_account_local=False, workflows_dir=str(ROOT / "workflows"), frontend_dir=str(ROOT / "frontend"),
-                    default_workflow="video/h3_master", backup_keep=0, port=8099, console_port=8098, hold_queue_offline=False)
+                    default_workflow="video/h3_all_in_one", backup_keep=0, port=8099, console_port=8098, hold_queue_offline=False)
 app = create_app(settings)
 
 
@@ -39,7 +39,7 @@ async def fake_ask(system, message, workflow_ids, history=(), model=None):
     await asyncio.sleep(1.6)
     return {"thought": "They want a short shot of a dog. One 5 s landscape clip on the default workflow, reference mode.",
             "reply": "Here is **one shot** of the dog running across a park.\n- 5 seconds, landscape\n- low quality for a quick look",
-            "steps": [{"tool": "generate", "workflow": "video/h3_master", "name": "Dog in the park",
+            "steps": [{"tool": "generate", "workflow": "video/h3_all_in_one", "name": "Dog in the park",
                        "prompt": "SCENE CONTEXT: a brown dog runs across a sunny park.\nACTION: it chases a red ball.\nCAMERA: tracking shot.",
                        "duration": 5, "resolution": 480, "orientation": "landscape", "choices": [{"setting": "quality", "value": "low"}]}]}
 

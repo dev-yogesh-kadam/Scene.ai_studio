@@ -68,7 +68,7 @@ def test_the_always_on_entries_fill_the_slots_meant_for_them_in_order(client):
                               ("Clearing", "clearing", "location"), ("Vlog Camera", "camera", "prop")):
         add(client, items[item], name, type_, always=True, project=project)
     on = kit.always(db, me["id"], project)
-    master = kit.fills(schema_of(client, "video/h3_master"), on)
+    master = kit.fills(schema_of(client, "video/h3_all_in_one"), on)
     # one main character and her other angle, one second person, the place and the prop: as many as the slots take
     assert [(f["name"], f["slot"], f["said_as"]) for f in master] == [
         ("Violet", "201:image", "the main character"), ("Violet", "202:image", "the main character"),
@@ -78,7 +78,7 @@ def test_the_always_on_entries_fill_the_slots_meant_for_them_in_order(client):
         ("Violet", "201:image"), ("Alice", "202:image"), ("Lily", "203:image"), ("Hazel", "204:image"), ("Madelyn", "212:image")]
     # a shot that leaves the place out, and one that has Alice in a slot already (by her library item)
     alice = next(e for e in on if e["name"] == "Alice")
-    fewer = kit.fills(schema_of(client, "video/h3_master"), on, left_out={next(e["id"] for e in on if e["name"] == "Clearing")},
+    fewer = kit.fills(schema_of(client, "video/h3_all_in_one"), on, left_out={next(e["id"] for e in on if e["name"] == "Clearing")},
                       used_items={alice["made_from"]})
     assert [(f["name"], f["slot"]) for f in fewer] == [("Violet", "201:image"), ("Violet", "202:image"), ("Lily", "203:image"),
                                                        ("Vlog Camera", "206:image")]
@@ -102,7 +102,7 @@ def test_the_cast_of_before_becomes_the_always_on_entries_of_the_kit(client):
     assert moved == 4 and kit.migrate_cast(db, client.app.state.assets_dir, client.app.state.outputs) == 0   # once
     on = kit.always(db, me["id"], project)
     assert [(e["name"], e["type"]) for e in on] == [("mira", "character"), ("mira", "character"), ("harbour", "location"), ("song", "voice")]
-    fills = client.get("/api/cast?project=%d&workflow=video/h3_master" % project).json()["fills"]
+    fills = client.get("/api/cast?project=%d&workflow=video/h3_all_in_one" % project).json()["fills"]
     assert [(f["name"], f["slot"]) for f in fills] == [("mira", "201:image"), ("mira", "202:image"), ("harbour", "205:image"), ("song", "208:audio")]
 
 
@@ -111,7 +111,7 @@ def test_a_planned_shot_gets_the_always_on_entries_but_those_it_leaves_out(clien
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     violet = add(client, picture(client, me["id"], "v", project=project), "Violet", "character", True, project)
     clearing = add(client, picture(client, me["id"], "c", project=project), "Clearing", "location", True, project)
-    shot = {"tool": "generate", "workflow": "video/h3_master", "name": "Close-up", "prompt": "The main character smiles at the camera."}
+    shot = {"tool": "generate", "workflow": "video/h3_all_in_one", "name": "Close-up", "prompt": "The main character smiles at the camera."}
     asked = model(monkeypatch, client, {"thought": "", "reply": "Two shots.", "steps": [
         dict(shot, name="Wide"), dict(shot, leave_out=[clearing["id"]])]})
     plan = client.post("/api/agent/plan", json={"instruction": "two shots of Violet", "project_id": project}).json()
@@ -196,7 +196,7 @@ def test_at_names_in_a_prompt_go_into_the_slots_that_fit_them(client, monkeypatc
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     violet = add(client, picture(client, me["id"], "v", project=project, about="A woman with wavy purple hair."), "Violet", "character", False, project)
     clearing = add(client, picture(client, me["id"], "c", project=project), "Bonfire Clearing", "location", False, project)
-    schema = schema_of(client, "video/h3_master")
+    schema = schema_of(client, "video/h3_all_in_one")
     on = kit.entries(client.app.state.db, me["id"], project)
     said, placed = kit.mentions(schema, "@Violet walks into @bonfire clearing at night. @Violet smiles. @Nobody waves.", on)
     assert said == "the main character walks into the background at night. the main character smiles. @Nobody waves."
@@ -215,7 +215,7 @@ def test_at_names_in_a_prompt_go_into_the_slots_that_fit_them(client, monkeypatc
         sent.append(name)
         return name
     monkeypatch.setattr(client.app.state.comfy, "upload", upload)
-    settings = {"workflow": "video/h3_master", "values": {"100:value": "@Violet waves at the camera."}, "options": {"engine": "reference"},
+    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "@Violet waves at the camera."}, "options": {"engine": "reference"},
                 "project_id": project}
     made = client.post("/api/jobs", data={"settings": json.dumps(settings)})
     assert made.status_code == 200, made.text

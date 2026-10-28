@@ -1,0 +1,24 @@
+{
+  "title": "Restyle Video: LTX-2.3",
+  "description": "A video given a new look: the motion and camera of your video are kept, the look comes from a style frame and the prompt (LTX-2.3 IC-LoRA, with sound).",
+  "output_name": "68.filename_prefix",
+  "labels": {
+    "900:value": "Describe the new look (the motion comes from the video)",
+    "901:value": "Seconds of the video to use",
+    "199:file": "Source video (its motion and camera are kept)",
+    "200:image": "Style frame (its first frame with the new look)"
+  },
+  "required_refs": [
+    "199:file",
+    "200:image"
+  ],
+  "hide": [
+    "129_114",
+    "129_112",
+    "129_704"
+  ],
+  "hints": [
+    "Make the style frame from the video's first frame with a picture model, so the people and their places match.",
+    "Describe what changes: the place, the clothes, the light, the style."
+  ]
+}
