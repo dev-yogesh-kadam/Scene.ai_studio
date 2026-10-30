@@ -35,6 +35,12 @@ class Settings:
     gemini_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     gemini_key: str = ""          # a Google Gemini API key, from aistudio.google.com
     gemini_models: str = ""       # for example "gemini-3.8-flash"; empty = ask Google and offer its Pro and Flash models
+    # Claude through Claude Code on this machine (the CLI or the VS Code extension), signed in with its owner's Claude
+    # account: no API key, and its usage limits are that account's. Offered as "claude/<name>" in the model picker.
+    claude_models: str = ""       # for example "sonnet, opus, haiku"; empty = Claude is not offered
+    claude_fast_model: str = ""   # one of claude_models for the small jobs (captions, notes, checks), e.g. "haiku"; empty = the one in use
+    claude_path: str = ""         # the claude program; empty = the one on PATH, else the VS Code extension's
+    claude_timeout: int = 600     # seconds one call to Claude may take
     host: str = "0.0.0.0"
     port: int = 8080
     # The admin console is a site of its own, on its own port, with its own sign-in. It listens only where console_host
@@ -54,6 +60,9 @@ class Settings:
     backup_dir: str = ""          # where the daily copies of the database go; empty = "backups" inside storage_dir
     backup_keep: int = 14         # how many days of copies are kept; 0 = no backups
     config_file: str = ""         # the config.json these settings were read from, so it is backed up too
+    # The key the secrets kept in the database are encrypted with (vault.py), made on first start. SCENE_SECRET_KEY, when
+    # set, is used instead. Keep a copy of it apart from the backups: they can't be read without it.
+    secret_key_file: str = "secret.key"
     frontend_dir: str = "frontend"
     node_path: str = ""           # the Node.js program that renders motion graphics; empty = the one that is installed
     default_workflow: str = ""

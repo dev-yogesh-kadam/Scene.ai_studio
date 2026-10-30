@@ -11,10 +11,11 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import backup, endpoints, gpu, health, kit, media, motion, roles, sequence, staff, traces, versions
+from . import backup, claude, endpoints, gpu, health, media, motion, roles, sequence, staff, traces, vault, versions
 from .agent import Agent, AgentError, service
-from .api import admin, assets, auth, bulk, console as console_api, film, kit as kit_api, library, runs, studio, workspace
+from .api import admin, auth, bulk, console as console_api, film, kit as kit_api, library, runs, studio, workspace
 from .catalog import Catalog
 from .comfy import workflows
 from .comfy.client import ComfyError
@@ -102,6 +103,21 @@ class Hub:
                               "since": min((t["since"] for t in tabs), default=time.time()), "tabs": len(tabs)}
         return found
 
+    def drop(self, user_id):
+        """Close every open page of a user whose sessions were ended (disabled, signed out by an admin)."""
+        for ws in list(self.sockets.get(user_id, ())):
+            asyncio.ensure_future(self._close(user_id, ws))
+
+    async def _close(self, user_id, ws):
+        try:
+            await ws.close(code=4401)
+        except Exception:
+            pass
+        self.discard(user_id, ws)
+
+    def is_online(self, user_id):
+        return bool(self.sockets.get(user_id))
+
     def send(self, user_id, message):
         for ws in list(self.sockets.get(user_id, ())):
             asyncio.ensure_future(self._send(user_id, ws, message))
@@ -120,7 +136,10 @@ class Hub:
 def create_app(settings=None):
     settings = settings or load_settings()
     storage = settings.path("storage_dir")
+    vault.configure(settings.path("secret_key_file"))
     db = open_database(settings, storage)
+    with as_everyone():
+        vault.seal_stored(db)   # secrets saved before they were encrypted
     endpoints.seed(db, settings)   # the servers and APIs of the console's Servers section
     comfy_pool = endpoints.ComfyPool(db, settings.comfy_url)
     comfy = comfy_pool.main
@@ -134,6 +153,8 @@ def create_app(settings=None):
         service(settings.api_name.strip().lower().replace(" ", "-") or "api", settings.api_name, settings.api_url, settings.api_key, settings.api_models),
         service("gemini", "Gemini", settings.gemini_url, settings.gemini_key, settings.gemini_models,
                 only=r"^gemini-[\d.]+-(pro|flash)(-lite)?(-preview)?$"),
+        *filter(None, [claude.service(settings.claude_models, settings.claude_path, settings.claude_timeout, settings.claude_fast_model,
+                                      storage / "claude")]),
     ])
     endpoints.apply(db, agent, settings)
     def renders_waiting():
@@ -163,9 +184,33 @@ def create_app(settings=None):
         return json.dumps({"jobs": app.state.jobs.snapshot(user_id), "credits": credits.balance(user_id),
                            "library_changed": library_changed})
 
-    def notify(user_id, library_changed=False):
+    told, waiting = {}, set()   # when each user was last sent their jobs; who has a send waiting
+
+    def tell(user_id, library_changed=False):
+        told[user_id] = time.monotonic()
         hub.send(user_id, live_message(user_id, library_changed))
+
+    def notify(user_id, library_changed=False):
+        """Send a user's open pages where their jobs stand. A render's progress changes many times a second: a user is
+        sent at most one update a second (a finished result at once), and nothing is made for one with no page open."""
         hub.jobs_changed()   # the console's Jobs and Overview follow every job
+        if not hub.is_online(user_id):
+            return
+        since = time.monotonic() - told.get(user_id, 0)
+        if library_changed or since >= LIVE_EVERY:
+            return tell(user_id, library_changed)
+        if user_id in waiting:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:   # not from the app's own loop (a test calling straight in)
+            return tell(user_id)
+        waiting.add(user_id)
+
+        def later():
+            waiting.discard(user_id)
+            tell(user_id)
+        loop.call_later(LIVE_EVERY - since, later)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -185,6 +230,7 @@ def create_app(settings=None):
         for worker in workers:
             worker.cancel()
         await comfy_pool.close()
+        await claude.close_all()   # the conversations' live Claude Code programs
         await agent.http.aclose()
         db.close()
 
@@ -209,11 +255,6 @@ def create_app(settings=None):
     app.state.storage_dir = storage
     app.state.output_dir = settings.path("output_dir") if settings.output_dir else storage / "outputs"
     app.state.outputs = Outputs(app.state.output_dir, db)
-    with as_everyone():   # work saved at the top of a user's folder (before projects had folders) goes into its project's
-        app.state.outputs.file_all()
-    with as_everyone():   # once: every project's cast becomes the always-on entries of its kit
-        kit.migrate_cast(db, storage / "assets", app.state.outputs)
-        kit.remove_global(db, storage / "assets")   # a NeuralCore belongs to a project: assets of no project are deleted
     app.state.versions = versions.Shelf(db, catalog, storage / "workflow_versions")
     agent.recorder = app.state.traces = traces.Recorder(db, storage / "agent_calls")   # every call to its models
     roles.apply(db, agent)   # the models an admin chose in the console for the agent's roles, over config.json
@@ -243,15 +284,20 @@ def create_app(settings=None):
     _answer_errors(app)
     _guard(app)   # after the one above, so its answers get the headers too
     # The admin routes are not here: they are the admin console's, a site of its own (create_console).
-    for module in (auth, studio, library, workspace, film, runs, kit_api, assets, bulk):
+    for module in (auth, studio, library, workspace, film, runs, kit_api, bulk):
         app.include_router(module.router)
 
     frontend = settings.path("frontend_dir").resolve()
 
+    seen_version = [0, 0.0]   # the version, and when the files were last looked at
+
     def page_version():
         """The time of the last change to a script or the stylesheet of the page. A tab opened before it runs old code:
-        /api/status says this, and the tab offers to reload."""
-        return int(max((f.stat().st_mtime for f in (frontend / "assets").rglob("*") if f.suffix in (".js", ".css")), default=0))
+        /api/status says this, and the tab offers to reload. The files are looked at once every few seconds at most."""
+        if time.time() - seen_version[1] > PAGE_LOOK:
+            seen_version[:] = [int(max((f.stat().st_mtime for f in (frontend / "assets").rglob("*") if f.suffix in (".js", ".css")),
+                                       default=0)), time.time()]
+        return seen_version[0]
     app.state.page_version = page_version
 
     # The studio's pages have addresses of their own (/library, /canvas), all answered by the one page, which routes them.
@@ -283,6 +329,11 @@ def _answer_errors(app):
 def _guard(app):
     """What both sites do with every request: refuse a change from another site's page, and tell the browser what
     the page may do and to check for newer files."""
+    # Scripts, styles and answers go compressed (a fifth of their size); pictures, videos, sounds, fonts and other files
+    # already are, or would not shrink. A streamed answer (the agent at work) is sent piece by piece as before.
+    app.add_middleware(GZipMiddleware, minimum_size=1024,
+                       exclude_content_types=(*DEFAULT_EXCLUDED_CONTENT_TYPES, "application/octet-stream"))
+
     @app.middleware("http")
     async def always_current_pages(request, call_next):
         """Make the browser check for a newer page file every time, so an update shows without clearing its cache.
@@ -290,7 +341,10 @@ def _guard(app):
         Unchanged files are still answered with "not modified", so this costs almost nothing.
         """
         response = await call_next(request)
-        if not request.url.path.startswith("/api/"):
+        if request.url.path.startswith("/v/") and response.status_code == 200:
+            # A versioned address changes whenever any page file does, so what it serves never changes: kept a year.
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif not request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -348,6 +402,8 @@ def _pages(app, frontend, html_file, script, paths):
     return page
 
 
+PAGE_LOOK = 10   # seconds between looks at the page files for a change (page_version)
+LIVE_EVERY = 1.0   # seconds: the most often a user's open pages are sent where their jobs stand (notify)
 # The admin console's scripts, under the page files: /assets/js/console/, or the same under a /v/<version>/ address.
 CONSOLE_FILES = re.compile(r"^(/v/[^/]+)?/assets/js/console(/|$)")
 SECTION = re.compile(r"^[a-z]{1,30}$")

@@ -10,7 +10,7 @@ note on how to use it, its place in the kit, and whether it is always on.
 - An entry attached without a name (named = 0) is one the agent asks the user about.
 
 Entries come in from everywhere work is done: named in an agent message ("Maya - @3"), kept from what a step made
-(keep_made), saved by the agent (its kit_save tool), dropped into a job's reference slot (keep_upload), and added by
+(keep_made), saved by the agent (its book_save tool), dropped into a job's reference slot (keep_upload), and added by
 the user in the panel or from a result on the canvas.
 
 A kit belongs to one project (its modules share it): nothing is kept outside a project, and nothing is shared between
@@ -19,9 +19,7 @@ projects. The assets saved before kits existed, with no project, are not used at
 
 import contextlib
 import hashlib
-import json
 import re
-import shutil
 import time
 from .db import as_everyone
 from pathlib import Path
@@ -275,7 +273,7 @@ def described(on):
         else:
             said = SAID_AS.get(e["tag"], "the " + TYPES.get(e["tag"], "reference"))
         lines.append('- {} "{}" (asset {}): in prompts call it "{}".'.format(TYPES.get(e["tag"], "other"), e["name"], e["id"], said))
-    return ("Always on: these entries of the NeuralCore are attached to every shot automatically, in the slots meant for them "
+    return ("Always on: these entries of the asset book are attached to every shot automatically, in the slots meant for them "
             "(the characters in this order). Do not describe how they look and do not list them in \"uses\"; name them in "
             "the prompt with the words given. A shot they do not belong in leaves them out: list their asset ids in "
             "\"leave_out\".\n" + "\n".join(lines))
@@ -345,58 +343,6 @@ def mentions(schema, text, all_entries, taken=(), usable=None):
     by_name = {e["name"].lower(): e for e in named}
     out = pattern.sub(lambda m: said(by_name[m.group(1).lower()]), str(text))
     return out, placed
-
-
-# ---------------------------------------------------------------- the cast boards of before
-
-CAST_ROLES = (("character_1", "character"), ("character_2", "character"), ("character_3", "character"), ("outfit", "outfit"),
-              ("background", "background"), ("prop", "prop"), ("voice", "voice"))
-
-
-def remove_global(db, assets_root):
-    """Delete the assets that belong to no project (saved before a NeuralCore belonged to a project, or kept for all
-    work), and their files when no other entry uses them. Nothing makes such rows any more; this clears what is left.
-    Returns how many were deleted."""
-    gone = db.all("SELECT id, user_id, filename FROM assets WHERE project_id IS NULL")
-    for row in gone:
-        db.run("DELETE FROM assets WHERE id = ?", (row["id"],))
-    for row in gone:
-        if not db.one("SELECT 1 FROM assets WHERE user_id = ? AND filename = ?", (row["user_id"], row["filename"])):
-            try:
-                (assets_root / str(row["user_id"]) / row["filename"]).unlink(missing_ok=True)
-            except OSError:
-                pass   # held open for the moment: it goes with the next start
-    return len(gone)
-
-
-def migrate_cast(db, assets_root, outputs):
-    """Once: every project's cast (a board of pins: {role: library item id}) becomes always-on entries of its kit, in the
-    cast's order. "Main character, another angle" keeps the main character's name, so it fills the other-angle slot."""
-    if db.setting("kit_migrated", "0") == "1":
-        return 0
-    moved = 0
-    for board in db.all("SELECT user_id, project_id, data FROM boards WHERE kind = 'cast'"):
-        try:
-            pins = json.loads(board["data"] or "{}")
-        except ValueError:
-            continue
-        main = None
-        for role, tag in CAST_ROLES:
-            item_id = pins.get(role)
-            if not isinstance(item_id, int):
-                continue
-            row = db.one("SELECT id, name FROM generations WHERE id = ? AND user_id = ?", (item_id, board["user_id"]))
-            if not row:
-                continue
-            name = main if role == "character_2" and main else row["name"]
-            made = add_item(db, assets_root / str(board["user_id"]), outputs.folder(board["user_id"]), board["user_id"],
-                            board["project_id"] or None, item_id, name, tag, always=True)
-            if made:
-                moved += 1
-                if role == "character_1":
-                    main = name
-    db.set_setting("kit_migrated", "1")
-    return moved
 
 
 def copy_entries(db, user_id, source, target):

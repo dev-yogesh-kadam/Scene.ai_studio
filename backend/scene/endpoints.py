@@ -15,6 +15,7 @@ import time
 
 import httpx
 
+from . import vault
 from .agent import service
 from .comfy.client import Comfy
 
@@ -75,7 +76,7 @@ def apply(db, agent, settings):
         ollama = [settings.ollama_url.rstrip("/")] if settings.ollama_url else []
     agent.set_servers(ollama)
     extra = [service(re.sub(r"[^a-z0-9]+", "-", r["name"].lower()).strip("-") or "api{}".format(r["id"]), r["name"], r["url"],
-                     r["api_key"] or "none", r["models"]) for r in listed(db, "openai", active_only=True)]
+                     vault.reveal(r["api_key"]) or "none", r["models"]) for r in listed(db, "openai", active_only=True)]
     agent.set_services(extra)
 
 
@@ -151,7 +152,7 @@ async def status(state):
                 r.raise_for_status()
                 item.update(online=True, found=[m["name"] for m in r.json().get("models") or []], calls=agent.calls.get(row["url"], 0))
             else:
-                r = await http.get(row["url"] + "/models", headers={"Authorization": "Bearer " + (row["api_key"] or "none")})
+                r = await http.get(row["url"] + "/models", headers={"Authorization": "Bearer " + (vault.reveal(row["api_key"]) or "none")})
                 item.update(online=r.status_code < 400,
                             found=[str(m.get("id")) for m in (r.json().get("data") or [])][:40] if r.status_code < 400 else [])
         except (httpx.HTTPError, ValueError, AttributeError, TypeError):

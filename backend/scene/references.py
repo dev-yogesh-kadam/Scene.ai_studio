@@ -130,12 +130,6 @@ async def upload_reference(comfy, filename, data, mime=None, db=None, user_id=No
 
 
 def owns_upload(db, user_id, name):
-    """Whether a file in the render server's input folder is one this user put there. A file sent before uploads
-    were recorded counts when one of the user's own jobs used it."""
+    """Whether a file in the render server's input folder is one this user put there."""
     name = str(name or "")
-    if not UPLOAD_NAME.match(name):
-        return False
-    if db.one("SELECT 1 FROM uploads WHERE user_id = ? AND name = ?", (user_id, name)):
-        return True
-    like = '%"{}"%'.format(name.replace("_", r"\_"))   # the name has no other character LIKE reads specially
-    return db.one("SELECT 1 FROM jobs WHERE user_id = ? AND settings LIKE ? ESCAPE '\\' LIMIT 1", (user_id, like)) is not None
+    return bool(UPLOAD_NAME.match(name)) and db.one("SELECT 1 FROM uploads WHERE user_id = ? AND name = ?", (user_id, name)) is not None

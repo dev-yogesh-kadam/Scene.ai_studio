@@ -1,10 +1,11 @@
-"""The workflow catalog: every workflow file under workflows/<kind>/, read fresh on each request.
+"""The workflow catalog: every workflow file under workflows/<kind>/. A file is read again only once it changed.
 
 A workflow is <name>.json (the graph that runs: an API export, or ComfyUI's own save), with <name>.studio.json beside it
 (its presets) and, when the file that runs is an API export, <name>.ui.json (the save to open in ComfyUI, never run).
 A new file shows on the next request. workflows/archive and workflows/reports are never read."""
 
 import asyncio
+import copy
 import json
 import time
 
@@ -33,9 +34,25 @@ class Catalog:
             except ValueError:
                 pass
         self.lock = asyncio.Lock()  # several requests may need the node definitions at once: fetch them once
+        # What was read, kept until a file changes: (the folders' times, the files); (their sidecars' times, replaced);
+        # path -> (the file's and its sidecar's times, the node definitions it was read with, the workflow).
+        self._files, self._replaced, self._read = (None, {}), (None, {}), {}
+
+    @staticmethod
+    def _time(path):
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return None
 
     def files(self):
-        """Workflow id ("video/h3_director") -> path."""
+        """Workflow id ("video/h3_director") -> path. Looked for again only when a folder changed (a file came or went)."""
+        seen = tuple(self._time(self.directory / kind) for kind in FOLDERS)
+        if self._files[0] != seen:
+            self._files = (seen, self._find())
+        return dict(self._files[1])
+
+    def _find(self):
         found = {}
         for kind in FOLDERS:
             folder = self.directory / kind
@@ -73,8 +90,15 @@ class Catalog:
     def replaced(self):
         """Retired workflow id -> the id of the workflow that took its place (its presets file lists it under "replaces").
         Earlier work, a saved default and a job still waiting name the old id; they are served by the new workflow."""
+        files = self.files()
+        seen = tuple((path, self._time(self.sidecar_of(path))) for path in files.values())
+        if self._replaced[0] != seen:
+            self._replaced = (seen, self._find_replaced(files))
+        return dict(self._replaced[1])
+
+    def _find_replaced(self, files):
         found = {}
-        for workflow_id, path in self.files().items():
+        for workflow_id, path in files.items():
             sidecar = self.sidecar_of(path)
             try:
                 old = json.loads(sidecar.read_text(encoding="utf-8")).get("replaces") if sidecar.is_file() else None
@@ -93,7 +117,7 @@ class Catalog:
         if path is None:
             raise workflows.WorkflowError("There is no workflow named '{}'.".format(workflow_id))
         try:
-            wf = workflows.load_workflow(path, self.object_info or self.saved, workflow_id, self.sidecar_of(path))
+            wf = self._load_file(path, self.object_info or self.saved, workflow_id)
             if not wf["approximate"]:
                 return wf
             error = None
@@ -113,10 +137,19 @@ class Catalog:
                 except (httpx.HTTPError, ValueError, OSError):
                     pass
         if self.object_info is not None:
-            return workflows.load_workflow(path, self.object_info, workflow_id, self.sidecar_of(path))
+            return self._load_file(path, self.object_info, workflow_id)
         if wf is None:
             raise error
         return wf
+
+    def _load_file(self, path, info, workflow_id):
+        """workflows.load_workflow, kept until the file or its sidecar changes or other node definitions arrive. Each
+        caller gets a copy of its own to change."""
+        seen = (self._time(path), self._time(self.sidecar_of(path)), id(info), workflow_id)
+        kept = self._read.get(path)
+        if kept is None or kept[0] != seen:
+            kept = self._read[path] = (seen, workflows.load_workflow(path, info, workflow_id, self.sidecar_of(path)))
+        return copy.deepcopy(kept[1])
 
     async def listing(self):
         items = []

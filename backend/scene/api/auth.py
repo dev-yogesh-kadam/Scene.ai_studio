@@ -9,10 +9,11 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from .. import audit, staff
-from ..security import (DUMMY_HASH, MAX_PASSWORD, check_totp, client_address, hash_password, is_https, needs_rehash,
-                        new_recovery_codes, new_token, new_totp_secret, recovery_hash, token_hash, totp_uri, verify_password)
-from .deps import CONSOLE_COOKIE, COOKIE, current_user, limited, may_use_agent
+from .. import audit, staff, vault
+from ..security import (ACCOUNT_FAILURES, ACCOUNT_SECONDS, DUMMY_HASH, MAX_PASSWORD, check_totp, client_address, hash_password,
+                        is_https, needs_rehash, new_recovery_codes, new_token, new_totp_secret, recovery_hash, token_hash,
+                        totp_uri, verify_password)
+from .deps import CONSOLE_COOKIE, COOKIE, current_user, limited
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -47,10 +48,20 @@ def signup_open(state):
     return state.db.setting("allow_signup", "1" if state.settings.allow_signup else "0") == "1"
 
 
+# Headers a proxy in front of the studio adds. A request carrying any of them came from elsewhere, through the proxy,
+# even when the proxy runs on this computer (the tunnel, nginx, Tailscale).
+FORWARDED = ("cf-connecting-ip", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded", "true-client-ip")
+LOCAL_NAMES = ("localhost", "127.0.0.1", "[::1]")
+
+
 def on_this_machine(request):
-    """A request from a browser on the computer the studio runs on, not one that came in through the tunnel."""
-    host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "localhost") and "cf-connecting-ip" not in request.headers
+    """A request from a browser on the computer the studio runs on, not one that came in through a proxy or tunnel:
+    from this machine's own address, addressed to it by a local name, with nothing a proxy adds."""
+    address = request.client.host if request.client else ""
+    host = request.headers.get("host", "").lower()
+    named = host.split("]")[0] + "]" if host.startswith("[") else host.split(":")[0]   # without the port
+    return (address in ("127.0.0.1", "::1") and named in LOCAL_NAMES
+            and not any(header in request.headers for header in FORWARDED))
 
 
 def shown(state, user):
@@ -118,8 +129,7 @@ async def register(body: dict, request: Request, response: Response):
                            (email, name, await new_hash(password), "admin" if first_run else "user", time.time()))
     state.credits.add(user_id, state.credits.signup, "welcome")
     start_session(request, response, user_id)
-    user = state.db.one("SELECT id, email, name, role, credits, agent FROM users WHERE id = ?", (user_id,))
-    user["agent"] = may_use_agent(user)
+    user = state.db.one("SELECT id, email, name, role, credits FROM users WHERE id = ?", (user_id,))
     audit.record(request, user, "Created account", email)
     return shown(state, user)
 
@@ -127,7 +137,7 @@ async def register(body: dict, request: Request, response: Response):
 def _second_step(db, user, code):
     """Whether `code` is the user's current authenticator code or one of their unused recovery codes. A code is
     used up either way: an authenticator code by its time step, a recovery code by being struck off the list."""
-    step = check_totp(user["mfa_secret"], code, user["mfa_step"])
+    step = check_totp(vault.reveal(user["mfa_secret"]), code, user["mfa_step"])
     if step is not None:
         db.run("UPDATE users SET mfa_step = ? WHERE id = ?", (step, user["id"]))
         return True
@@ -147,14 +157,18 @@ async def check_sign_in(request, body, failed="Failed sign-in"):
     state = request.app.state
     email = str(body.get("email", "")).strip().lower()[:254]
     key = "{}|{}".format(email, client_address(request))
+    account = "account|" + email
     if state.throttle.blocked(key):
         raise HTTPException(429, "Too many wrong passwords. Wait a minute and try again.")
+    if state.throttle.blocked(account, ACCOUNT_FAILURES, ACCOUNT_SECONDS):
+        raise HTTPException(429, "Too many wrong passwords for this account. Wait a few minutes and try again.")
     user = state.db.one("SELECT * FROM users WHERE email = ?", (email,))
     password = str(body.get("password", ""))
     # An email with no account is checked against a made-up hash, so it takes as long as a wrong password.
     right = await check_password(password, user["password_hash"] if user else DUMMY_HASH)
     if user is None or not right:
         state.throttle.fail(key)
+        state.throttle.fail(account)
         audit.record(request, None, failed, email)
         raise HTTPException(401, "Wrong email or password.")
     state.throttle.clear(key)
@@ -185,7 +199,7 @@ async def login(body: dict, request: Request, response: Response):
         return answer
     start_session(request, response, user["id"])
     audit.record(request, user, "Signed in", user["email"])
-    return shown(request.app.state, {**{k: user[k] for k in ("id", "email", "name", "role", "credits")}, "agent": may_use_agent(user)})
+    return shown(request.app.state, {k: user[k] for k in ("id", "email", "name", "role", "credits")})
 
 
 VIEW_SECONDS = 3600
@@ -274,7 +288,7 @@ async def mfa_setup(body: dict, request: Request, user: dict = Depends(current_u
         raise HTTPException(400, "Two-step sign-in is already on.")
     await _confirm_password(request, user, body.get("password"))
     secret = new_totp_secret()
-    db.run("UPDATE users SET mfa_secret = ?, mfa_step = 0 WHERE id = ?", (secret, user["id"]))
+    db.run("UPDATE users SET mfa_secret = ?, mfa_step = 0 WHERE id = ?", (vault.seal(secret), user["id"]))
     return {"secret": secret, "uri": totp_uri(secret, user["email"])}
 
 
@@ -286,7 +300,7 @@ async def mfa_enable(body: dict, request: Request, user: dict = Depends(current_
         raise HTTPException(400, "Two-step sign-in is already on.")
     if not row["mfa_secret"]:
         raise HTTPException(400, "Start again: set up the authenticator app first.")
-    step = check_totp(row["mfa_secret"], body.get("code"))
+    step = check_totp(vault.reveal(row["mfa_secret"]), body.get("code"))
     if step is None:
         raise HTTPException(400, "That code is not right. Check the app shows Scene.ai and try the newest code.")
     codes = new_recovery_codes()

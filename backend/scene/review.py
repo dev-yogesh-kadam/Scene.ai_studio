@@ -27,6 +27,10 @@ CHECKS = ("who", "what", "clean", "coherence", "continuity")
 LEVELS = ("fine", "minor", "major")
 MAX_REFERENCES = 3      # reference pictures shown beside the result
 FRAME_WIDTH = 768       # the frames of a clip the model looks at
+CLIP_FRAMES = 8         # frames spread over a clip, start to end
+EDGE = 0.3              # seconds kept clear of a clip's first and last frame
+STRIP_WIDTH = 512       # the three neighbouring frames where the picture changes most
+SHARPEST = 0.08         # a change smaller than this is ordinary movement: no strip
 
 
 class ReviewError(Exception):
@@ -43,22 +47,33 @@ async def _still(path):
 
 
 async def result_frames(path, kind):
-    """What the model looks at of a result: [(label, base64 JPEG)]. A picture is itself; a clip is four frames,
-    half a second in, a third, two thirds and half a second before the end."""
+    """What the model looks at of a result: [(label, base64 JPEG)]. A picture is itself; a clip is CLIP_FRAMES frames
+    spread from start to end, then, where the picture changes most from one frame to the next (a cut, a jump, a face
+    or a hand that melts), that frame with the ones just before and after it: a fault between the spread frames would
+    be missed otherwise."""
     if kind == "image":
         return [("the result", await _still(path))]
     length = (await media.probe(path))["seconds"]
     if length <= 0:
         raise ReviewError("That video can't be read.")
-    moments = sorted({round(t, 2) for t in (min(0.5, length / 4), length / 3, 2 * length / 3, max(0.0, length - 0.5))})
+    edge = min(EDGE, length / 4)
+    step = (length - 2 * edge) / (CLIP_FRAMES - 1)
+    moments = sorted({round(edge + n * step, 2) for n in range(CLIP_FRAMES)})
     frames = []
     with tempfile.TemporaryDirectory() as folder:
         for number, moment in enumerate(moments):
             found = await media.frame_at(path, moment, Path(folder) / "f{}.jpg".format(number), FRAME_WIDTH)
             if found:
                 frames.append(("the result at {:.1f} s".format(moment), _b64(found)))
-    if not frames:
-        raise ReviewError("No frame could be taken from that video.")
+        if not frames:
+            raise ReviewError("No frame could be taken from that video.")
+        sharpest = max(((t, s) for t, s in await media.changes(path) if 0 < t < length), key=lambda c: c[1], default=None)
+        if sharpest and sharpest[1] >= SHARPEST:
+            at = sharpest[0]
+            for number, (moment, said) in enumerate(((at - 1 / media.FPS, "just before"), (at, "at"), (at + 1 / media.FPS, "just after"))):
+                found = await media.frame_at(path, moment, Path(folder) / "s{}.jpg".format(number), STRIP_WIDTH)
+                if found:
+                    frames.append(("{} the sharpest change, {:.2f} s".format(said, moment), _b64(found)))
     return frames
 
 
@@ -108,10 +123,11 @@ def load(row):
     return found if isinstance(found, dict) else None
 
 
-async def review_item(state, user_id, item, prompt, references=(), previous=None):
+async def review_item(state, user_id, item, prompt, references=(), previous=None, model=None):
     """Review one library item. item: its generations row. prompt: what it was asked to show (its own prompt when
     empty). references: [(label, path)] of the reference pictures it was made with. previous: (path, kind) of the
-    shot it continues, or None. Keeps the verdict with the item and returns it."""
+    shot it continues, or None. model: the one that reviews; the agent's usual one when not given. Keeps the verdict
+    with the item and returns it."""
     path = state.outputs.folder(user_id) / item["filename"]
     if item["kind"] not in ("image", "video"):
         raise ReviewError("Only pictures and videos can be reviewed.")
@@ -140,7 +156,7 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
         pictures += await result_frames(path, item["kind"])
     except media.MediaError as error:
         raise ReviewError(str(error))
-    answer = await state.agent.review([p for _, p in pictures], [label for label, _ in pictures], prompt, item["kind"])
+    answer = await state.agent.review([p for _, p in pictures], [label for label, _ in pictures], prompt, item["kind"], **({"model": model} if model else {}))
     verdict = verdict_from(answer)
     state.db.run("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
     return verdict

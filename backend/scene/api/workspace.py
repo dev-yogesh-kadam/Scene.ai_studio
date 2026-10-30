@@ -1,6 +1,7 @@
 """The canvas, the timeline and the agent: arranging finished work, queueing edits and motion graphics, and planning new work."""
 
 import asyncio
+import hashlib
 import json
 import math
 import re
@@ -10,10 +11,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import agent, camera, credits, edits, gpu, kit, media, memory, motion, review, runs, sequence, sharing, skills
+from .. import agent, camera, claude, credits, edits, gpu, kit, media, memory, motion, review, runs, sequence, sharing, skills
 from ..db import as_everyone
 from ..comfy import workflows
-from .deps import agent_user, current_user
+from .deps import current_user
 from .studio import price
 
 router = APIRouter(prefix="/api", tags=["workspace"])
@@ -57,7 +58,7 @@ STUDIO_ABILITY = (
     "its times exact, and working out every shot's frames from it (transcript, timing). Bringing pictures, clips and sounds in from "
     "links on other sites (import_url). Reading a script or document the user attached (read_text; Word files arrive as "
     "their text). Questions to the user with two to four buttons; tables of pictures in a reply. A run goes on "
-    "by itself when its steps are made, and may have a budget the user sets. A permission under the Agent box lets plans run "
+    "by itself when its steps are made. A permission under the Agent box lets plans run "
     "without waiting for Approve. Looking at pictures and "
     "clips, reviewing results, remembering assets. Not here: running other programs or scripts, other models than the workflows listed.")
 
@@ -106,11 +107,19 @@ async def save_board(kind: str, body: dict, request: Request, user: dict = Depen
 
 @router.delete("/boards/{kind}")
 async def delete_board(kind: str, request: Request, project: int = 0, user: dict = Depends(current_user)):
-    """Forget the conversation of an agent tab the user deleted. Other boards are not deleted this way."""
+    """Forget the conversation of an agent tab the user deleted, and its Claude sessions. Other boards are not deleted
+    this way."""
     if not AGENT_TAB.match(kind):
         raise HTTPException(404, "No such board.")
-    request.app.state.db.run("DELETE FROM boards WHERE user_id = ? AND project_id = ? AND kind = ?",
-                             (user["id"], _project_id(request, user, project, "viewer"), kind))
+    state = request.app.state
+    state.db.run("DELETE FROM boards WHERE user_id = ? AND project_id = ? AND kind = ?",
+                 (user["id"], _project_id(request, user, project, "viewer"), kind))
+    run = kind[len("agent-"):]
+    await claude.close_all("{}:{}:".format(user["id"], run))
+    hosted =(getattr(state.agent, "services", None) or {}).get("claude")
+    for thread in runs.threads_of(state.db, user["id"], run):
+        claude.forget(hosted, thread.get("id"))
+    runs.delete(state.db, user["id"], run, runs.THREADS, trusted=True)
     return {"ok": True}
 
 
@@ -147,7 +156,8 @@ async def export_timeline(body: dict, request: Request, user: dict = Depends(cur
 @router.post("/edit/assemble")
 async def assemble(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue the finished cut: the clips in order, a title card and an end card, music under it. Costs no credits.
-    Body: {"name"?, "clips": [{"id", "start"?, "end"?}], "music"?: audio item id, "title"?, "end"?: {"heading", "text"},
+    Body: {"name"?, "clips": [{"id", "start"?, "end"?, "fade"?: crossfade in from the clip before}], "music"?: audio item id,
+    "title"?, "end"?: {"heading", "text"},
     "look"?, "shape"?, "project_id"?}."""
     state = request.app.state
     clips = body.get("clips") if isinstance(body.get("clips"), list) else []
@@ -160,7 +170,7 @@ async def assemble(body: dict, request: Request, user: dict = Depends(current_us
         if row is None or not (folder / row["filename"]).is_file():
             raise HTTPException(404, "A shot of the cut is no longer in your library.")
         try:
-            parts.append({"id": row["id"], "start": float(clip.get("start") or 0), "end": float(clip.get("end") or 0)})
+            parts.append({"id": row["id"], "start": float(clip.get("start") or 0), "end": float(clip.get("end") or 0), "fade": clip.get("fade") is True})
         except (TypeError, ValueError):
             raise HTTPException(400, "The start and end of {} must be numbers.".format(row["name"]))
     music = None
@@ -241,7 +251,7 @@ async def _motion_scenes(body, request, user):
     about = str(body.get("about") or "").strip()[:2000]
     if not about:
         raise HTTPException(400, "Say what the video is about first.")
-    project = _project_id(request, user, body.get("project_id"))
+    _project_id(request, user, body.get("project_id"))   # only in a project the user may work in
     written = await request.app.state.agent.write_scenes(about, **_model(body))
     try:
         written["scenes"] = sequence.clean_scenes(written["scenes"])
@@ -322,7 +332,7 @@ async def motion_render(body: dict, request: Request, user: dict = Depends(curre
 # ---------------------------------------------------------------- agent
 
 @router.get("/agent/status")
-async def agent_status(request: Request, user: dict = Depends(agent_user)):
+async def agent_status(request: Request, user: dict = Depends(current_user)):
     try:
         # "model" is the one used when the user has not picked another; "models" is what they can pick from.
         brain = request.app.state.agent
@@ -340,17 +350,64 @@ def _model(body):
     return {"model": picked[:120]} if isinstance(picked, str) and picked.strip() else {}
 
 
+def _said(reply):
+    return hashlib.sha1(str(reply or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _thread_run(body):
+    run = str(body.get("run") or "main")
+    return run if runs.RUN.match(run) else None
+
+
+def _thread(state, user, project, body, model, system):
+    """The thread of this conversation with Claude ({"id", "sent", "seen", "full", "system", "last"}, see Agent.chat),
+    or None for a model that does not keep one. A conversation is its run's (a tab of the agent panel), with one
+    thread for each project and model, kept in the run's state so it outlives a restart of the studio. It starts
+    again (no session id) when it is new, when the earlier turns the browser sent do not end with the reply the
+    thread gave last (a new chat, or one taken up elsewhere), when the system prompt is not the one it began with (a
+    long skill came or went), or when its session has grown past claude.SESSION_TOKENS: the new one opens with the
+    studio's own short account of the conversation (its direction and latest turns), so no message of a long
+    conversation reads more than that."""
+    run = _thread_run(body)
+    if not run or not state.agent.keeps_threads(model):
+        return None
+    history = [t for t in body.get("history") or [] if isinstance(t, dict)] if isinstance(body.get("history"), list) else []
+    signature = hashlib.sha1(system.encode("utf-8")).hexdigest()[:16]
+    thread = runs.kept_thread(state.db, user["id"], run, project, model)
+    if (not thread or not history or thread.get("last") != _said(history[-1].get("reply")) or thread.get("system") != signature
+            or (thread.get("size") or 0) > claude.SESSION_TOKENS):
+        thread = {"id": None, "sent": 1, "seen": {}, "full": "", "system": signature, "last": None}
+    thread["key"] = "{}:{}:{}:{}".format(user["id"], run, project or 0, model)   # its live session (claude.converse)
+    return thread
+
+
+def _keep_thread(state, user, project, body, model, thread, reply):
+    """Remember the thread once its message is answered: the next one goes on with it when its history ends with
+    `reply` (None: Claude did not give this answer, so the session does not hold it, and the next one starts anew)."""
+    kept = {k: v for k, v in thread.items() if k not in ("full", "stood_in", "key")}   # the whole message is made anew each time
+    kept["last"] = _said(reply) if reply is not None else None
+    runs.keep_thread(state.db, user["id"], _thread_run(body), project, model, kept)
+
+
+def _looks(state, body):
+    """The models that look at pictures for a message: {"describe", "review"}. A hosted model the user picked (Claude)
+    looks itself, its quick one describing; with a local one, or none picked, the agent's usual ones do as before."""
+    picked = _model(body).get("model")
+    if not picked or state.agent.is_local(picked):
+        return {"describe": None, "review": None}
+    return {"describe": state.agent.helper(picked), "review": picked}
+
+
 
 # ---------------------------------------------------------------- shared memory
 
 @router.get("/memory")
 async def get_memory(request: Request, project: int = 0, user: dict = Depends(current_user)):
     """A project's kit, as the panel of before read it ({"assets": the kit's entries, "uploads": []}); the kit's own
-    endpoints are /api/kit. For a user who has the agent, its model first looks at a few pictures it has not described."""
+    endpoints are /api/kit. The agent's model first looks at a few pictures it has not described."""
     state = request.app.state
     project = _project_id(request, user, project)
-    if user["agent"]:
-        await memory.describe_missing(state, user["id"], memory.book(state.db, user["id"], project or None), limit=6)
+    await memory.describe_missing(state, user["id"], memory.book(state.db, user["id"], project or None), limit=6)
     found = memory.panel(state.db, user["id"], project or None)
     found["skills"] = [{"id": s["id"], "title": s["title"], "version": s["version"]} for s in skills.load()]
     return found
@@ -368,7 +425,7 @@ async def list_skills(user: dict = Depends(current_user)):
 # ---------------------------------------------------------------- review
 
 @router.post("/agent/review")
-async def agent_review(body: dict, request: Request, user: dict = Depends(agent_user)):
+async def agent_review(body: dict, request: Request, user: dict = Depends(current_user)):
     with gpu.politely():   # a check waits for the renders still queued, so the GPU does not swap models between them
         return await _patient(_agent_review(body, request, user))
 
@@ -493,7 +550,7 @@ def _as_shot(step, shot_id):
 
 
 @router.post("/agent/storyboard")
-async def agent_storyboard(body: dict, request: Request, user: dict = Depends(agent_user)):
+async def agent_storyboard(body: dict, request: Request, user: dict = Depends(current_user)):
     """Stage one of a long film: a cheap still for each planned video shot, to look at before any clip is made.
     Body: {"shots": [{"shot_id", "proposal"}], "project_id"?}. Returns {"steps": [...], "dropped": [...], "total"};
     nothing is queued or charged: the browser queues the stills on Approve, as for any plan."""
@@ -522,7 +579,7 @@ async def agent_storyboard(body: dict, request: Request, user: dict = Depends(ag
 
 
 @router.post("/agent/animate")
-async def agent_animate(body: dict, request: Request, user: dict = Depends(agent_user)):
+async def agent_animate(body: dict, request: Request, user: dict = Depends(current_user)):
     """Stage two: each approved still becomes the first frame of its clip. Body: {"shots": [{"shot_id", "item", "proposal"}],
     "project_id"?}, item being the library id of the still. Returns {"steps", "dropped", "total"}, not queued."""
     state = request.app.state
@@ -557,7 +614,7 @@ async def agent_animate(body: dict, request: Request, user: dict = Depends(agent
 
 
 @router.post("/agent/reroll")
-async def agent_reroll(body: dict, request: Request, user: dict = Depends(agent_user)):
+async def agent_reroll(body: dict, request: Request, user: dict = Depends(current_user)):
     """Another take of a finished shot: the same prompt and settings with a new seed, priced and not queued.
     Body: {"item", "prompt"?}. Returns {"retake"}, as the review does for a failed shot."""
     state = request.app.state
@@ -585,7 +642,7 @@ async def _menu(state, user):
 
 
 @router.post("/agent/step")
-async def agent_step(body: dict, request: Request, user: dict = Depends(agent_user)):
+async def agent_step(body: dict, request: Request, user: dict = Depends(current_user)):
     """Change one step of a plan on its approval card: the workflow, the shape, the size, the length or the prompt.
     The step is built again with the same checks as a planned one and priced. Nothing is queued or charged."""
     state = request.app.state
@@ -658,7 +715,7 @@ async def agent_step(body: dict, request: Request, user: dict = Depends(agent_us
 
 
 @router.post("/agent/plan")
-async def agent_plan(body: dict, request: Request, user: dict = Depends(agent_user)):
+async def agent_plan(body: dict, request: Request, user: dict = Depends(current_user)):
     """Ask the agent for a plan. Each step comes back as checked, priced job settings; nothing is queued or charged.
 
     Asked with "Accept: application/x-ndjson", it answers as it works: one JSON line per thing it does ("status" while
@@ -872,21 +929,21 @@ async def _planning(request, user, body, instruction, project):
     said_names = memory.named_in(instruction, selection[:tagged])
     named = memory.keep_named(state.db, folder, outputs, user["id"], said_names, project or None)
     if named:
-        yield activity("book", "Kept in the NeuralCore: " + ", ".join("{} ({})".format(n["name"], n["type"]) for n in named))
+        yield activity("book", "Kept in the asset book: " + ", ".join("{} ({})".format(n["name"], n["type"]) for n in named))
     # A long run that starts with pictures nobody named keeps them too, without a name: the agent asks who they are.
     if run_id and long_skill and not carried:
         said_items = {n["item"] for n in said_names}
         unnamed = memory.keep_unnamed(state.db, folder, outputs, user["id"], project or None,
                                       [s["id"] for s in selection[:tagged] if s["kind"] == "image" and s["id"] not in said_items])
         if unnamed:
-            yield activity("book", "Kept {} picture{} without a name in the NeuralCore".format(len(unnamed), "" if len(unnamed) == 1 else "s"))
+            yield activity("book", "Kept {} picture{} without a name in the asset book".format(len(unnamed), "" if len(unnamed) == 1 else "s"))
     pinned = kit.always(state.db, user["id"], project or None)
     # The asset book: what the agent knows of the project by name. Pictures it has not looked at yet are described now.
     book = memory.book(state.db, user["id"], project, pinned)
     if book:
         yield activity("book", "Opened the asset book: {} {}".format(len(book), "entry" if len(book) == 1 else "entries"))
     yield status("Looking at new pictures…")
-    looked = await memory.describe_missing(state, user["id"], book)
+    looked = await memory.describe_missing(state, user["id"], book, model=_looks(state, body)["describe"])
     if looked:
         yield activity("look", "Looked at {} new {}".format(looked, "picture" if looked == 1 else "pictures"))
     book_items, book_assets = memory.lookup(book)
@@ -1018,7 +1075,7 @@ async def _planning(request, user, body, instruction, project):
         if entry is None:
             return "That id is not in the asset book."
         if not entry["shows"]:
-            await memory.describe_missing(state, user["id"], [entry], limit=1)
+            await memory.describe_missing(state, user["id"], [entry], limit=1, model=_looks(state, body)["describe"])
         noted("look", "Looked at “{}”".format(entry["name"]))
         return entry["shows"] or "It could not be looked at (the model cannot see it, or the file is gone)."
 
@@ -1035,7 +1092,8 @@ async def _planning(request, user, body, instruction, project):
         if row is None:
             return "No such item."
         try:
-            verdict = await review.review_item(state, user["id"], row, memory._prompt(json.loads(row["settings"] or "{}")), [], None)
+            verdict = await review.review_item(state, user["id"], row, memory._prompt(json.loads(row["settings"] or "{}")), [], None,
+                                              model=_looks(state, body)["review"])
         except (review.ReviewError, agent.AgentError) as error:
             return "It could not be reviewed: {}".format(error)
         noted("look", "Checked “{}”".format(row["name"]))
@@ -1048,10 +1106,10 @@ async def _planning(request, user, body, instruction, project):
             noted("book", "Updated the direction")
         return "Saved." if text else "Nothing to save."
 
-    async def kit_save(call):
+    async def book_save(call):
         name, said_type = kit.clean_name(call.get("text")), str(call.get("op") or "").strip().lower()
         if not project:
-            return "There is no NeuralCore here: it belongs to a project, and this message is in no project. Say so to the user."
+            return "There is no asset book here: it belongs to a project, and this message is in no project. Say so to the user."
         if not name:
             return "Give the entry its name in text."
         always_on = str(call.get("settings") or "").strip().lower() == "always"
@@ -1061,7 +1119,7 @@ async def _planning(request, user, body, instruction, project):
             changes = {"name": name, "type": said_type, **({"about": about} if about else {}), **({"always": True} if always_on else {})}
             found = kit.update(state.db, user["id"], call["asset"], changes)
             if not found:
-                return "There is no NeuralCore entry {}.".format(call["asset"])
+                return "There is no asset book entry {}.".format(call["asset"])
             asset = found["id"]
         elif call.get("item"):
             asset = kit.add_item(state.db, folder, state.outputs.folder(user["id"]), user["id"], project or None, call["item"],
@@ -1070,8 +1128,8 @@ async def _planning(request, user, body, instruction, project):
                 return "There is no library item {}.".format(call["item"])
             kit.update(state.db, user["id"], asset, {"name": name, "type": said_type, **({"about": about} if about else {})})
         else:
-            return "Give the library id of what to keep in item, or the NeuralCore entry to change in asset."
-        noted("book", "Kept “{}” ({}) in the NeuralCore".format(name, kit.TYPES.get(kit.tag_of(said_type), "other")))
+            return "Give the library id of what to keep in item, or the asset book entry to change in asset."
+        noted("book", "Kept “{}” ({}) in the asset book".format(name, kit.TYPES.get(kit.tag_of(said_type), "other")))
         return json.dumps({"asset": asset, "name": name, "type": kit.TYPES.get(kit.tag_of(said_type), "other"), "always": always_on})
 
     reminded = []   # the run was reminded once to save its work
@@ -1158,7 +1216,7 @@ async def _planning(request, user, body, instruction, project):
                                (call.get("item"), user["id"])) if isinstance(call.get("item"), int) else None
             path = state.outputs.folder(user["id"]) / row["filename"] if row else None
         if not path or not path.is_file():
-            return "That is not a text in the library or the NeuralCore."
+            return "That is not a text in the library or the asset book."
         words = path.read_text(encoding="utf-8-sig", errors="replace")
         if call.get("path"):
             if not run:
@@ -1288,27 +1346,52 @@ async def _planning(request, user, body, instruction, project):
         noted("attach", "Brought in “{}” from a link".format(made["name"]))
         return json.dumps({"item": made["id"], "kind": kind, "name": made["name"], **made["context"]}, ensure_ascii=False)
 
+    threaded = []   # the thread of the conversation with Claude, when it keeps one (_thread)
+
     tools = {"find_assets": find_assets, "look": look, "check_shots": check_shots, "review": review_it, "save_note": save_note,
-             "kit_save": kit_save,
+             "book_save": book_save,
              "state_read": state_read, "state_write": state_write, "state_check": state_check, "film": film_op, "import_url": import_url,
              "transcript": read_transcript, "timing": timing, "read_text": read_text, "read_skill": read_skill}
 
     async def plan(message):
         """One answer of the model, timed, and the steps of it that can run. Returns (answer, steps, dropped, seconds)."""
         asked = time.monotonic()
-        system = agent.SYSTEM.format(max_steps=agent.MAX_STEPS)
+        system = agent.system()
         # A long skill goes first, in the system prompt: every call of a run then opens the same way, and a hosted
         # service can read that opening from its cache instead of anew (the rest of the message changes as the run goes).
         first = long_skill and with_tools
         if first:
             system += "\n\n" + agent.skills_part(guides)
-        asking = agent.question(message, offers, selection, state.catalog.current(state.settings.default_workflow),
-                                agent.past_turns(body.get("history")), pinned, recent, memory.book_for_model(book), "" if first else guides,
-                                body.get("direction") or "")
-        if with_tools:   # the model works in a loop of tool calls (a local one too, unless local_tools is off)
-            answer = await state.agent.ask_with_tools(system, asking, [o["id"] for o in offers], tools, finishing, rounds=rounds, **_model(body))
+        parts = agent.question_parts(message, offers, selection, state.catalog.current(state.settings.default_workflow),
+                                     agent.past_turns(body.get("history")), pinned, recent, memory.book_for_model(book),
+                                     "" if first else guides, body.get("direction") or "")
+        full = "\n\n".join(text for _, text in parts)
+        # A conversation with Claude goes on in one session (a thread): a later message sends only what is new.
+        thread = _thread(state, user, project, body, chosen_model, system)
+        threaded[:] = [thread] if thread is not None else []
+
+        async def asked_with(asking):
+            going = {"thread": thread} if thread is not None else {}
+            if with_tools:   # the model works in a loop of tool calls (a local one too, unless local_tools is off)
+                return await state.agent.ask_with_tools(system, asking, [o["id"] for o in offers], tools, finishing, rounds=rounds,
+                                                        **going, **_model(body))
+            return await state.agent.ask(system, asking, [o["id"] for o in offers], **going, **_model(body))
+
+        if thread is None:
+            answer = await asked_with(full)
         else:
-            answer = await state.agent.ask(system, asking, [o["id"] for o in offers], **_model(body))
+            going_on = bool(thread.get("id"))
+            asking = agent.follow_up(parts, thread["seen"]) if going_on else full
+            thread.update(seen=agent.fingerprints(parts), full=full)
+            try:
+                answer = await asked_with(asking)
+            except agent.ContextLost:   # its session is gone: the conversation starts a new one, with the whole message
+                thread["id"] = None
+                answer = await asked_with(full)
+            # A turn another model answered (Claude was busy) is not in the session: the next message starts a new one.
+            thread["stood_in"] = answer.get("model") != chosen_model
+            if going_on:
+                noted("book", "Went on with this conversation's Claude session: sent only what is new")
         seconds = time.monotonic() - asked
         # Each answer is charged at the price of the model that gave it (another one may have stood in for a busy one).
         used = answer.get("model") or chosen_model
@@ -1414,7 +1497,7 @@ async def _planning(request, user, body, instruction, project):
         if step.get("settings"):
             step["shot_id"] = uuid.uuid4().hex[:8]
             step["settings"]["shot"] = {"id": step["shot_id"], "take": 1}
-            if run:   # counted against the run's budget
+            if run:   # the job is tagged as the run's
                 step["settings"]["run_of"] = run
     if steps:
         yield activity("plan", "Checked and priced {} {}".format(len(steps), "step" if len(steps) == 1 else "steps"))
@@ -1427,7 +1510,10 @@ async def _planning(request, user, body, instruction, project):
         state.notify(user["id"])   # the open pages show the new balance
     # A reply left empty: in a long run the model stopped mid-step, and "go" carries on; otherwise it has nothing to make.
     nothing = RUN_STOPPED if run and long_skill else "Tell me what you would like to see and I will plan it."
-    yield {"type": "plan", "reply": reply or ("Here is the plan." if steps else nothing),
+    reply = reply or ("Here is the plan." if steps else nothing)
+    for thread in threaded:   # the next message goes on with this session when its history ends with this reply
+        _keep_thread(state, user, project, body, chosen_model, thread, None if thread.get("stood_in") else reply)
+    yield {"type": "plan", "reply": reply,
            "thought": str(answer.get("thought") or ""), "activity": log, "seconds": round(time.monotonic() - started, 1),
            "chips": chips, "direction": answer.get("direction") or "", "steps": steps, "total": sum(s["credits"] for s in steps), "llm": charged,
            "balance": state.credits.balance(user["id"]), "question": answer.get("question"), "run": run,
@@ -1435,7 +1521,7 @@ async def _planning(request, user, body, instruction, project):
            # a turn that made nothing but saved its work (a stage of planning) goes on at once
            "continues": bool(run and long_skill and not answer.get("question")
                              and (steps or runs.saved_since(state.db, user["id"], run, since))),
-           "budget": runs.budget(state.db, user["id"], run) if run and long_skill else None, "tokens": tokens}
+           "tokens": tokens}
 
 
 async def _plan_step(state, proposed, instruction, steps, made_by, schemas, names, kinds, videos, pinned, project, shapes, assets=None, menu=None):
@@ -1485,8 +1571,15 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
             proposed = dict(proposed, prompt=proposed["prompt"].rstrip() + "\n" + words)
     # A step can start on what an earlier step of this plan makes, if that is a picture or a video
     # and this workflow has a first frame to put it in.
-    earlier = made_by.get(proposed.get("after"))
     first_frame = (schema.get("slots") or {}).get("first_frame")
+    place = _place(proposed)
+    before = steps[-1] if steps else None
+    follows = len(steps) - 1 if place and before and before.get("settings") and before["kind"] == "video" and before.get("place") == place else None
+    # The shot just before was in the same place: this one goes on from its last frame, unless it is told what to start on.
+    if follows is not None and schema["id"].startswith("video/") and first_frame and not proposed.get("after") \
+            and not proposed.get("start_from") and not any(use["slot"] == first_frame for use in uses):
+        proposed = dict(proposed, after=next((n for n, at in made_by.items() if at == follows), 0))
+    earlier = made_by.get(proposed.get("after"))
     chained = earlier is not None and earlier < len(steps) and bool(first_frame) and steps[earlier]["kind"] != "audio"
     # A song's length is not left to the model, which likes to ask for the longest one (and it is paid by the second):
     # the length the user named, or else the video shots planned before it, rounded up to a length the workflow offers.
@@ -1514,7 +1607,15 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
                                    {"step": earlier, "slot": first_frame} if chained else None, agent.why(proposed)))
     steps[-1]["camera"] = camera.clean(proposed)
     steps[-1]["proposal"] = original
+    steps[-1]["place"] = place
+    if follows is not None and not chained:   # not started on it, but still checked against it
+        steps[-1]["follows"] = follows
     return None
+
+
+def _place(step):
+    """Where a shot happens, as compared between shots: its "place" in lower case, spaces made single."""
+    return " ".join(str(step.get("place") or "").lower().split())[:80]
 
 
 def _orientation(schema, settings, ctx):

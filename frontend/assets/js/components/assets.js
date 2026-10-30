@@ -2,15 +2,7 @@
 // (The saved assets of before are the kit of each project now: see kit.js.)
 
 import { api } from '../api.js';
-import { el } from '../dom.js';
-
-function openDialog(...content) {
-  const dialog = el('dialog', {}, ...content);
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
-  return dialog;
-}
+import { el, openDialog } from '../dom.js';
 
 // Resolves with a library item (something made or uploaded, in any project) the user picks, or null. kinds: the
 // kinds it may be, e.g. ['image', 'video']; all when not given.

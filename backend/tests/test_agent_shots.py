@@ -170,6 +170,48 @@ def test_the_final_cut_joins_the_shots_under_music(client):
     item = made_by(client, client.post("/api/edit/assemble", json={"name": "The film", "music": song, "clips": [{"id": ids[0]}, {"id": ids[1]}]}))
     assert (item["name"], item["workflow"], item["context"]["duration"]) == ("The film", "edit/assemble", 2.0)
     assert asyncio.run(media.probe(folder / item["filename"]))["audio"]
+    # a clip marked to fade overlaps the one before by media.FADE
+    faded = made_by(client, client.post("/api/edit/assemble", json={"clips": [{"id": ids[0]}, {"id": ids[1], "fade": True}]}))
+    assert abs(faded["context"]["duration"] - (2.0 - media.FADE)) < 0.01
+    assert sorted(p.name for p in folder.iterdir() if "_joined" in p.name or "_mixed" in p.name) == []   # nothing left on the way
+
+
+def test_music_goes_down_under_speech_and_the_film_is_levelled(tmp_path):
+    import asyncio
+    import re
+    from scene import media
+    film, song = tmp_path / "film.mp4", tmp_path / "song.wav"
+    # 2 s of picture, its own sound loud for the first second and silent for the second
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=gray:s=64x64:r=24:d=2", "-f", "lavfi",
+                              "-i", "sine=frequency=200:duration=2,volume='if(lt(t,1),0.9,0)':eval=frame", "-shortest", "-pix_fmt", "yuv420p", film))
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000:duration=2", song))
+    mixed, levelled = tmp_path / "mixed.mp4", tmp_path / "levelled.mp4"
+    asyncio.run(media.add_sound(film, song, mixed))
+
+    def music_level(path, start):   # the loudness of the 1 kHz music alone, a band away from the 200 Hz voice
+        said = asyncio.run(media._ffmpeg("-ss", str(start), "-t", "0.5", "-i", path, "-af", "highpass=f=700,highpass=f=700,highpass=f=700,volumedetect", "-f", "null", "-", check=False))
+        return float(re.search(r"mean_volume: (-?[\d.]+) dB", said).group(1))
+
+    assert music_level(mixed, 0.3) < music_level(mixed, 1.3) - 6   # quieter while the voice is loud
+    asyncio.run(media.level(mixed, levelled))
+    said = asyncio.run(media._ffmpeg("-i", levelled, "-af", "ebur128", "-f", "null", "-", check=False))
+    assert abs(float(re.findall(r"I:\s+(-?[\d.]+) LUFS", said)[-1]) + 14) < 3
+
+
+def test_the_review_looks_close_at_the_sharpest_change(tmp_path):
+    import asyncio
+    from scene import media, review
+    clip = tmp_path / "clip.mp4"
+    # 2 s of black that turns white at 1 s: the strip is taken there
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=24:d=1", "-f", "lavfi",
+                              "-i", "color=white:s=64x64:r=24:d=1", "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]",
+                              "-pix_fmt", "yuv420p", clip))
+    labels = [label for label, _ in asyncio.run(review.result_frames(clip, "video"))]
+    assert len(labels) == review.CLIP_FRAMES + 3
+    assert labels[-2] == "at the sharpest change, 1.00 s" and labels[-3].startswith("just before")
+    still = tmp_path / "still.mp4"   # nothing changes: no strip
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=gray:s=64x64:r=24:d=2", "-pix_fmt", "yuv420p", still))
+    assert len(asyncio.run(review.result_frames(still, "video"))) == review.CLIP_FRAMES
 
 
 # ---------------------------------------------------------------- skills written by people

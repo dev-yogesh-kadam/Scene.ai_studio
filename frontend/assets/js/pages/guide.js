@@ -6,7 +6,7 @@ import { KIT } from '../components/kit.js';
 
 const SECTIONS = [
   { id: 'start', title: 'Getting started', body: [
-    ['p', 'Scene.ai turns what you describe into pictures, videos, music and voice, and puts them together into finished videos. Work happens in projects: each project has its own canvas, timeline, agent conversations and ' + KIT + '.'],
+    ['p', 'Scene.ai turns what you describe into pictures, videos, music and voice, and puts them together into finished videos. Work happens in projects: each project has its own canvas, timeline, agent conversations and its ' + KIT + '.'],
     ['steps', ['Open Projects from the menu at the top left and make a project.',
       'Open its main canvas, or add a module for a separate part of the work, such as an episode.',
       'Ask the agent for what you want, or make something yourself from the panel beside the canvas.',

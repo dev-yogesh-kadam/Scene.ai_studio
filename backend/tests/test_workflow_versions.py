@@ -4,7 +4,7 @@ render server lacks, who a workflow is offered to, and test runs."""
 import json
 
 from scene import versions
-from test_api import ADMIN, console, post_job, register
+from test_api import console, post_job, register
 
 BOB = {"email": "bob@example.com", "password": "another one"}
 

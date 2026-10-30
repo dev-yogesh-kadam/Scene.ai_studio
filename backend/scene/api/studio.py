@@ -16,10 +16,9 @@ from .. import sharing, health, kit, media, memory, runs
 from ..db import as_everyone
 from ..catalog import KINDS
 from ..comfy import workflows
-from ..agent import AgentError
 from ..references import media_kind, owns_upload, read_upload, upload_reference
 from ..security import same_origin
-from .deps import COOKIE, current_user, limited, user_for_token
+from .deps import COOKIE, current_user, limited, uploading, user_for_token
 
 router = APIRouter(prefix="/api", tags=["studio"])
 PAGE = re.compile(r"^#/[a-z]{1,20}$")   # a page of the studio, as the browser names it: "#/canvas"
@@ -98,14 +97,19 @@ def switched_on(state, workflow_id, user):
 
 @router.get("/status")
 async def status(request: Request, user: dict = Depends(current_user)):
+    """Whether the render server answers, and the version of the page files (a tab opened before a change offers to
+    reload). Every open tab asks every 15 s: the render server is asked once for all of them, every few seconds."""
     state = request.app.state
-    try:
-        stats = await state.comfy.stats()
-        state.saw_server(True)
-        return {"online": True, "version": stats.get("system", {}).get("comfyui_version"), "page": state.page_version()}
-    except (httpx.HTTPError, ValueError):
-        state.saw_server(False)
-        return {"online": False, "page": state.page_version()}   # the version of the page files, for a tab opened before a change
+
+    async def ask():
+        try:
+            stats = await state.comfy.stats()
+            state.saw_server(True)
+            return {"online": True, "version": stats.get("system", {}).get("comfyui_version")}
+        except (httpx.HTTPError, ValueError):
+            state.saw_server(False)
+            return {"online": False}
+    return dict(await health.remembered(state, "status", ask), page=state.page_version())
 
 
 @router.get("/announcement")
@@ -183,7 +187,7 @@ async def _video_seconds(state, data, filename):
         path.unlink(missing_ok=True)
 
 
-@router.post("/jobs", dependencies=[limited("jobs", 30, 60)])
+@router.post("/jobs", dependencies=[limited("jobs", 30, 60), uploading])
 async def create_job(request: Request, user: dict = Depends(current_user)):
     """Multipart form: "settings" (JSON) plus one file per filled reference slot, named "ref:<slot id>".
 
@@ -291,9 +295,6 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
         raise HTTPException(429, over)
     run_of = settings.get("run_of") if isinstance(settings.get("run_of"), str) and runs.RUN.match(settings["run_of"]) else ""
     settings["run_of"] = run_of
-    over = runs.budget_problem(state.db, user["id"], run_of, quote["credits"])
-    if over:
-        raise HTTPException(402, over)
     if not state.credits.charge(user["id"], quote["credits"], "generation"):
         raise HTTPException(402, "This needs {} credits and you have {}. Ask an admin for more.".format(
             quote["credits"], state.credits.balance(user["id"])))
@@ -345,6 +346,10 @@ async def events(ws: WebSocket):
             try:
                 said = json.loads(await ws.receive_text())
                 if said.get("ping"):
+                    # The session is checked again: one signed out, ended by an admin or of a disabled account stops here.
+                    if user_for_token(state.db, ws.cookies.get(COOKIE)) is None:
+                        await ws.close(code=4401)
+                        return
                     await ws.send_text(state.live_message(user["id"]))
                     continue
                 page = str(said.get("page", ""))

@@ -1,5 +1,6 @@
 """Shared request helpers: who is signed in, and how often they may ask."""
 
+import asyncio
 import time
 
 from fastapi import Depends, HTTPException, Request
@@ -20,7 +21,7 @@ def user_for_token(db, token, console=False):
         return None
     hashed, now = token_hash(token), time.time()
     user = db.one(
-        "SELECT u.id, u.email, u.name, u.role, u.credits, u.created, u.agent, u.mfa_enabled, s.seen AS session_seen, "
+        "SELECT u.id, u.email, u.name, u.role, u.credits, u.created, u.mfa_enabled, s.seen AS session_seen, "
         "v.name AS viewer FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN users v ON v.id = s.view_as "
         "WHERE s.token_hash = ? AND s.expires > ? AND s.console = ? AND u.disabled = 0",
         (hashed, now, int(console)))
@@ -30,14 +31,7 @@ def user_for_token(db, token, console=False):
         viewer = user.pop("viewer")
         if viewer:   # an admin looking at the studio as this user (api/admin.view_as): read only
             user["viewing"] = {"by": viewer}
-        user["agent"] = may_use_agent(user)
     return user
-
-
-def may_use_agent(user):
-    """Every account has the agent (17 October: every user sees the same studio). What a message costs is set per
-    model in the admin console's Pricing. The `agent` column of users is no longer read."""
-    return True
 
 
 async def current_user(request: Request):
@@ -49,12 +43,6 @@ async def current_user(request: Request):
     if user.get("viewing") and request.method not in ("GET", "HEAD", "OPTIONS"):
         raise HTTPException(403, "This is a read-only view of {}'s studio: nothing can be changed or made.".format(user["name"]))
     act_for(user["id"])
-    return user
-
-
-async def agent_user(user: dict = Depends(current_user)):
-    if not user["agent"]:
-        raise HTTPException(403, "The agent is coming soon. An admin can give your account access to it.")
     return user
 
 
@@ -97,3 +85,19 @@ def limited(name, limit, seconds, by="user"):
             raise HTTPException(429, "Too many requests. Wait a little and try again.",
                                 headers={"Retry-After": str(limits.retry_after(key, seconds))})
     return Depends(check)
+
+
+# Requests that carry files (uploads, a generation with references) are handled a few at a time: each may hold a file of
+# up to 200 MB in memory while it is checked and sent on, so many at once could use up the server's memory.
+UPLOADS_AT_ONCE = 4
+_uploads = None
+
+
+async def _one_upload():
+    global _uploads
+    _uploads = _uploads or asyncio.Semaphore(UPLOADS_AT_ONCE)
+    async with _uploads:
+        yield
+
+
+uploading = Depends(_one_upload)

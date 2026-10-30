@@ -5,8 +5,9 @@ from conftest import ROOT
 from scene.comfy import workflows
 
 VIDEO = ROOT / "workflows" / "video"
-ARCHIVE = ROOT / "workflows" / "archive"
-GONE = ARCHIVE / "video_removed_2026-10-26"   # out of the studio, kept to test the workflow engine on
+# Workflows out of the studio (drafts, and video workflows it no longer offers), kept to test the workflow engine on.
+ARCHIVE = Path(__file__).parent / "fixtures" / "workflows"
+GONE = ARCHIVE / "gone"
 # ComfyUI's definitions of the node types some workflows can't be read without (saved from a real server).
 NODES = json.loads((Path(__file__).parent / "fixtures" / "node_definitions.json").read_text(encoding="utf-8"))
 
@@ -162,15 +163,12 @@ def master(**settings):
     return workflows.build_prompt(wf, {"values": {"100:value": "She waves."}, **settings})
 
 
-def test_every_video_workflow_has_a_presets_file_and_only_drafts_stay_archived():
+def test_every_video_workflow_has_a_presets_file():
     flows = sorted(p.stem for p in VIDEO.glob("*.json") if not p.name.endswith(".studio.json"))
     assert len(flows) == 10 and {"h3_chunk", "h3_all_in_one", "video_wan_animate2", "video_v2v_wan_vace"} <= set(flows)
     for name in flows:
         profile = json.loads((VIDEO / (name + ".studio.json")).read_text(encoding="utf-8"))
         assert profile["title"] and not {r.split("/")[1] for r in profile.get("replaces", [])} & set(flows), name   # it replaces only what has gone
-    assert sorted(p.name for p in ARCHIVE.glob("*.json")) == [   # kept, not offered: drafts, and two the render PC cannot run yet
-        "FreeVideo-All-in-One.json", "ai_influencer_seedvr2_backup.json", "h3_director_draft_api.json", "h3_director_draft_backup.json",
-        "llm_qwen3vl_text_gen.json"]
 
 
 def test_every_picture_workflow_has_a_presets_file_and_the_new_family_its_shape_and_upscale():

@@ -42,7 +42,7 @@ def test_entries_come_in_from_a_canvas_item_a_file_and_a_script_and_can_be_chang
     assert clearing["type"] == "location" and not clearing["always"]
     script = client.post("/api/kit", json={"text": "VIOLET: Do I know you?", "name": "Ep 135", "project_id": project}).json()
     assert (script["type"], script["kind"]) == ("script", "text")
-    assert client.get("/api/assets/%d/file" % script["id"]).content == b"VIOLET: Do I know you?"
+    assert client.get("/api/kit/%d/file" % script["id"]).content == b"VIOLET: Do I know you?"
     # the same file again is the same entry
     again = client.post("/api/kit", files={"file": ("other-name.png", PNG + b"c", "image/png")}, data={"project_id": str(project)}).json()
     assert again["id"] == clearing["id"]
@@ -87,25 +87,6 @@ def test_the_always_on_entries_fill_the_slots_meant_for_them_in_order(client):
     assert words.count('"Violet"') == 1 and '"leave_out"' in words
 
 
-def test_the_cast_of_before_becomes_the_always_on_entries_of_the_kit(client):
-    me = register(client)
-    db = client.app.state.db
-    project = client.post("/api/projects", json={"name": "Old"}).json()["id"]
-    mira, side, harbour, song = (picture(client, me["id"], n, k, project) for n, k in
-                                 (("mira", "image"), ("mira-side", "image"), ("harbour", "image"), ("song", "audio")))
-    client.put("/api/boards/cast", json={"project": project, "data": {"character_1": mira, "character_2": side,
-                                                                      "background": harbour, "voice": song, "prop": 999}})
-    db.set_setting("kit_migrated", "0")
-    from scene.db import as_everyone
-    with as_everyone():
-        moved = kit.migrate_cast(db, client.app.state.assets_dir, client.app.state.outputs)
-    assert moved == 4 and kit.migrate_cast(db, client.app.state.assets_dir, client.app.state.outputs) == 0   # once
-    on = kit.always(db, me["id"], project)
-    assert [(e["name"], e["type"]) for e in on] == [("mira", "character"), ("mira", "character"), ("harbour", "location"), ("song", "voice")]
-    fills = client.get("/api/cast?project=%d&workflow=video/h3_all_in_one" % project).json()["fills"]
-    assert [(f["name"], f["slot"]) for f in fills] == [("mira", "201:image"), ("mira", "202:image"), ("harbour", "205:image"), ("song", "208:audio")]
-
-
 def test_a_planned_shot_gets_the_always_on_entries_but_those_it_leaves_out(client, monkeypatch):
     me = register(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
@@ -125,24 +106,24 @@ def test_the_agent_keeps_and_names_entries_itself(client, monkeypatch):
     me = register(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     sheet = picture(client, me["id"], "sheet", project=project)
-    seen = hosted(monkeypatch, client, {"tool": "kit_save", "item": sheet, "text": "Maya", "op": "character", "settings": "always"},
+    seen = hosted(monkeypatch, client, {"tool": "book_save", "item": sheet, "text": "Maya", "op": "character", "settings": "always"},
                   {"tool": "finish", "reply": "Kept Maya.", "steps": []})
     plan = client.post("/api/agent/plan", json={"instruction": "keep that sheet as Maya", "project_id": project}).json()
-    assert plan["reply"] == "Kept Maya." and any(e["text"] == "Kept “Maya” (character) in the NeuralCore" for e in plan["activity"])
+    assert plan["reply"] == "Kept Maya." and any(e["text"] == "Kept “Maya” (character) in the asset book" for e in plan["activity"])
     told = [m["content"] for m in seen[-1] if m["role"] == "user"]
-    entry = json.loads(next(t for t in told if t.startswith("Result of kit_save")).split("\n", 1)[1])
+    entry = json.loads(next(t for t in told if t.startswith("Result of book_save")).split("\n", 1)[1])
     assert entry["name"] == "Maya" and entry["always"] is True
     # and renames one
-    hosted(monkeypatch, client, {"tool": "kit_save", "asset": entry["asset"], "text": "Maya Rao", "op": "character"},
+    hosted(monkeypatch, client, {"tool": "book_save", "asset": entry["asset"], "text": "Maya Rao", "op": "character"},
            {"tool": "finish", "reply": "Renamed.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "her name is Maya Rao", "project_id": project})
     assert [e["name"] for e in kit.entries(client.app.state.db, me["id"], project)] == ["Maya Rao"]
-    # outside a project there is no NeuralCore: the agent is told so, and nothing is kept
-    seen = hosted(monkeypatch, client, {"tool": "kit_save", "item": sheet, "text": "Lone", "op": "character"},
+    # outside a project there is no asset book: the agent is told so, and nothing is kept
+    seen = hosted(monkeypatch, client, {"tool": "book_save", "item": sheet, "text": "Lone", "op": "character"},
                   {"tool": "finish", "reply": "No project.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "keep it as Lone"})
     told = [m["content"] for m in seen[-1] if m["role"] == "user"]
-    assert any("There is no NeuralCore here" in t for t in told)
+    assert any("There is no asset book here" in t for t in told)
     assert not client.app.state.db.one("SELECT 1 FROM assets WHERE name = 'Lone'")
 
 
@@ -158,7 +139,7 @@ def test_a_long_run_keeps_pictures_nobody_named_and_the_agent_is_told_to_ask(cli
                                                 "run": "pm-k", "project_id": project}).json()
     entries = {e["name"]: e for e in kit.entries(client.app.state.db, me["id"], project)}
     assert entries["Maya"]["named"] == 1 and entries["stranger"]["named"] == 0
-    assert any(e["text"] == "Kept 1 picture without a name in the NeuralCore" for e in plan["activity"])
+    assert any(e["text"] == "Kept 1 picture without a name in the asset book" for e in plan["activity"])
     told = seen[0][1]["content"]
     assert '"unnamed": true' in told and "ask the" in seen[0][0]["content"]
     # named later, it is an entry like any other
@@ -169,7 +150,7 @@ def test_a_long_run_keeps_pictures_nobody_named_and_the_agent_is_told_to_ask(cli
 def test_assets_of_no_project_are_not_used_anywhere(client):
     me = register(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
-    for origin in ("saved", "kit", "upload"):   # what was kept before every NeuralCore belonged to a project
+    for origin in ("saved", "kit", "upload"):   # what was kept before every asset book belonged to a project
         client.app.state.db.run("INSERT INTO assets (user_id, name, tag, kind, filename, size, created, origin) "
                                 "VALUES (?, 'Meera', 'character', 'image', 'meera.png', 1, 1, ?)", (me["id"], origin))
     listed = client.get("/api/kit?project=%d" % project).json()
@@ -177,18 +158,6 @@ def test_assets_of_no_project_are_not_used_anywhere(client):
     assert client.get("/api/kit").json() == {"entries": [], "project": False, "types": listed["types"]}
     assert memory.book(client.app.state.db, me["id"], project) == [] and memory.book(client.app.state.db, me["id"], 0) == []
     assert client.post("/api/kit/import", json={"project_id": project, "ids": [1]}).status_code in (404, 405)
-    # and they are deleted, files too, while a project's entry with the same file keeps it
-    folder = client.app.state.assets_dir / str(me["id"])
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / "meera.png").write_bytes(PNG)
-    (folder / "lone.png").write_bytes(PNG)
-    db = client.app.state.db
-    db.run("INSERT INTO assets (user_id, name, tag, kind, filename, size, created, origin) VALUES (?, 'Lone', 'other', 'image', 'lone.png', 1, 1, 'saved')", (me["id"],))
-    db.run("INSERT INTO assets (user_id, name, tag, kind, filename, size, created, origin, project_id) "
-           "VALUES (?, 'Meera', 'character', 'image', 'meera.png', 1, 1, 'kit', ?)", (me["id"], project))
-    assert kit.remove_global(db, client.app.state.assets_dir) == 4
-    assert not db.one("SELECT 1 FROM assets WHERE project_id IS NULL") and kit.remove_global(db, client.app.state.assets_dir) == 0
-    assert not (folder / "lone.png").exists() and (folder / "meera.png").exists()
 
 
 def test_at_names_in_a_prompt_go_into_the_slots_that_fit_them(client, monkeypatch):

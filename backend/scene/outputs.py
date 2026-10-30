@@ -54,12 +54,7 @@ class Outputs:
                 user = self.db.one("SELECT email FROM users WHERE id = ?", (user_id,))
             if user is None:
                 return self.root / str(user_id)
-            name = folder_name(user["email"])
-            # Folders used to be named by user id. One that is still around is renamed the first time it is needed.
-            old = self.root / str(user_id)
-            if old.is_dir() and not (self.root / name).exists():
-                old.rename(self.root / name)
-            self.names[user_id] = name
+            self.names[user_id] = folder_name(user["email"])
         return self.root / self.names[user_id]
 
     def relative(self, project_id):
@@ -135,27 +130,6 @@ class Outputs:
         if relative.parts and relative.parts[0] != NO_PROJECT and target.is_dir():
             shutil.rmtree(target, ignore_errors=True)
 
-    def file_all(self):
-        """Put every item that is not in its project's folder (saved before projects had folders, by an older copy of
-        the app, or before the Main canvas folder) into it. Done at every start; an item in its place is not touched,
-        and one whose file is missing keeps its name."""
-        moved, places, emptied = 0, {}, set()
-        for row in self.db.all("SELECT id, user_id, project_id, filename FROM generations"):
-            if row["project_id"] not in places:
-                places[row["project_id"]] = self.relative(row["project_id"]).as_posix()
-            if row["filename"].rpartition("/")[0] == places[row["project_id"]]:
-                continue
-            path = self.folder(row["user_id"]) / row["filename"]
-            if path.is_file():
-                self.db.run("UPDATE generations SET filename = ? WHERE id = ?", (self.settle(row["user_id"], row["project_id"], path), row["id"]))
-                emptied.add(path.parent / ".posters")
-                moved += 1
-        for posters in emptied:   # a .posters folder its files' posters all left
-            try:
-                posters.rmdir()
-            except OSError:
-                pass
-        return moved
 
 
 def _free(path):

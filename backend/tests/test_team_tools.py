@@ -3,7 +3,7 @@ sent to many workflows at once, free, for admins only."""
 
 import json
 
-from test_api import ADMIN, console, register
+from test_api import console, register
 
 BOB = {"name": "Bob", "email": "bob@example.com", "password": "correct horse 2"}
 

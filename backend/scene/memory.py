@@ -12,7 +12,6 @@ generations.about), so the agent knows what is in a picture and not only its nam
 
 import asyncio
 import base64
-import hashlib
 import json
 import re
 import shutil
@@ -289,7 +288,7 @@ def kit_row(row):
     return {"id": row["id"], "name": row["name"], "tag": row["tag"], "type": TYPES.get(row["tag"], "other"), "kind": row["kind"],
             "about": row["about"], "use_note": row["use_note"], "origin": row["origin"], "created": row["created"],
             "always": bool(row["always"]), "named": bool(row["named"]), "position": row["position"], "item": row["made_from"],
-            "url": "/api/assets/{}/file".format(row["id"])}
+            "url": "/api/kit/{}/file".format(row["id"])}
 
 
 # ---------------------------------------------------------------- looking at pictures
@@ -305,10 +304,11 @@ async def _picture(path):
     return base64.b64encode(still.read_bytes()).decode("ascii")
 
 
-async def describe_missing(state, user_id, entries, limit=DESCRIBE_AT_ONCE, seconds=DESCRIBE_SECONDS):
+async def describe_missing(state, user_id, entries, limit=DESCRIBE_AT_ONCE, seconds=DESCRIBE_SECONDS, model=None):
     """Have the agent's model look at the pictures and videos of the book that have no description yet, up to
     `limit` of them, the ones given in full first, and keep what it writes. The entries are updated in place. A model
-    that cannot see, a missing file or a slow answer leaves an entry as it is; it is not tried again until a restart."""
+    that cannot see, a missing file or a slow answer leaves an entry as it is; it is not tried again until a restart.
+    model: the one that looks; the agent's usual one when not given."""
     tried = getattr(state, "described_tried", None)
     if tried is None:
         tried = state.described_tried = set()
@@ -324,7 +324,7 @@ async def describe_missing(state, user_id, entries, limit=DESCRIBE_AT_ONCE, seco
             path = _path(state, user_id, entry["_file"])
             if not path.is_file():
                 return False
-            shows = await state.agent.describe(await _picture(path), entry["name"], entry["kind"])
+            shows = await state.agent.describe(await _picture(path), entry["name"], entry["kind"], **({"model": model} if model else {}))
         except Exception:   # noqa: BLE001 - a description is a help, never a reason for the plan to fail
             return False
         entry["shows"] = shows if not entry.get("brief") else shows[:90]

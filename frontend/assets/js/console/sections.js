@@ -153,7 +153,6 @@ async function openUser(ctx, id) {
       el('div', { class: 'drawer-title' }, el('div', { class: 'avatar' }, (u.name[0] || '?').toUpperCase()),
         el('div', {}, el('b', {}, u.name), el('div', { class: 'muted' }, u.email)),
         el('span', { class: 'pill ' + (u.role !== 'user' ? 'running' : 'queued') }, u.role),
-        u.role !== 'admin' && u.agent ? el('span', { class: 'pill done' }, 'Agent') : null,
         u.mfa_enabled ? el('span', { class: 'pill done' }, 'Two-step') : null,
         u.disabled ? el('span', { class: 'pill failed' }, 'Disabled') : null),
       el('div', { class: 'tiles small-tiles' },
@@ -417,7 +416,7 @@ function backupsCard(b, ctx) {
     el('p', { class: 'muted small' },
       'A backup is a dated copy of the studio\'s database: the accounts, projects, canvases, jobs, credits, prices and settings. ',
       'With it goes a copy of config.json, which holds the server addresses and keys. ',
-      'The finished pictures, videos and sounds and the kit\'s uploads are copied too, into the files folder beside them: ',
+      'The finished pictures, videos and sounds and the asset book\'s uploads are copied too, into the files folder beside them: ',
       'only what is new or changed each time, and a file deleted in the studio keeps its copy there.'),
     el('p', { class: 'muted small' }, b.on
       ? `A copy is made each time the app starts and once a day while it runs. The last ${b.keep} days are kept in ${b.folder}. A copy made today replaces today's earlier one.`

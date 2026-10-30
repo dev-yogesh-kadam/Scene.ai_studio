@@ -44,13 +44,12 @@ Stop the app with `Ctrl+C`.
 | `backend/scene/` | The server (FastAPI). `api/` holds the routes, `comfy/` talks to ComfyUI, `jobs.py` is the queue. |
 | `backend/tests/` | Tests. Run them with `pytest` from `backend/`. |
 | `frontend/` | The web app: plain HTML, CSS and JavaScript modules, no build step. |
-| `workflows/video/`, `workflows/image/`, `workflows/audio/` | The ComfyUI workflows users can run. `workflows/archive/` is not shown in the app. |
+| `workflows/video/`, `workflows/image/`, `workflows/audio/` | The ComfyUI workflows users can run. `workflows/reports/` holds the render PC's model lists and is not read by the app. |
 | `workflows/upscaler/` | Workflows that make a video the user has larger. They appear as "Upscale video" on the Canvas. |
 | `motion/` | Motion graphics: the HyperFrames packages (`package.json`) and the templates. |
 | `scripts/` | Start scripts for each system, and `check_models.py`, which checks the agent's models and that no key can reach git. |
-| `docs/` | The [handover](docs/HANDOVER.md) (start here), [architecture](docs/architecture.md), [servers and folders](docs/servers.md), [how to add workflows](docs/workflows.md), [motion graphics](docs/motion.md) and the latest [code review](docs/code-review.md). |
+| `docs/` | Kept on this machine only (not in git): the [handover](docs/HANDOVER.md) (start here), [architecture](docs/architecture.md), [servers and folders](docs/servers.md), [how to add workflows](docs/workflows.md), [motion graphics](docs/motion.md) and the latest [code review](docs/code-review.md). |
 | `storage/` | Created at run time: the database and every user's files. Not in git. |
-| `legacy/` | The earlier command-line script, kept for reference. |
 
 ## What users can do
 
@@ -98,7 +97,8 @@ Stop the app with `Ctrl+C`.
 | `signup_credits` | `1000` | Credits a new account starts with. An admin can change it in the admin console. |
 | `signups_per_day` | `3` | New accounts one visitor address may make in a day. `0` means no limit. |
 | `storage_dir`, `workflows_dir` | `storage`, `workflows` | Where data and workflows live. Keep `storage_dir` outside the repo on a real installation, for example `C:/Scene/Data`: git can then never touch the database. |
-| `backup_dir`, `backup_keep` | `backups` inside `storage_dir`, `14` | Where a dated copy of the database and of `config.json` is written at every start and once a day, and how many days are kept. Best on another disk. `backup_keep: 0` turns it off. |
+| `backup_dir`, `backup_keep` | `backups` inside `storage_dir`, `14` | Where a dated copy of the database and of `config.json` (encrypted with the secret key) is written at every start and once a day, and how many days are kept. Best on another disk. `backup_keep: 0` turns it off. |
+| `secret_key_file` | `secret.key` | The key the API keys, two-step sign-in secrets and backup copies of `config.json` are encrypted with. Made on first start; `SCENE_SECRET_KEY` is used instead when set. Keep a copy apart from the backups: without it those secrets can't be read. |
 | `node_path` | the installed one | The Node.js program that renders motion graphics. See [docs/motion.md](docs/motion.md). |
 | `output_dir` | `outputs` inside `storage_dir` | Where finished images and videos are kept. Can be any folder, for example `C:/Scene/Outputs`. |
 

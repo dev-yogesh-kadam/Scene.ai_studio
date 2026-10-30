@@ -18,10 +18,10 @@ PAGE = 100              # leaves listed at a time
 MANY = 2000             # leaves written by one write_many
 
 
-BUDGET = "/budget"      # the most credits the run may spend: set by the user only, never by the agent's tools
 SKILL = "/skill"        # the long skill the run follows, kept from the message that named it: set by the studio only
 ATTACHED = "/attached"  # the library ids of every file attached in the run, so later messages still have them: the studio's
-PROTECTED = (BUDGET, SKILL, ATTACHED)
+THREADS = "/claude"     # the Claude session of the run's conversation, one for each project and model: the studio's
+PROTECTED = (SKILL, ATTACHED, THREADS)
 MOST_ATTACHED = 64
 
 
@@ -52,13 +52,13 @@ def _under(path):
     return "substr(path, 1, ?) = ?", (len(path) + 1, path + "/")
 
 
-def write(db, user_id, run, path, value, writer="", budget=False):
+def write(db, user_id, run, path, value, writer="", trusted=False):
     """Put a value at a leaf, replacing what was there. Refused when the path is a folder, sits under a leaf, the value
-    is too large, or the run is full; and a protected path (the budget, the run's skill, its attachments) unless
-    `budget`: only the user's or the studio's own code sets those."""
+    is too large, or the run is full; and a protected path (the run's skill, its attachments, its Claude sessions)
+    unless `trusted`: only the studio's own code sets those."""
     run, path = clean_run(run), clean_path(path)
-    if _protected(path) and not budget:
-        raise RunError("{} is kept by the studio and the user: the agent cannot set it.".format(path))
+    if _protected(path) and not trusted:
+        raise RunError("{} is kept by the studio: the agent cannot set it.".format(path))
     text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_VALUE:
         raise RunError("{} is too large to keep ({:,} characters; at most {:,}). Split it into several paths.".format(path, len(text), MAX_VALUE))
@@ -143,11 +143,11 @@ def coverage(db, user_id, run, path, against):
     return {"ok": not missing and bool(need), "missing": missing, "extra": sorted(have - set(need), key=_natural), "count": len(need)}
 
 
-def delete(db, user_id, run, path, budget=False):
-    """Remove a leaf, or a folder and everything in it (never the budget, unless `budget`). Returns how many went."""
+def delete(db, user_id, run, path, trusted=False):
+    """Remove a leaf, or a folder and everything in it (never a protected path, unless `trusted`). Returns how many went."""
     run, path = clean_run(run), clean_path(path)
-    if _protected(path) and not budget:
-        raise RunError("{} is kept by the studio and the user: the agent cannot set it.".format(path))
+    if _protected(path) and not trusted:
+        raise RunError("{} is kept by the studio: the agent cannot set it.".format(path))
     where, params = _under(path)
     return db.change("DELETE FROM run_state WHERE user_id = ? AND run = ? AND (path = ? OR " + where + ")", (user_id, run, path, *params))
 
@@ -161,41 +161,6 @@ def listing(db, user_id):
                         (user_id, row["run"]))
         row["status"] = json.loads(status["value"]) if status else None
     return rows
-
-
-def spent(db, user_id, run):
-    """Credits the run's jobs have taken, less what failed jobs gave back."""
-    row = db.one("SELECT COALESCE(SUM(cost - credits_refunded), 0) AS n FROM jobs WHERE user_id = ? AND run = ?", (user_id, clean_run(run)))
-    return int(row["n"] or 0)
-
-
-def budget(db, user_id, run):
-    """{"credits": the most it may spend, or None for no limit, "spent"}."""
-    found = read(db, user_id, run, BUDGET)
-    limit = found.get("value") if isinstance(found.get("value"), int) else None
-    return {"credits": limit, "spent": spent(db, user_id, run)}
-
-
-def set_budget(db, user_id, run, credits):
-    """Set the run's budget (a whole number of credits), or take it away (None)."""
-    if credits is None:
-        delete(db, user_id, run, BUDGET, budget=True)
-    elif isinstance(credits, bool) or not isinstance(credits, int) or credits < 0:
-        raise RunError("A budget is a whole number of credits.")
-    else:
-        write(db, user_id, run, BUDGET, credits, "user", budget=True)
-    return budget(db, user_id, run)
-
-
-def budget_problem(db, user_id, run, credits):
-    """Why a job of `credits` may not start in this run (its budget would be passed), or None."""
-    if not run:
-        return None
-    found = budget(db, user_id, run)
-    if found["credits"] is not None and found["spent"] + credits > found["credits"]:
-        return "This run's budget is {:,} credits and it has spent {:,}: this step needs {:,} more. Raise the budget to go on.".format(
-            found["credits"], found["spent"], credits)
-    return None
 
 
 def saved_any(db, user_id, run):
@@ -228,12 +193,32 @@ def keep_attached(db, user_id, run, ids):
     kept = kept_attached(db, user_id, run)
     more = [i for i in ids if isinstance(i, int) and i not in kept]
     if more:
-        write(db, user_id, run, ATTACHED, (kept + more)[-MOST_ATTACHED:], "studio", budget=True)
+        write(db, user_id, run, ATTACHED, (kept + more)[-MOST_ATTACHED:], "studio", trusted=True)
 
 
 def keep_skill(db, user_id, run, skill_id):
     """Remember the long skill this run follows, so the messages after the one that named it carry on with it."""
-    write(db, user_id, run, SKILL, skill_id, "studio", budget=True)
+    write(db, user_id, run, SKILL, skill_id, "studio", trusted=True)
+
+
+def _thread_path(project, model):
+    return "{}/p{}-{}".format(THREADS, int(project or 0), re.sub(r"[^a-z0-9_.-]+", ".", str(model or "").lower()).strip(".")[:48] or "model")
+
+
+def kept_thread(db, user_id, run, project, model):
+    """The thread (agent.chat) this run's conversation with `model` in `project` goes on in, or None."""
+    found = read(db, user_id, run, _thread_path(project, model))
+    return found["value"] if isinstance(found.get("value"), dict) else None
+
+
+def keep_thread(db, user_id, run, project, model, thread):
+    write(db, user_id, run, _thread_path(project, model), thread, "studio", trusted=True)
+
+
+def threads_of(db, user_id, run):
+    """Every thread the run keeps, to let their sessions go with it."""
+    found = read(db, user_id, run, THREADS, limit=PAGE)
+    return [leaf["value"] for leaf in found.get("leaves") or [] if isinstance(leaf.get("value"), dict)]
 
 
 STATE_REF = re.compile(r"^\$state:(/[a-z0-9_./-]+?)(/\*)?$")

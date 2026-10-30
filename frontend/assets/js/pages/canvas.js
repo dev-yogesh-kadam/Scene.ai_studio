@@ -83,13 +83,7 @@ export function render(view) {
     projectId: () => project || null,
   });
 
-  // The agent is open to admins and to users an admin has given it to. For the others its tab says so.
-  const comingSoon = () => ({ node: el('div', { class: 'agent-panel soon' },
-    el('div', { class: 'soon-box' }, icon('chat'), el('span', { class: 'soon-tag' }, 'Coming soon'), el('b', {}, 'The agent'),
-      el('p', { class: 'muted small' }, 'Describe what you want and have it planned for you. It is not open on your account yet.'),
-      el('button', { class: 'btn small', onclick: () => showPanel(true, 'quick') }, 'Use Quick actions'))),
-    attach: () => {}, selectionChanged: () => {}, reload: () => {}, redraw: () => {}, focus: () => {}, setFull: () => {}, destroy: () => {} });
-  const agent = !store.user.agent ? comingSoon() : agentTabs({
+  const agent = agentTabs({
     projectId: () => project,
     // What is selected on the canvas: offered to the message as one suggestion, and read when a message says "this".
     selection: () => items.filter((i) => selected.has(i.id)),
@@ -110,7 +104,7 @@ export function render(view) {
   });
   // The panel is open every time the canvas is entered, and remembers which of its two tabs was showing.
   const savedTab = localStorage.getItem('scene.panel.tab');   // Quick actions unless the agent or the memory was chosen
-  let tab = savedTab === 'agent' && store.user.agent ? 'agent' : savedTab === 'kit' || savedTab === 'memory' ? 'kit'
+  let tab = savedTab === 'agent' ? 'agent' : savedTab === 'kit' || savedTab === 'memory' ? 'kit'
     : savedTab === 'bulk' && store.user.role === 'admin' ? 'bulk' : 'quick';
   const tabsShown = () => TABS.filter((t) => !t.admin || store.user.role === 'admin');   // Bulk generation is an admin's tool
   const bulk = bulkPanel({ projectId: () => project, onQueued: () => refreshJobs().catch(() => {}) });
@@ -336,7 +330,7 @@ export function render(view) {
       const c = item.context || {};
       const label = el('b', {}, take(spot));
       // "+" on a frame adds it to the agent's message, opening the agent when it is not showing.
-      const toChat = store.user.agent && el('button', { type: 'button', class: 'frame-attach', title: 'Add to chat', 'aria-label': `Add ${item.name} to the chat`,
+      const toChat = el('button', { type: 'button', class: 'frame-attach', title: 'Add to chat', 'aria-label': `Add ${item.name} to the chat`,
         onpointerdown: (e) => e.stopPropagation(), ondblclick: (e) => e.stopPropagation(),
         onclick: (e) => { e.stopPropagation(); addToChat([item]); } }, icon('plus'));
       const node = el('div', { class: 'frame' + (selected.has(item.id) ? ' selected' : ''), style: `left:${spot.x}px;top:${spot.y}px`, title: item.name,
@@ -804,8 +798,8 @@ export function render(view) {
         picker.textContent = here ? (here.parent_name ? `${here.parent_name} › ${here.name}` : here.canvas_name ? `${here.name} › ${here.canvas_name}` : here.name) : 'All work';
         picker.onclick = here ? () => go('/project?id=' + (here.parent_id || here.id)) : null;
         picker.classList.toggle('linked', !!here);
-        shareButton.classList.toggle('hidden', !project);   // a NeuralCore belongs to a project: none for all work
-        picker.title = here ? 'Open the project: its kit and its modules' : 'Everything you have made';
+        shareButton.classList.toggle('hidden', !project);   // an asset book belongs to a project: none for all work
+        picker.title = here ? 'Open the project: its asset book and its modules' : 'Everything you have made';
       }
       tabTitle((projects.find((p) => p.id === project) || { name: 'Canvas' }).name);
       const [board] = await Promise.all([api('/api/boards/canvas?project=' + project), loadItems()]);

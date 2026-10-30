@@ -2,21 +2,21 @@
 
 import { api } from './api.js';
 import { consoleAddress, go, here, linkClicks, oldAddress } from './nav.js';
-import { creditMark, el, icon, segmented, tabTitle } from './dom.js';
+import { applyTheme, creditMark, el, icon, segmented, tabTitle } from './dom.js';
 import { store, subscribe, startLive, stopLive, refreshJobs } from './store.js';
-import { renderAuth } from './pages/auth.js';
-import { renderLanding } from './pages/landing.js';
-import * as home from './pages/home.js';
-import * as create from './pages/create.js';
-import * as canvas from './pages/canvas.js';
-import * as timeline from './pages/timeline.js';
-import * as projects from './pages/projects.js';
-import * as project from './pages/project.js';
-import * as library from './pages/library.js';
-import * as skills from './pages/skills.js';
-import * as settings from './pages/settings.js';
-import * as guide from './pages/guide.js';
-import * as analytics from './pages/analytics.js';
+
+// Each page's script is fetched the first time it is opened, not with the app: the canvas and the agent are most of it.
+const home = () => import('./pages/home.js');
+const create = () => import('./pages/create.js');
+const canvas = () => import('./pages/canvas.js');
+const timeline = () => import('./pages/timeline.js');
+const projects = () => import('./pages/projects.js');
+const project = () => import('./pages/project.js');
+const library = () => import('./pages/library.js');
+const skills = () => import('./pages/skills.js');
+const settings = () => import('./pages/settings.js');
+const guide = () => import('./pages/guide.js');
+const analytics = () => import('./pages/analytics.js');
 
 const root = document.getElementById('app');
 // The first page is where a visit starts. `group` is the heading a page sits under in the menu.
@@ -43,12 +43,6 @@ const THEMES = [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, 
 let leavePage = null;
 let leaveShell = null;
 
-function applyTheme(theme) {
-  if (theme === 'system') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = theme;
-  localStorage.setItem('scene.theme', theme);
-}
-
 // What someone who is not signed in sees: the landing page at the site's address, Create account at /signup, and
 // Sign in at /signin or at any page of the studio (an old link, or a session that ran out).
 let leaveDoor = null;
@@ -61,10 +55,16 @@ async function showAuth() {
   store.user = null;
   let info = { signup_open: false };
   try { info = await api('/api/auth/state'); } catch (e) { /* show the pages anyway */ }
-  const door = () => {
+  const door = async () => {
     if (store.user) return;
     const at = here();
-    if (at === '/') return renderLanding(root, { signupOpen: info.signup_open });
+    if (at === '/') {
+      const { renderLanding } = await import('./pages/landing.js');
+      if (!store.user && here() === at) renderLanding(root, { signupOpen: info.signup_open });
+      return;
+    }
+    const { renderAuth } = await import('./pages/auth.js');
+    if (store.user || here() !== at) return;   // signed in or moved on while it was fetched
     // Signing in always lands on All projects. replaceState does not fire a route event, so the page is routed once, by showApp.
     renderAuth(root, (user) => { store.user = user; leaveDoor(); history.replaceState(null, '', LANDING); showApp(); },
       at === '/signup' && info.signup_open ? 'register' : 'login');
@@ -193,16 +193,21 @@ function showApp() {
     server.textContent = store.online == null ? 'Checking render server…' : store.online ? 'Render server online' : 'Render server offline';
   };
   const drawCredits = () => credits.replaceChildren(creditMark(''), el('b', {}, Number(store.user.credits ?? 0).toLocaleString()), Number(store.user.credits) === 1 ? 'credit' : 'credits');
-  const route = () => {
+  let routing = 0;   // the newest route: a page fetched for an older one is not drawn
+  const route = async () => {
     // Where the admin console used to be, in an old link: it is a site of its own now.
     if (here() === '/admin' && store.user.console) { location.replace(consoleAddress(store.user)); return; }
     const target = PAGES.find((p) => p.path === here());
     if (!target) { go(LANDING, { replace: true }); return; }
     if (leavePage) leavePage();
+    leavePage = null;
     close();
     trail = null;
     tabTitle(target.label);   // the canvas and the timeline put the name of their project here once it is loaded
-    leavePage = target.page.render(view) || null;
+    const ticket = ++routing;
+    const page = await target.page();
+    if (ticket !== routing || !store.user) return;   // another page was asked for, or signed out, while it was fetched
+    leavePage = page.render(view) || null;
     drawNav();
     drawCrumbs();
     window.scrollTo(0, 0);

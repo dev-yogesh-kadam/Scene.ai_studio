@@ -1,4 +1,4 @@
-"""Dated copies of the database and of config.json: one of each per day, made when the app starts and once a day
+"""Dated copies of the database and of config.json (encrypted with the secret key, see vault.py): one of each per day, made when the app starts and once a day
 after that. A database that is lost or overwritten then costs a day of work at most. The finished pictures, videos and
 sounds and the kit's uploads are copied too, into files/ in the same folder: only what is new or changed each time.
 Nothing is ever deleted from the copy: a file deleted in the studio (with its project, say) keeps its copy there."""
@@ -12,6 +12,8 @@ import time
 from datetime import date
 from pathlib import Path
 
+from . import vault
+
 EVERY = 24 * 3600   # seconds between copies while the app keeps running
 
 
@@ -24,9 +26,11 @@ def make(db, folder, config_file="", keep=14):
     partial.unlink(missing_ok=True)
     db.backup(partial)
     partial.replace(target)
-    if config_file and Path(config_file).is_file():
-        shutil.copy2(config_file, folder / "config_{}.json".format(day))
-    for pattern in ("scene_*" + db.suffix, "config_*.json"):
+    if config_file and Path(config_file).is_file():   # it holds keys and passwords: its copy is encrypted (vault.py)
+        (folder / "config_{}.json.enc".format(day)).write_bytes(vault.seal_bytes(Path(config_file).read_bytes()))
+    for plain in folder.glob("config_*.json"):   # the plain copies made before copies were encrypted
+        plain.unlink()
+    for pattern in ("scene_*" + db.suffix, "config_*.json.enc"):
         for old in sorted(folder.glob(pattern))[:-keep] if keep > 0 else []:
             old.unlink()
     return target

@@ -12,7 +12,7 @@ export const span = (seconds) => {
 // "0:04", the place of a frame in a clip.
 export const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
-const ITEM_URL = { item: (id) => `/api/library/${id}/file`, asset: (id) => `/api/assets/${id}/file` };
+const ITEM_URL = { item: (id) => `/api/library/${id}/file`, asset: (id) => `/api/kit/${id}/file` };
 
 // An item or a saved asset named in a message: its picture and its name. onPick(table, id) when it is clicked.
 export function chip(table, id, known, onPick) {

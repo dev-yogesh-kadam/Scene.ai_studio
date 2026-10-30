@@ -30,7 +30,7 @@ from .. import audit, errors, sharing
 from ..comfy import workflows
 from ..comfy.workflows import WorkflowError
 from ..references import media_kind, read_upload, upload_reference
-from .deps import current_user
+from .deps import current_user, uploading
 from .studio import needs_caption
 
 router = APIRouter(prefix="/api/bulk", tags=["bulk"])
@@ -113,7 +113,7 @@ def _queue(state, user, wf, schema, settings, project_id):
                           estimate["minutes"] * 60 if estimate["minutes"] else None, 0, project_id)
 
 
-@router.post("")
+@router.post("", dependencies=[uploading])
 async def bulk_run(request: Request, user: dict = Depends(admin_only)):
     state = request.app.state
     form = await request.form(max_files=MOST_PICTURES + 2, max_fields=40)

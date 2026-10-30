@@ -201,7 +201,7 @@ promptField, texts, keep.node, note),
     if (form.wf !== wf) return;
     for (const [slot, ref] of Object.entries(form.refs)) if (ref.cast) delete form.refs[slot];
     for (const f of fills) {
-      if (!form.refs[f.slot]) form.refs[f.slot] = { assetId: f.asset, name: f.name, takes: f.kind, shown: f.item_kind, url: `/api/assets/${f.asset}/file`, cast: true };
+      if (!form.refs[f.slot]) form.refs[f.slot] = { assetId: f.asset, name: f.name, takes: f.kind, shown: f.item_kind, url: `/api/kit/${f.asset}/file`, cast: true };
     }
     if (page !== 'home' && page !== 'motion') drawSource();
   }
@@ -300,7 +300,7 @@ promptField, texts, keep.node, note),
 
   async function chooseSaved(slot) {
     const asset = await pickFromKit(slot.kind, projectId());
-    if (asset) setRef(slot, { assetId: asset.id, name: asset.name, url: `/api/assets/${asset.id}/file` });
+    if (asset) setRef(slot, { assetId: asset.id, name: asset.name, url: `/api/kit/${asset.id}/file` });
   }
 
   function slotBox(slot) {

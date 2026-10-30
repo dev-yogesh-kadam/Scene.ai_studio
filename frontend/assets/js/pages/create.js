@@ -292,7 +292,7 @@ export function render(view) {
 
   async function chooseSaved(slot) {
     const asset = await pickFromKit(slot.kind, form.projectId);
-    if (asset) setRef(slot, { assetId: asset.id, name: asset.name, kind: asset.kind, url: `/api/assets/${asset.id}/file` });
+    if (asset) setRef(slot, { assetId: asset.id, name: asset.name, kind: asset.kind, url: `/api/kit/${asset.id}/file` });
   }
 
   // Whether the workflow reads this box with the choices made: some belong to one mode only. A file left in a box

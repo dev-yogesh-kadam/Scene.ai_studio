@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, edits, endpoints, errors, health, kit, media, moderation, phone, roles, skills, staff, versions
+from .. import __version__, audit, backup, edits, endpoints, errors, health, kit, media, moderation, phone, roles, skills, staff, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..comfy import workflows
@@ -232,7 +232,7 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
 # ---------------------------------------------------------------- users
 
 USER_ROWS = (
-    "SELECT u.id, u.email, u.name, u.role, u.credits, u.disabled, u.agent, u.mfa_enabled, u.created, "
+    "SELECT u.id, u.email, u.name, u.role, u.credits, u.disabled, u.mfa_enabled, u.created, "
     "(SELECT COUNT(*) FROM generations g WHERE g.user_id = u.id) AS generations, "
     "(SELECT COUNT(*) FROM jobs j WHERE j.user_id = u.id) AS jobs, "
     "(SELECT MAX(j.created) FROM jobs j WHERE j.user_id = u.id) AS last_job, "
@@ -330,14 +330,16 @@ async def sign_out_user(user_id: int, body: dict, request: Request, user: dict =
         raise HTTPException(400, "No such session.")
     ended = db.change("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?" + (" AND token_hash LIKE ?" if key else ""),
                       (user_id, mine, *([key + "%"] if key else [])))
+    if not key:
+        request.app.state.hub.drop(user_id)   # their open pages stop getting updates at once
     audit.record(request, user, "Signed a user out", target["email"], "one session" if key else "everywhere")
     return {"ended": ended}
 
 
 @router.put("/users/{user_id}")
 async def update_user(user_id: int, body: dict, request: Request, user: dict = Depends(admin_user)):
-    """Change a user's role, add credits (negative takes them away), disable the account, give or take access to
-    the agent, set a new password, or turn off their two-step sign-in (when they have lost their phone)."""
+    """Change a user's role, add credits (negative takes them away), disable the account, set a new
+    password, or turn off their two-step sign-in (when they have lost their phone)."""
     state = request.app.state
     target = state.db.one("SELECT email, role FROM users WHERE id = ?", (user_id,))
     if target is None:
@@ -355,13 +357,11 @@ async def update_user(user_id: int, body: dict, request: Request, user: dict = D
             raise HTTPException(400, "The role must be one of: {}.".format(", ".join((*staff.roles(), "user"))))
         state.db.run("UPDATE users SET role = ? WHERE id = ?", (body["role"], user_id))
         audit.record(request, user, "Changed role", email, "now " + body["role"])
-    if "agent" in body:
-        state.db.run("UPDATE users SET agent = ? WHERE id = ?", (1 if body["agent"] else 0, user_id))
-        audit.record(request, user, "Gave agent access" if body["agent"] else "Took agent access away", email)
     if "disabled" in body:
         state.db.run("UPDATE users SET disabled = ? WHERE id = ?", (1 if body["disabled"] else 0, user_id))
         if body["disabled"]:
             state.db.run("DELETE FROM sessions WHERE user_id = ?", (user_id,))  # signs them out everywhere
+            state.hub.drop(user_id)
         audit.record(request, user, "Disabled account" if body["disabled"] else "Enabled account", email)
     if "password" in body:
         if password_problem(str(body["password"])):
@@ -369,6 +369,7 @@ async def update_user(user_id: int, body: dict, request: Request, user: dict = D
         state.db.run("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(str(body["password"])), user_id))
         if user_id != user["id"]:
             state.db.run("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            state.hub.drop(user_id)
         audit.record(request, user, "Set a new password", email)
     if "daily_cap" in body:
         own = None if body["daily_cap"] in (None, "") else int(_number(body, "daily_cap", 10000000))
@@ -378,6 +379,7 @@ async def update_user(user_id: int, body: dict, request: Request, user: dict = D
     if body.get("mfa_off"):
         state.db.run("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user_id,))
         state.db.run("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        state.hub.drop(user_id)
         audit.record(request, user, "Turned off two-step sign-in", email)
     if "add_credits" in body:
         try:
@@ -774,7 +776,7 @@ async def list_backups(request: Request, user: dict = Depends(admin_user)):
     copies = []
     if folder.is_dir():
         for f in folder.iterdir():
-            if f.is_file() and (f.name.startswith("scene_") or f.name.startswith("config_")) and f.suffix in (".db", ".dump", ".json"):
+            if f.is_file() and (f.name.startswith("scene_") or f.name.startswith("config_")) and f.suffix in (".db", ".dump", ".enc"):
                 info = f.stat()
                 copies.append({"name": f.name, "what": "settings (config.json)" if f.suffix == ".json" else "database",
                                "bytes": info.st_size, "made": info.st_mtime})
@@ -869,6 +871,7 @@ async def list_endpoints(request: Request, fresh: bool = False, user: dict = Dep
 def _endpoints_changed(state, main_before):
     endpoints.apply(state.db, state.agent, state.settings)
     health.forget(state, "endpoints")   # the section shows the change at once
+    health.forget(state, "status")
     if state.comfy.url != main_before:   # another main server: its nodes are read again
         state.catalog.forget_nodes()
     state.jobs.wake.set()   # a new free server takes the waiting renders
@@ -879,7 +882,7 @@ async def add_endpoint(body: dict, request: Request, user: dict = Depends(admin_
     state, main = request.app.state, request.app.state.comfy.url
     row = endpoints.clean(body)
     state.db.run("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                 (row["kind"], row["name"], row["url"], row["api_key"], row["models"], row["active"], time.time()))
+                 (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["active"], time.time()))
     _endpoints_changed(state, main)
     audit.record(request, user, "Added a server", row["name"], "{} at {}".format(endpoints.KINDS[row["kind"]], row["url"]))
     return {}
@@ -895,7 +898,7 @@ async def change_endpoint(endpoint_id: int, body: dict, request: Request, user: 
         body = {k: v for k, v in body.items() if k != "api_key"}   # left empty: the key it has is kept
     row = endpoints.clean(body, before)
     state.db.run("UPDATE endpoints SET kind = ?, name = ?, url = ?, api_key = ?, models = ?, active = ? WHERE id = ?",
-                 (row["kind"], row["name"], row["url"], row["api_key"], row["models"], row["active"], endpoint_id))
+                 (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["active"], endpoint_id))
     _endpoints_changed(state, main)
     audit.record(request, user, "Changed a server", row["name"], "{} at {}{}".format(
         endpoints.KINDS[row["kind"]], row["url"], "" if row["active"] else ", off"))
@@ -961,7 +964,7 @@ IN_PROJECT = "({0}.project_id = p.id OR {0}.project_id IN (SELECT m.id FROM proj
 
 @router.get("/projects")
 async def list_projects(request: Request, q: str = "", user: dict = Depends(admin_user)):
-    """Every user's projects, the most recently used first: their modules, NeuralCore kit, items, jobs and space."""
+    """Every user's projects, the most recently used first: their modules, asset book, items, jobs and space."""
     where, params = "p.parent_id IS NULL", []
     if q.strip():
         where += " AND (LOWER(p.name) LIKE ? ESCAPE '\\' OR LOWER(u.name) LIKE ? ESCAPE '\\' OR LOWER(u.email) LIKE ? ESCAPE '\\')"
@@ -981,7 +984,7 @@ async def list_projects(request: Request, q: str = "", user: dict = Depends(admi
 
 @router.get("/projects/{project_id}")
 async def project_detail(project_id: int, request: Request, user: dict = Depends(admin_user)):
-    """One project: its owner, its modules, its NeuralCore kit (the entries the agent and the canvas use by name) and its
+    """One project: its owner, its modules, its asset book (the entries the agent and the canvas use by name) and its
     latest items."""
     db = request.app.state.db
     project = db.one("SELECT p.*, u.name AS user_name, u.email AS user_email FROM projects p JOIN users u ON u.id = p.user_id "

@@ -21,6 +21,13 @@ def quick_hashes(monkeypatch):
     monkeypatch.setattr(security, "SCRYPT", {"n": 2 ** 10, "r": 8, "p": 1, "dklen": 32})
 
 
+@pytest.fixture(autouse=True)
+def secret_key(monkeypatch):
+    """A secret key of the test's own (vault.py), so no test writes secret.key into the project."""
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("SCENE_SECRET_KEY", Fernet.generate_key().decode("ascii"))
+
+
 # Set to a PostgreSQL database that may be emptied (postgresql://scene_test:...@localhost:5432/scene_test) to run the
 # tests against PostgreSQL instead of SQLite. Every test starts with that database empty.
 POSTGRES = os.environ.get("SCENE_TEST_DATABASE_URL", "")

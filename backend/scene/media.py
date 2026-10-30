@@ -132,6 +132,15 @@ async def frame_at(video, seconds, target, width=POSTER_WIDTH):
     return target if target.is_file() and target.stat().st_size else None
 
 
+async def changes(video):
+    """How much the picture changes into each frame of a video: [(seconds, score)], the score 0 (the same picture) to
+    1 (a different one), measured on a small copy, so it is quick (a tenth of a second for a 10 s clip)."""
+    text = await _ffmpeg("-i", video, "-an", "-vf", r"scale=160:-2,select='gte(scene\,0)',metadata=print", "-f", "null", "-", check=False)
+    times = [float(t) for t in re.findall(r"pts_time:([\d.]+)", text)]
+    scores = [float(s) for s in re.findall(r"lavfi\.scene_score=([\d.]+)", text)]
+    return list(zip(times, scores))
+
+
 async def cut_audio(source, start, seconds, target):
     """Save a piece of an audio (or video) file's sound as a WAV file."""
     await _ffmpeg("-loglevel", "error", "-ss", "{:.3f}".format(start), "-t", "{:.3f}".format(seconds),
@@ -206,6 +215,17 @@ async def keep_sound(path, stem):
 
 
 MUSIC_UNDER = 0.35   # how loud added music is against the video's own sound
+DUCK_THRESHOLD = 0.01   # the video's own sound louder than this (-40 dB: speech, an effect) turns the music down
+DUCK_RATIO = 10         # how far it goes down: about 9 dB under a voice at -22 dB, measured
+LOUDNESS = "loudnorm=I=-14:TP=-1.5:LRA=11"   # what a finished film is levelled to: the loudness the social apps play at
+
+
+async def level(video, target):
+    """The video with its sound levelled to LOUDNESS, so a film of shots made at different levels plays at one, as
+    loud as the apps it is posted to expect. The picture is copied. Returns the target."""
+    await _ffmpeg("-loglevel", "error", "-i", video, "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+                  "-af", LOUDNESS + ",aresample=48000", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", target)
+    return target
 
 
 async def add_sound(video, sound, target, replace=False):
@@ -213,15 +233,19 @@ async def add_sound(video, sound, target, replace=False):
 
     The picture is copied as it is, not encoded again. The sound is looped if it is shorter than the video,
     cut to the video's length, and faded out at the end. With replace it takes the place of the video's own
-    sound; otherwise it is mixed under it (music under speech and effects)."""
+    sound; otherwise it is mixed under it (music under speech and effects), and goes quieter still while the
+    video's own sound is loud (someone speaks), coming back up in the pauses."""
     info = await probe(video)
     if not info["seconds"]:
         raise MediaError("That video can't be read.")
     length = info["seconds"]
     fade = "afade=t=in:d=0.3,afade=t=out:st={:.3f}:d=0.8".format(max(0.0, length - 0.8))
     if info["audio"] and not replace:
-        mix = ("[1:a]volume={},{}[under];[0:a][under]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
-               .format(MUSIC_UNDER, fade))
+        mix = ("[0:a]aresample=48000,aformat=channel_layouts=stereo,asplit=2[own][key];"
+               "[1:a]aresample=48000,aformat=channel_layouts=stereo,volume={},{}[music];"
+               "[music][key]sidechaincompress=threshold={}:ratio={}:attack=20:release=400[under];"
+               "[own][under]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
+               .format(MUSIC_UNDER, fade, DUCK_THRESHOLD, DUCK_RATIO))
     else:
         mix = "[1:a]{}[a]".format(fade)
     await _ffmpeg("-loglevel", "error", "-i", video, "-stream_loop", "-1", "-i", sound, "-filter_complex", mix,
@@ -230,16 +254,21 @@ async def add_sound(video, sound, target, replace=False):
     return length
 
 
-async def sequence(parts, target):
+FADE = 0.5   # seconds of a crossfade between two clips of a cut
+
+
+async def sequence(parts, target, fades=()):
     """Join any videos into one, each cut to its (start, end) seconds. Returns the length in seconds.
 
     Unlike join, the clips need not match: every clip is fitted into the frame of the first one,
-    and a clip without sound gets silence when any other clip has sound.
+    and a clip without sound gets silence when any other clip has sound. fades: the positions of the clips that
+    crossfade (FADE seconds, picture and sound) from the clip before instead of cutting to it; a clip too short to
+    lose that much is cut to.
     """
     infos = [await probe(path) for path, _, _ in parts]
     width, height = (infos[0]["width"] or 1280) // 2 * 2, (infos[0]["height"] or 720) // 2 * 2
     with_audio = any(info["audio"] for info in infos)
-    args, filters, labels, total = ["-loglevel", "error"], [], "", 0.0
+    args, filters, lengths = ["-loglevel", "error"], [], []
     for i, ((path, start, end), info) in enumerate(zip(parts, infos)):
         if not info["seconds"]:
             raise MediaError("{} can't be read as a video.".format(path.name))
@@ -247,19 +276,30 @@ async def sequence(parts, target):
         start = max(0.0, min(start or 0.0, end))
         if end - start < 1 / FPS:
             raise MediaError("A clip on the timeline is cut down to nothing.")
-        total += end - start
+        lengths.append(end - start)
         args += ["-i", path]
         filters.append(
             "[{i}:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS,fps={fps},"
-            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}]"
+            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v{i}]"
             .format(i=i, s=start, e=end, fps=FPS, w=width, h=height))
-        labels += "[v{}]".format(i)
         if with_audio:
             sound = ("[{i}:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS,".format(i=i, s=start, e=end)
                      if info["audio"] else "anullsrc=r=48000:cl=stereo,atrim=duration={:.3f},".format(end - start))
             filters.append(sound + "aresample=48000,aformat=channel_layouts=stereo[a{}]".format(i))
-            labels += "[a{}]".format(i)
-    filters.append("{}concat=n={}:v=1:a={}[v]{}".format(labels, len(parts), int(with_audio), "[a]" if with_audio else ""))
+    # Clips joined one at a time onto what is joined so far: a crossfade overlaps the two, a cut puts them end to end.
+    video, sound, total = "[v0]", "[a0]", lengths[0]
+    for i in range(1, len(parts)):
+        fade = i in fades and min(lengths[i - 1], lengths[i]) >= 2 * FADE
+        if fade:
+            filters.append("{}[v{}]xfade=transition=fade:duration={}:offset={:.3f}[jv{}]".format(video, i, FADE, total - FADE, i))
+        else:
+            filters.append("{}[v{}]concat=n=2:v=1:a=0[jv{}]".format(video, i, i))
+        if with_audio:
+            filters.append("{}[a{}]{}[ja{}]".format(sound, i, "acrossfade=d={}".format(FADE) if fade else "concat=n=2:v=0:a=1", i))
+        video, sound, total = "[jv{}]".format(i), "[ja{}]".format(i), total + lengths[i] - (FADE if fade else 0)
+    filters.append("{}null[v]".format(video))
+    if with_audio:
+        filters.append("{}anull[a]".format(sound))
     args += ["-filter_complex", ";".join(filters), "-map", "[v]"]
     if with_audio:
         args += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]

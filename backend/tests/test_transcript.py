@@ -66,7 +66,7 @@ def test_many_leaves_at_once_and_a_folder_reference(client):
     with pytest.raises(runs.RunError):
         runs.write_many(db, me["id"], "pm-1", "/motion/x", {"a/b": 1})            # one level only
     with pytest.raises(runs.RunError):
-        runs.write_many(db, me["id"], "pm-1", "/budget", {"x": 1})                # never the budget
+        runs.write_many(db, me["id"], "pm-1", "/skill", {"x": 1})                 # never the studio's own
     runs.write_many(db, me["id"], "pm-1", "/motion/lines", {"2": {"start": 2.0}, "10": {"start": 9.0}, "1": {"start": 0.5}})
     assert runs.resolve(db, me["id"], "pm-1", "$state:/motion/lines/*") == [{"start": 0.5, "n": 1}, {"start": 2.0, "n": 2}, {"start": 9.0, "n": 10}]
     with pytest.raises(runs.RunError, match="state_reference_unresolved"):

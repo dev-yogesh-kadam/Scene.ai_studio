@@ -157,25 +157,17 @@ def test_a_runs_step_may_use_its_own_working_files(client, monkeypatch):
     assert all(e.get("item") != ref for e in memory.book(db, me["id"], 0))
 
 
-def test_a_runs_budget_is_the_users_and_stops_its_jobs(client, monkeypatch):
+def test_the_studios_own_paths_of_a_run_are_not_the_agents_and_its_jobs_are_tagged(client, monkeypatch):
     import json as js
     from test_api import JOB
-    me = register(client)
-    # the agent cannot set or lift it
-    seen = hosted(monkeypatch, client, {"tool": "state_write", "path": "/budget", "value": "999999"}, {"tool": "finish", "reply": "ok", "steps": []})
+    register(client)
+    # the agent cannot set the run's skill (nor anything else the studio keeps for it)
+    seen = hosted(monkeypatch, client, {"tool": "state_write", "path": "/skill", "value": '"other"'}, {"tool": "finish", "reply": "ok", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "go", "run": "pm-1"})
     assert any("the agent cannot set it" in m["content"] for m in seen[-1] if m["role"] == "user")
-    assert client.put("/api/runs/pm-1/state", json={"path": "/budget", "value": 5}).status_code == 400
-    assert client.put("/api/runs/pm-1/budget", json={"credits": -1}).status_code == 400
-    assert client.put("/api/runs/pm-1/budget", json={"credits": 150}).json() == {"credits": 150, "spent": 0}
-    post = lambda run: client.post("/api/jobs", data={"settings": js.dumps({**JOB, "run_of": run})})
-    first = post("pm-1")
-    assert first.status_code == 200 and first.json()["credits"] == 100            # 100 of 150
-    second = post("pm-1")
-    assert second.status_code == 402 and "budget is 150 credits" in second.json()["detail"]
-    assert post("other-run").status_code == 200                                    # another run has no budget
-    assert client.put("/api/runs/pm-1/budget", json={"credits": None}).json()["credits"] is None
-    assert post("pm-1").status_code == 200                                         # no budget, no limit
+    assert client.put("/api/runs/pm-1/state", json={"path": "/skill", "value": 5}).status_code == 400
+    first = client.post("/api/jobs", data={"settings": js.dumps({**JOB, "run_of": "pm-1"})})
+    assert first.status_code == 200
     db = db_of(client)
     assert db.one("SELECT run FROM jobs WHERE id = ?", (first.json()["id"],))["run"] == "pm-1"
 

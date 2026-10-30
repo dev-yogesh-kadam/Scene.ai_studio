@@ -243,7 +243,6 @@ CREATE TABLE IF NOT EXISTS endpoints (
 COLUMNS = [
     ("users", "credits", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "disabled", "INTEGER NOT NULL DEFAULT 0"),
-    ("users", "agent", "INTEGER NOT NULL DEFAULT 0"),   # may use the agent; an admin always may
     ("jobs", "project_id", "INTEGER"),
     ("jobs", "cost", "INTEGER NOT NULL DEFAULT 0"),
     ("generations", "project_id", "INTEGER"),
@@ -318,6 +317,21 @@ COLUMNS = [
     ("workflow_pricing", "admins_only", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
+# Indexes for what the studio looks up often, made once the columns of later releases are there (some are on those).
+INDEXES = """
+CREATE INDEX IF NOT EXISTS generations_project ON generations(project_id);
+CREATE INDEX IF NOT EXISTS assets_project ON assets(user_id, project_id);
+CREATE INDEX IF NOT EXISTS jobs_project ON jobs(project_id);
+CREATE INDEX IF NOT EXISTS jobs_run ON jobs(user_id, run);
+CREATE INDEX IF NOT EXISTS credit_events_user ON credit_events(user_id, created);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS project_members_user ON project_members(user_id);
+CREATE INDEX IF NOT EXISTS audit_log_action ON audit_log(action, ip, created);
+CREATE INDEX IF NOT EXISTS agent_calls_started ON agent_calls(started);
+CREATE INDEX IF NOT EXISTS agent_calls_run ON agent_calls(run);
+CREATE INDEX IF NOT EXISTS moderation_item ON moderation(generation_id);
+"""
+
 # The studio's two machines, added to an installation that has no servers yet. Every value can be changed in the
 # admin console; the power of Zoro is a first assumption until it is measured at the wall.
 SERVERS = [
@@ -389,6 +403,7 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
         _seed(self, starting_credits)
+        self.conn.executescript(INDEXES)
 
     def columns(self, table):
         return [row["name"] for row in self.all("PRAGMA table_info({})".format(table))]
@@ -536,6 +551,9 @@ class PostgresDatabase:
                 conn.execute(statement)
         for table, column, definition in COLUMNS:
             conn.execute("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}".format(table, column, postgres_types(definition)))
+        for statement in INDEXES.split(";"):
+            if statement.strip():
+                conn.execute(statement)
         for table, column in OWNED.items():
             rule = OWN_ROWS.format(acting=ACTING_SQL, column=column)
             conn.execute("ALTER TABLE {} ENABLE ROW LEVEL SECURITY".format(table))

@@ -91,7 +91,7 @@ def test_only_the_local_models_named_in_the_settings_are_offered():
     from scene.agent import Agent
     tags = {"models": [{"name": "qwen3.5:9b", "size": 6}, {"name": "qwen3.6:35b", "size": 23}, {"name": "nemotron3:33b", "size": 26},
                        {"name": "nomic-embed-text:latest", "size": 1}]}
-    for local, offered in (("", ["qwen3.5:9b", "qwen3.6:35b", "nemotron3:33b", "nomic-embed-text:latest"]),
+    for local, offered in (("", ["qwen3.5:9b", "qwen3.6:35b", "nemotron3:33b"]),   # never the embedding model
                            ("qwen3.6:35b, nemotron3:33b", ["qwen3.6:35b", "nemotron3:33b"])):
         brain = Agent("http://ollama", local=local)
         brain.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=tags)))

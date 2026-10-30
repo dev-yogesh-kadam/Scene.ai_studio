@@ -18,7 +18,7 @@ from ..outputs import MAIN_CANVAS
 
 FIRST_MODULE = "Module 1"
 from ..references import media_kind, read_text_upload, read_upload, safe_name, text_kind, upload_reference
-from .deps import current_user
+from .deps import current_user, limited, uploading
 
 router = APIRouter(prefix="/api", tags=["library"])
 
@@ -90,12 +90,12 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
 UPLOADED = "upload/file"   # what an item the user brought in is filed under: it was not made with a workflow
 
 
-@router.post("/library/upload")
+@router.post("/library/upload", dependencies=[limited("upload", 60, 600), uploading])
 async def upload_item(request: Request, user: dict = Depends(current_user)):
     """Multipart form with "file" (an image, a video, a sound, or a transcript: .srt, .json) and "project_id".
     The file joins the library and the project's canvas like a finished generation, so it can be a frame to start on, a
     reference or a clip on the timeline. Nothing is charged."""
-    form = await request.form()
+    form = await request.form(max_files=1, max_fields=10)
     upload = form.get("file")
     if not hasattr(upload, "filename"):
         raise HTTPException(400, "Choose a file.")
@@ -435,9 +435,9 @@ async def project_analytics_csv(project_id: int, request: Request, period: str =
 
 @router.post("/projects/{project_id}/duplicate")
 async def duplicate_project(project_id: int, request: Request, user: dict = Depends(current_user)):
-    """A copy of a project to start again from: its modules (empty canvases of the same names) and its NeuralCore kit,
+    """A copy of a project to start again from: its modules (empty canvases of the same names) and its asset book,
     named "<name> copy". What was made stays with the first project."""
-    state, db = request.app.state, request.app.state.db
+    db = request.app.state.db
     row = _own_project(request, user, project_id)
     root = db.one("SELECT * FROM projects WHERE id = ?", (row["parent_id"] or project_id,))
     copy = db.run("INSERT INTO projects (user_id, name, created, canvas_name) VALUES (?, ?, ?, ?)",
@@ -501,7 +501,7 @@ async def rename_canvas(project_id: int, body: dict, request: Request, user: dic
 async def delete_project(project_id: int, request: Request, user: dict = Depends(current_user)):
     """Delete a project, or a module, and everything in it, so nothing that can no longer be used stays in storage: what
     was made in it (the files, their posters and keyframes), its jobs still waiting or running (their credits given
-    back), and its canvases, timelines and agent tabs. A project takes its modules and its NeuralCore with it. The jobs'
+    back), and its canvases, timelines and agent tabs. A project takes its modules and its asset book with it. The jobs'
     records stay, in no project, for the credit history."""
     probe = _own_project(request, user, project_id, "viewer")
     here = _own_project(request, user, project_id, "manager" if probe["parent_id"] else "owner")   # a module: a manager; a project: its owner
@@ -522,7 +522,7 @@ async def delete_project(project_id: int, request: Request, user: dict = Depends
             db.run("UPDATE jobs SET project_id = NULL WHERE project_id = ?", (one,))
             # Its canvas, timeline and agent tabs go with it: a project made later must not open with them.
             db.run("DELETE FROM boards WHERE project_id = ?", (one,))
-            if not here["parent_id"]:   # the NeuralCore is the project's: its modules share it, so it goes only with the project
+            if not here["parent_id"]:   # the asset book is the project's: its modules share it, so it goes only with the project
                 for row in db.all("SELECT id FROM assets WHERE project_id = ? AND user_id = ?", (one, owner)):
                     kit.remove(db, state.assets_dir / str(owner), owner, row["id"])   # files too
             db.run("DELETE FROM projects WHERE id = ?", (one,))

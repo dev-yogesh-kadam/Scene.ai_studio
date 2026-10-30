@@ -16,6 +16,7 @@ def test_page_files_are_never_served_stale(client):
     script = re.search(r'src="(/v/\d+/assets/js/main\.js)"', page.text).group(1)
     assert page.headers["cache-control"] == "no-cache" and re.search(r'href="/v/\d+/assets/css/app\.css"', page.text)
     assert client.get(script).text == client.get("/assets/js/main.js").text
+    assert "immutable" in client.get(script).headers["cache-control"]                      # its address changes, not its file
     assert client.get(script.replace("main.js", "pages/home.js")).status_code == 200      # what main.js imports, relatively
     assert client.get(script.replace("assets/js/main.js", "assets/../index.html")).status_code == 404
 
@@ -185,21 +186,21 @@ def test_projects_and_search(client):
     assert names("") == []   # what was in the project is deleted with it
 
 
-def test_neuralcore_entries_belong_to_a_project_and_are_private(client):
+def test_asset_book_entries_belong_to_a_project_and_are_private(client):
     register(client)
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     other = client.post("/api/projects", json={"name": "Other"}).json()["id"]
     entry = client.post("/api/kit", files={"file": ("anna.png", png, "image/png")}, data={"name": "Anna", "type": "character", "project_id": str(film)}).json()
     assert [(e["name"], e["type"]) for e in client.get("/api/kit?project=%d" % film).json()["entries"]] == [("Anna", "character")]
-    assert client.get("/api/kit?project=%d" % other).json()["entries"] == []   # one project's NeuralCore is not another's
+    assert client.get("/api/kit?project=%d" % other).json()["entries"] == []   # one project's asset book is not another's
     assert client.get("/api/kit").json()["entries"] == []                       # and there is none outside a project
     assert client.post("/api/kit", files={"file": ("anna.png", png, "image/png")}, data={"name": "Anna"}).status_code == 400
-    assert client.get("/api/assets/%d/file" % entry["id"]).content == png
+    assert client.get("/api/kit/%d/file" % entry["id"]).content == png
     assert client.get("/api/assets").status_code in (404, 405)                  # no saved assets of their own any more
     client.post("/api/auth/logout")
     client.post("/api/auth/register", json={"email": "bob@example.com", "password": "another one"})
-    assert client.get("/api/assets/%d/file" % entry["id"]).status_code == 404
+    assert client.get("/api/kit/%d/file" % entry["id"]).status_code == 404
 
 
 def test_the_admin_console_is_a_site_of_its_own_for_admins_only(client):
@@ -593,6 +594,25 @@ def test_a_step_can_start_on_what_an_earlier_step_makes(client, monkeypatch):
     assert steps[1]["after"]["slot"] == "209:image" and steps[1]["start"] is None
 
 
+def test_a_shot_in_the_same_place_goes_on_from_the_shot_before(client, monkeypatch):
+    register(client)
+    shot = {"tool": "generate", "workflow": "video/h3_all_in_one", "prompt": "She waits.", "start_from": 0, "after": 0, "uses": []}
+
+    async def fake_ask(system, message, workflow_ids, history=(), model=None):
+        return {"reply": "Four shots.", "steps": [
+            dict(shot, name="Arrives", place="Rainy  Market"),
+            dict(shot, name="Waits", place="rainy market"),                   # the same place: chained, without "after"
+            dict(shot, name="Next day", place="rainy market, next morning"),  # named differently: starts fresh
+            dict(shot, name="Unplaced")]}
+
+    monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
+    steps = client.post("/api/agent/plan", json={"instruction": "she arrives, waits, comes back"}).json()["steps"]
+    assert [(s["name"], s["after"] and s["after"]["step"]) for s in steps] == [
+        ("Arrives", None), ("Waits", 0), ("Next day", None), ("Unplaced", None)]
+    assert [s["place"] for s in steps] == ["rainy market", "rainy market", "rainy market, next morning", ""]
+    assert "follows" not in steps[1]   # chained: the review already compares it with the shot it starts on
+
+
 def test_a_shot_takes_the_shape_of_the_picture_it_starts_on(client, monkeypatch):
     from scene import agent
     me = register(client)
@@ -708,11 +728,10 @@ def test_a_hosted_model_is_listed_beside_the_local_ones_and_asked_over_its_api(m
 
 
 def test_every_account_has_the_agent(client):
-    admin = register(client)
-    assert admin["agent"] is True and client.get("/api/agent/status").status_code == 200
+    register(client)
+    assert client.get("/api/agent/status").status_code == 200
     client.post("/api/auth/logout")
-    bob = client.post("/api/auth/register", json={"email": "bob@example.com", "password": "another one"}).json()
-    assert bob["agent"] is True and client.get("/api/auth/me").json()["agent"] is True   # the same studio as an admin
+    client.post("/api/auth/register", json={"email": "bob@example.com", "password": "another one"})
     assert client.get("/api/agent/status").status_code == 200
     assert client.post("/api/agent/plan", json={"instruction": "hi"}).status_code != 403
 
@@ -750,8 +769,21 @@ def test_the_login_throttle_blocks_and_then_forgets(monkeypatch):
     assert throttle.blocked("ada|1.2.3.4") and not throttle.blocked("bob|1.2.3.4")
     now = security.time.time()
     monkeypatch.setattr(security.time, "time", lambda: now + security.LOCK_SECONDS + 1)
+    assert not throttle.blocked("ada|1.2.3.4")   # the minute is over...
+    assert throttle.blocked("ada|1.2.3.4", security.MAX_FAILURES, security.ACCOUNT_SECONDS)   # ...the longer window is not
+    monkeypatch.setattr(security.time, "time", lambda: now + throttle.KEEP + 1)
     throttle.fail("bob|1.2.3.4")
     assert list(throttle.failures) == ["bob|1.2.3.4"]
+
+
+def test_one_account_is_locked_after_many_wrong_passwords_from_many_addresses(client):
+    from scene import security
+    register(client)
+    client.post("/api/auth/logout")
+    for _ in range(security.ACCOUNT_FAILURES):
+        client.app.state.throttle.fail("account|" + ADMIN["email"])
+    answer = client.post("/api/auth/login", json={"email": ADMIN["email"], "password": ADMIN["password"]})
+    assert answer.status_code == 429 and "this account" in answer.json()["detail"]
 
 
 def test_finished_work_can_be_kept_in_a_folder_outside_storage(tmp_path):
@@ -766,12 +798,7 @@ def test_finished_work_can_be_kept_in_a_folder_outside_storage(tmp_path):
 
 def test_each_users_work_is_kept_in_a_folder_named_after_their_email(client):
     me = register(client)
-    old = client.app.state.output_dir / str(me["id"])     # how folders were named before
-    old.mkdir(parents=True)
-    (old / "clip.mp4").write_bytes(b"x")
-    folder = client.app.state.outputs.folder(me["id"])
-    assert folder == client.app.state.output_dir / ADMIN["email"]
-    assert (folder / "clip.mp4").is_file() and not old.exists()
+    assert client.app.state.outputs.folder(me["id"]) == client.app.state.output_dir / ADMIN["email"]
 
 
 def test_a_job_and_an_edit_remember_the_item_they_were_made_from(client):
@@ -915,7 +942,6 @@ def test_prices_follow_what_was_asked_for_at_the_rate_of_each_kind(client):
     # The image and audio workflows are saved without their node settings: they can be read only with the node
     # definitions the studio keeps from the render server, which a machine that never reached it does not have.
     import json
-    from pathlib import Path
     import pytest
     from scene.config import load_settings
     definitions = load_settings().path("storage_dir") / "cache" / "node_definitions.json"   # read only: wherever this machine keeps its data
@@ -1033,7 +1059,7 @@ def test_one_visitor_cannot_make_account_after_account(client):
 
 
 def test_a_title_over_a_video_costs_less_a_second_than_a_motion_video(client, tmp_path):
-    import json, time
+    import time
     from scene import media
     me = register(client)
     folder = client.app.state.outputs.folder(me["id"])
@@ -1111,7 +1137,7 @@ def test_the_database_is_backed_up_at_every_start_and_old_copies_are_dropped(cli
     (tmp_path / "config.json").write_text("{}", encoding="utf-8")
     made = backup.make(db, folder, tmp_path / "config.json", keep=2)
     assert sorted(f.name for f in folder.glob(copies)) == ["scene_2020-01-03" + db.suffix, made.name]
-    assert len(list(folder.glob("config_*.json"))) == 1 and not (folder / "scene.partial").exists()
+    assert len(list(folder.glob("config_*.json.enc"))) == 1 and not (folder / "scene.partial").exists()
     if db.kind == "sqlite":
         assert sqlite3.connect(made).execute("SELECT email FROM users").fetchall() == [(ADMIN["email"],)]
     else:
@@ -1316,7 +1342,7 @@ def test_a_project_holds_modules_that_share_its_kit(client):
     # the kit of a module is the project's kit
     from scene import kit
     assert kit.root(db, one["id"]) == film and kit.root(db, film) == film
-    # what is kept from a module's canvas is in the project's NeuralCore, and no other project's
+    # what is kept from a module's canvas is in the project's asset book, and no other project's
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     kept = client.post("/api/kit", files={"file": ("maya.png", png, "image/png")}, data={"name": "Maya", "project_id": str(one["id"])}).json()
     assert db.one("SELECT project_id FROM assets WHERE id = ?", (kept["id"],))["project_id"] == film

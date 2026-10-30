@@ -9,6 +9,7 @@ motion/node_modules/
 
 # Local settings and data (users, sessions, generated media)
 config.json
+secret.key
 storage/
 
 # Media from the old command-line script

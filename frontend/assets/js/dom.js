@@ -272,3 +272,19 @@ export function ask({ title, message = '', confirm = 'OK', cancel = 'Cancel', da
     (danger ? no : yes).focus();   // Enter on a dangerous question does nothing harmful
   });
 }
+
+// A dialog of its own, shown at once and removed when closed.
+export function openDialog(...content) {
+  const dialog = el('dialog', {}, ...content);
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+// Light, dark or the computer's own ('system'), kept for the next visit (theme.js applies it before the page paints).
+export function applyTheme(theme) {
+  if (theme === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('scene.theme', theme); } catch (e) { /* no storage */ }
+}

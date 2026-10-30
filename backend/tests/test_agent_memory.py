@@ -10,14 +10,14 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
 
 def film(client):
-    """The test's project: a NeuralCore belongs to a project, and there is none outside one."""
+    """The test's project: an asset book belongs to a project, and there is none outside one."""
     if not getattr(client, "film", None):
         client.film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     return client.film
 
 
 def save_asset(client, name, tag, use_note="", project=0):
-    """An entry of the NeuralCore of the test's project (or of the project given)."""
+    """An entry of the asset book of the test's project (or of the project given)."""
     return client.post("/api/kit", files={"file": (name.lower() + ".png", PNG + name.encode(), "image/png")},
                        data={"name": name, "type": tag, "use_note": use_note, "project_id": str(project or film(client))}).json()["id"]
 
@@ -49,7 +49,7 @@ def test_the_book_lists_saved_assets_and_the_projects_pictures_and_describes_eac
     harbour = library_item(client, me["id"], "Harbour", project=film(client))
     library_item(client, me["id"], "Song", kind="audio", project=film(client))   # a sound is not a picture to reuse
 
-    shown = client.get("/api/memory?project=%d" % film(client)).json()   # the NeuralCore; the model looks at what it has not seen yet
+    shown = client.get("/api/memory?project=%d" % film(client)).json()   # the asset book; the model looks at what it has not seen yet
     assert [a["name"] for a in shown["assets"]] == ["Meera", "Cafe"] and "made" not in shown
     book = memory.book_for_model(memory.book(client.app.state.db, me["id"], film(client)))
     assert [(e.get("asset"), e.get("item"), e["name"], e["type"]) for e in book] == [
@@ -167,16 +167,16 @@ def test_a_file_dropped_into_a_job_is_kept_once_as_an_upload_of_its_project(clie
     assert [(u["name"], u["type"], u["origin"]) for u in shown] == [("meera face", "character", "upload")]   # typed by its slot
     assert client.get("/api/kit").json()["entries"] == []   # only in its own project
     upload_id = shown[0]["id"]
-    assert client.get("/api/assets/%d/file" % upload_id).content == PNG
+    assert client.get("/api/kit/%d/file" % upload_id).content == PNG
     # The agent knows it by name in that project.
     book = memory.book_for_model(memory.book(client.app.state.db, me["id"], project))
     assert book[0]["asset"] == upload_id and book[0]["type"] == "character"
-    # A deleted project takes its NeuralCore with it: nothing is left outside a project.
+    # A deleted project takes its asset book with it: nothing is left outside a project.
     second = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("cafe.png", PNG + b"cafe", "image/png")})
     assert second.status_code == 200
     client.delete("/api/projects/%d" % project)
     assert client.get("/api/kit").json()["entries"] == [] and not client.app.state.db.one("SELECT 1 FROM assets")
-    assert client.get("/api/assets/%d/file" % upload_id).status_code == 404
+    assert client.get("/api/kit/%d/file" % upload_id).status_code == 404
 
 
 def test_there_are_no_project_notes(client, monkeypatch):

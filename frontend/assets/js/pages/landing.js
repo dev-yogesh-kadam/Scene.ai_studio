@@ -40,7 +40,7 @@ function picture(name, cls = '', sketch = false) {
 }
 
 // The frame counter of the camera: hours, minutes, seconds and frames at 24 a second, from one hour in.
-export function timecode(frames) {
+export function frameTimecode(frames) {
   const two = (n) => String(n).padStart(2, '0');
   return `${two(Math.floor(frames / 86400) % 24)}:${two(Math.floor(frames / 1440) % 60)}:${two(Math.floor(frames / 24) % 60)}:${two(frames % 24)}`;
 }
@@ -109,7 +109,7 @@ function monitor(join, signupOpen) {
   const tick = () => {
     if (!node.isConnected && node.dataset.placed) return;
     if (node.isConnected) node.dataset.placed = '1';
-    tc.textContent = timecode(Math.floor((performance.now() - started) / (1000 / 24)) + 24 * 3600);
+    tc.textContent = frameTimecode(Math.floor((performance.now() - started) / (1000 / 24)) + 24 * 3600);
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);

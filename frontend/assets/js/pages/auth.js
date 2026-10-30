@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { el, field } from '../dom.js';
 import * as scenes from './landing-scenes.js';
-import { READOUT, timecode } from './landing.js';
+import { READOUT, frameTimecode } from './landing.js';
 
 const POINTS = [
   'Turn a prompt and a few reference images into video',
@@ -130,7 +130,7 @@ export function signInSet({ scene, home, heading, sub, points }) {
   const tick = () => {
     if (!node.isConnected && node.dataset.placed) return;
     if (node.isConnected) node.dataset.placed = '1';
-    tc.textContent = timecode(Math.floor((performance.now() - started) / (1000 / 24)) + 24 * 3600);
+    tc.textContent = frameTimecode(Math.floor((performance.now() - started) / (1000 / 24)) + 24 * 3600);
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);

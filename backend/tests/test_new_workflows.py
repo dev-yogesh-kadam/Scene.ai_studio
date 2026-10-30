@@ -4,8 +4,6 @@ results are filed apart. Read with the node definitions the render PC gave (test
 import asyncio
 import json
 
-import pytest
-
 from scene import agent, jobs, runs
 from scene.api import studio
 from scene.comfy import workflows

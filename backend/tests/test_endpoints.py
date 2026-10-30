@@ -24,7 +24,9 @@ def test_servers_are_added_changed_and_removed_in_the_console(client):
     assert "api_key" not in kimi and kimi["has_key"]   # the key is never sent back
     desk.put("/api/admin/endpoints/%d" % kimi["id"], json={"active": False})
     assert "kimi" not in agent.services
-    assert client.app.state.db.one("SELECT api_key FROM endpoints WHERE id = ?", (kimi["id"],))["api_key"] == "sk-1"   # kept
+    from scene import vault
+    stored = client.app.state.db.one("SELECT api_key FROM endpoints WHERE id = ?", (kimi["id"],))["api_key"]
+    assert stored.startswith(vault.MARK) and vault.reveal(stored) == "sk-1"   # kept, encrypted
     kaggle = next(e for e in listed if e["name"] == "Kaggle")
     desk.delete("/api/admin/endpoints/%d" % kaggle["id"])
     assert agent.servers == ["http://127.0.0.1:9"]

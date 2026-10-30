@@ -15,6 +15,9 @@ OLD_SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
 MAX_PASSWORD = 1024   # a longer one is refused before it is hashed, so nobody can make the server hash megabytes
 MAX_FAILURES = 5
 LOCK_SECONDS = 60
+# Wrong passwords for one account from every address together: someone trying from many addresses is stopped too.
+ACCOUNT_FAILURES = 20
+ACCOUNT_SECONDS = 900
 
 
 def _scrypt(password, salt, params):
@@ -104,22 +107,26 @@ def same_origin(request):
 
 
 class LoginThrottle:
-    """Blocks a key (email + address) for a minute after five wrong passwords."""
+    """Blocks a key (email + address) for a minute after five wrong passwords; `blocked` with other numbers asks the
+    same of a longer window (an account's wrong passwords from every address)."""
+
+    KEEP = 900   # seconds a failure is remembered: the longest window asked about
 
     def __init__(self):
         self.failures = {}
 
-    def blocked(self, key):
-        return len(self._recent(key)) >= MAX_FAILURES
+    def blocked(self, key, limit=MAX_FAILURES, seconds=LOCK_SECONDS):
+        now = time.time()
+        return sum(1 for t in self._recent(key) if now - t < seconds) >= limit
 
     def fail(self, key):
-        # Forget every key whose failures are all over a minute old, so the table does not grow for ever.
+        # Forget every key whose failures are all old, so the table does not grow for ever.
         for old in [k for k in self.failures if k != key]:
             self._recent(old)
         self.failures[key] = self._recent(key) + [time.time()]
 
     def _recent(self, key):
-        recent = [t for t in self.failures.get(key, []) if time.time() - t < LOCK_SECONDS]
+        recent = [t for t in self.failures.get(key, []) if time.time() - t < self.KEEP]
         if recent:
             self.failures[key] = recent
         else:

@@ -3,7 +3,7 @@
 
 import { api } from '../api.js';
 import { go, here, linkClicks } from '../nav.js';
-import { el, field, icon, segmented } from '../dom.js';
+import { applyTheme, el, field, icon, segmented } from '../dom.js';
 import { signInSet } from '../pages/auth.js';
 import { session } from './session.js';
 import { overview } from './overview.js';
@@ -42,12 +42,6 @@ const FIRST = '/overview';
 const THEMES = [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }, { id: 'system', label: 'Auto', hint: 'Same as this computer' }];
 const root = document.getElementById('app');
 let leave = null;
-
-function applyTheme(theme) {
-  if (theme === 'system') delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = theme;
-  try { localStorage.setItem('scene.theme', theme); } catch (e) { /* no storage */ }
-}
 
 const title = (name) => { document.title = name ? `${name} · Admin console` : 'Admin console · Scene.ai'; };
 

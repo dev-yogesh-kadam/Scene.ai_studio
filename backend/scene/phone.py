@@ -8,6 +8,8 @@ import json
 
 import httpx
 
+from . import vault
+
 TELEGRAM = "https://api.telegram.org/bot{}/{}"
 LABEL = {"critical": "Critical", "serious": "Serious", "warning": "Warning", "resolved": "Resolved", "test": "Test"}
 # ntfy's priorities (5 is the loudest) and the tags it shows as emoji.
@@ -20,12 +22,12 @@ def config(db):
         found = json.loads(db.setting("phone_alerts", "") or "{}")
     except ValueError:
         found = {}
-    return {"telegram_token": found.get("telegram_token", ""), "telegram_chat": found.get("telegram_chat", ""),
+    return {"telegram_token": vault.reveal(found.get("telegram_token", "")), "telegram_chat": found.get("telegram_chat", ""),
             "ntfy_url": found.get("ntfy_url", "")}
 
 
 def save(db, found):
-    db.set_setting("phone_alerts", json.dumps(found))
+    db.set_setting("phone_alerts", json.dumps(dict(found, telegram_token=vault.seal(found.get("telegram_token", "")))))
 
 
 def shown(found):

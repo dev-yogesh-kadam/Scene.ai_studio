@@ -872,13 +872,6 @@ tr.clickable:hover td, tr.clickable:focus-visible td { background: var(--hover);
 .agent-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-head { padding-left: 14px; }
 /* The cast: the references pinned to a project, one row per role. */
-.cast-count:not(:empty) { margin-left: 2px; padding: 0 5px; border-radius: 8px; background: var(--hover); color: var(--text); font: 600 11px/16px var(--sans); }
-.cast-box { display: grid; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); max-height: 60%; overflow-y: auto; }
-.cast-row { display: flex; align-items: center; gap: 10px; }
-.cast-row .attach-thumb { width: 36px; height: 36px; border-radius: 8px; }
-.cast-words { flex: 1; min-width: 0; display: grid; }
-.cast-words b { font-size: 13px; font-weight: 600; }
-.cast-words .slate-text { overflow: hidden; text-overflow: ellipsis; }
 .panel-title { font: 650 14px/20px var(--display); font-stretch: var(--wide); letter-spacing: -.01em; }
 .panel-head .seg button { padding: 0 9px; display: grid; place-items: center; }
 /* Quick actions: a list of things to make, then a short form for the one that was picked. */
@@ -939,13 +932,7 @@ select.opt, a.opt { width: auto; max-width: 100%; height: 28px; padding: 0 10px;
 select.opt:hover, a.opt:hover { background: var(--active); }
 a.opt { color: var(--muted); display: inline-block; }
 .quick-foot .btn.generate { height: 44px; width: 100%; }
-.agent-panel.soon { align-items: center; justify-content: center; padding: 24px; }
-.soon-box { display: grid; justify-items: center; gap: 10px; width: 100%; max-width: 300px; padding: 28px 24px; text-align: center; border: 1px solid var(--line); border-radius: 16px; background: var(--hover); }
-.soon-box svg.icon { width: 30px; height: 30px; padding: 12px; box-sizing: content-box; border-radius: 50%; background: var(--agent-soft); color: var(--agent); }
-.soon-box b { font-size: 15px; font-weight: 600; }
-.soon-box p { margin: 0; line-height: 1.5; }
-.soon-tag { padding: 2px 10px; border-radius: 10px; background: var(--agent-soft); color: var(--agent); font: 600 11px/18px var(--sans); letter-spacing: .02em; }
-.agent-name, h3.agent-label { color: var(--agent); }
+.agent-name { color: var(--agent); }
 button.chip { background: none; cursor: pointer; }
 button.chip:hover { color: var(--text); border-color: var(--control); }
 .chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-s); font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1233,7 +1220,6 @@ ol.steps li { overflow-wrap: anywhere; }
 a.brand { color: inherit; text-decoration: none; }
 
 /* An asset's note on how to use it (or what it shows), under its name on the Assets page */
-.asset-about { margin: 2px 0 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Shared memory: the third tab of the Canvas panel */
 .memory-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1241,18 +1227,6 @@ a.brand { color: inherit; text-decoration: none; }
 .memory-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; }
 .memory-head b { font-size: 15px; }
 .memory-lead { margin: 0; padding: 0 14px 10px; border-bottom: 1px solid var(--line); }
-.memory-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: grid; gap: 8px; align-content: start; }
-.memory-group { border-radius: var(--radius-s); background: var(--raised); box-shadow: 0 0 0 1px var(--line); }
-.memory-group-head { width: 100%; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 0; background: none; color: var(--text); cursor: pointer; text-align: left; font-size: 14px; }
-.memory-group-head:hover { background: var(--hover); border-radius: var(--radius-s); }
-.memory-caret { width: 12px; color: var(--muted); transition: transform .2s var(--ease); }
-.memory-group.open .memory-caret { transform: rotate(90deg); }
-.memory-items { display: grid; gap: 4px; padding: 0 8px 10px; }
-.memory-items > p { margin: 0 4px 4px; }
-.memory-item { border-radius: var(--radius-s); }
-.memory-item.shown { background: var(--hover); }
-.memory-item-head { width: 100%; display: flex; gap: 10px; align-items: flex-start; padding: 6px; border: 0; background: none; color: var(--text); cursor: pointer; text-align: left; border-radius: var(--radius-s); }
-.memory-item-head:hover { background: var(--hover); }
 .memory-thumb { flex: none; width: 44px; height: 44px; border-radius: 6px; overflow: hidden; background: var(--field); display: grid; place-items: center; }
 .memory-thumb img, .memory-thumb video { width: 100%; height: 100%; object-fit: cover; }
 .memory-thumb .sound span, .memory-thumb .note { display: none; }
@@ -1286,18 +1260,11 @@ a.brand { color: inherit; text-decoration: none; }
 .kit-row:hover .kit-remove { opacity: 1; }
 .kit-empty { padding: 18px 8px; text-align: center; }
 .kit-empty p { margin: 4px 0; }
-.kit-import { display: grid; gap: 4px; max-height: 50vh; overflow-y: auto; }
-.kit-import .check { margin-top: 4px; }
 .keep-field { margin: 10px 0 4px; }
 .keep-check { margin-top: 0; font-size: 13px; }
 .keep-row { display: flex; gap: 8px; margin-top: 8px; }
 .keep-name { flex: 1; min-width: 0; }
 .keep-type { width: auto; flex: none; max-width: 140px; }
-.memory-item-text { min-width: 0; display: grid; gap: 1px; }
-.memory-item-text b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.memory-about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.memory-detail { display: grid; gap: 6px; padding: 0 8px 10px 60px; }
-.memory-detail p { margin: 0; }
 
 /* Review: what the agent found when it looked at a finished shot */
 .agent-review { display: grid; gap: 8px; font-size: 12px; line-height: 1.45; color: var(--muted); }
@@ -1332,14 +1299,12 @@ a.brand { color: inherit; text-decoration: none; }
 /* ---------------------------------------------------------------- asset boards */
 /* The saved assets beside the shots: a board per type, each with its own accent, each asset a card with its name. */
 .asset-name { display: flex; align-items: center; gap: 6px; min-width: 0; font: 500 12px/16px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.asset-tag { padding: 0 6px; border-radius: 6px; background: var(--hover); color: var(--muted); font: 600 10px/16px var(--sans); font-style: normal; text-transform: uppercase; letter-spacing: .04em; }
 .asset-preview { width: min(760px, calc(100vw - 32px)); padding: 0; overflow: hidden; }
 .asset-preview-media { background: var(--media-ground); display: grid; place-items: center; max-height: 60vh; }
 .asset-preview-media img, .asset-preview-media video { max-width: 100%; max-height: 60vh; display: block; }
 .asset-preview-media audio { width: calc(100% - 32px); margin: 24px 16px; }
 .asset-preview-words { display: grid; gap: 8px; padding: 16px 20px 18px; }
 .asset-preview-words h2 { margin: 0; }
-.asset-preview-words .asset-tag { justify-self: start; }
 
 /* ---------------------------------------------------------------- agent tabs */
 /* Several conversations in one project: a history menu, the open tabs and a + over the panel. */
@@ -1816,8 +1781,6 @@ button.fold-head:hover .fold-title, button.fold-head:hover .fold-caret { color: 
 .owner-tag { padding: 3px 10px; border-radius: 999px; font-size: 12px; color: var(--series-1); border: 1px solid color-mix(in srgb, var(--series-1) 45%, transparent); }
 .proj-tint { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, .55); font: 600 14px/1 var(--sans); letter-spacing: .12em; }
 .proj-modules { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.proj-empty { color: var(--faint, var(--muted)); }
-.proj-empty .icon { width: 34px; height: 34px; }
 .proj-badge { position: absolute; top: 12px; left: 12px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 650; background: var(--material); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); color: var(--text); }
 .canvas-project.linked { cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
 @media (max-width: 860px) { .proj-page { grid-template-columns: 1fr; } .proj-side { position: static; } .proj-cover { aspect-ratio: 16 / 9; } }
@@ -1865,14 +1828,10 @@ button.fold-head:hover .fold-title, button.fold-head:hover .fold-caret { color: 
 .bulk-picture img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-s); display: block; }
 .bulk-picture .icon-btn { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; min-height: 0; padding: 0; background: var(--material); }
 .bulk-add { width: 64px; height: 64px; border: 1px dashed var(--line-strong); border-radius: var(--radius-s); background: none; color: var(--muted); font-size: 22px; cursor: pointer; }
-.bulk-head { display: flex; align-items: center; gap: 4px; }
-.bulk-toggle { flex: 1; text-align: left; background: none; border: 0; color: var(--text); font: 600 13px/1.4 var(--sans); padding: 4px 0; cursor: pointer; }
-.bulk-checks { display: grid; gap: 2px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-s); padding: 4px; }
 .bulk-check { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .bulk-check:hover { background: var(--hover); }
 .bulk-check.off { opacity: .5; cursor: default; }
 .bulk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.bulk-notice:empty { display: none; }
 
 /* Console, Servers & APIs: each address in full */
 .endpoint-url { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 4px 0 6px; }

@@ -3,7 +3,6 @@ in workflows/image): the catalog reads them from their sidecars, a job carries e
 and the prompt's names for them come from each model's hints."""
 
 import asyncio
-import json
 import shutil
 from pathlib import Path
 

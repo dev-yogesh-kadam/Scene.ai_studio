@@ -3,7 +3,6 @@ to a model that can see; small jobs to a quick model; the loop of tool calls in 
 read in parts. Ollama is faked: each test says what it answers."""
 
 import asyncio
-import json
 
 import pytest
 

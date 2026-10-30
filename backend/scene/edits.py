@@ -78,29 +78,42 @@ async def _timeline(settings, item, target, node_path, tmp_dir):
 
 
 async def _assemble(settings, item, target, node_path, tmp_dir):
-    """The shots in order, a title card before and an end card after, music mixed under all of it. The cards are drawn
-    by HyperFrames in the shape of the shots; the files made on the way are removed."""
+    """The shots in order, a title card before and an end card after, music mixed under all of it, the sound levelled
+    to one loudness. A clip marked "fade" (the first of a new scene) and the cards crossfade in; the rest cut. The
+    cards are drawn by HyperFrames in the shape of the shots; the files made on the way are removed."""
     spare = []
 
-    async def card(scene, label):
+    def between(label):
         path = Path(target).with_name("{}_{}.mp4".format(Path(target).stem, label))
         spare.append(path)
+        return path
+
+    async def card(scene, label):
+        path = between(label)
         await motion.render_sequence([scene], settings["look"], settings["shape"], path, node_path, tmp_dir)
         return path
 
     try:
-        parts = []
+        parts, fades = [], set()
         if settings.get("title"):
             parts.append((await card(settings["title"], "title"), 0.0, 0.0))
-        parts += [(item(clip["id"]), clip["start"], clip["end"]) for clip in settings["clips"]]
+        for clip in settings["clips"]:
+            if parts and (clip.get("fade") or len(parts) == 1 and settings.get("title")):
+                fades.add(len(parts))
+            parts.append((item(clip["id"]), clip["start"], clip["end"]))
         if settings.get("end"):
+            fades.add(len(parts))
             parts.append((await card(settings["end"], "end"), 0.0, 0.0))
-        joined = Path(target).with_name(Path(target).stem + "_joined.mp4") if settings.get("music") else target
-        if joined is not target:
-            spare.append(joined)
-        seconds = await media.sequence(parts, joined)
+        joined = between("joined")
+        seconds = await media.sequence(parts, joined, fades)
         if settings.get("music"):
-            await media.add_sound(joined, item(settings["music"], "audio"), target, False)
+            mixed = between("mixed")
+            await media.add_sound(joined, item(settings["music"], "audio"), mixed, False)
+            joined = mixed
+        if (await media.probe(joined))["audio"]:
+            await media.level(joined, target)
+        else:
+            Path(joined).replace(target)
     finally:
         for path in spare:
             path.unlink(missing_ok=True)

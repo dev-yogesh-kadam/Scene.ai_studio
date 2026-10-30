@@ -41,17 +41,6 @@ async def delete_state(run: str, request: Request, path: str, user: dict = Depen
     return {"deleted": _guarded(lambda: runs.delete(request.app.state.db, user["id"], run, path))}
 
 
-@router.get("/runs/{run}/budget")
-async def read_budget(run: str, request: Request, user: dict = Depends(current_user)):
-    return _guarded(lambda: runs.budget(request.app.state.db, user["id"], run))
-
-
-@router.put("/runs/{run}/budget")
-async def write_budget(run: str, body: dict, request: Request, user: dict = Depends(current_user)):
-    """{"credits": a whole number, or null for no limit}. The agent cannot set it: its tools refuse the path."""
-    return _guarded(lambda: runs.set_budget(request.app.state.db, user["id"], run, body.get("credits")))
-
-
 @router.get("/runs/{run}/coverage")
 async def check_coverage(run: str, request: Request, path: str, against: str, user: dict = Depends(current_user)):
     """Whether every name under `against` has one under `path`: {"ok", "missing", "extra", "count"}."""

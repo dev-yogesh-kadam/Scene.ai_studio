@@ -3,10 +3,10 @@
 // that has a slot for it (what the cast was). One panel for what the Cast box and the Shared memory tab were.
 
 import { api } from '../api.js';
-import { ago, ask, el, field, icon } from '../dom.js';
+import { ago, ask, el, field, icon, openDialog } from '../dom.js';
 import { addMenu } from './agent.js';
 
-export const KIT = 'NeuralCore';   // what the feature is called wherever the user reads it
+export const KIT = 'Asset book';   // what the feature is called wherever the user reads it
 export const KIT_TYPES = [
   { id: 'character', label: 'Character' }, { id: 'location', label: 'Location' }, { id: 'prop', label: 'Prop' },
   { id: 'outfit', label: 'Outfit' }, { id: 'voice', label: 'Voice' }, { id: 'style', label: 'Style' },
@@ -15,7 +15,7 @@ export const KIT_TYPES = [
 const FIND_KEY = 'scene.kit.type';
 const LOOK_AGAIN = 15000;   // while pictures wait to be described, the panel looks again this often (a few times)
 
-export const kitUrl = (entry) => `/api/assets/${entry.id}/file`;
+export const kitUrl = (entry) => `/api/kit/${entry.id}/file`;
 
 // The type of an entry made from a file dropped into a reference slot with this label (as the server reads it).
 const SLOT_TYPES = [['character', /character|main character|second person|\bperson\b/i], ['location', /background|location/i],
@@ -28,21 +28,13 @@ export function kitThumb(entry) {
   return el('span', { class: 'kit-glyph' }, icon(entry.kind === 'audio' ? 'audio' : 'book'));
 }
 
-function openDialog(...content) {
-  const dialog = el('dialog', {}, ...content);
-  dialog.addEventListener('close', () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
-  return dialog;
-}
-
 const typeSelect = (current, onChange) => el('select', { class: 'kit-type', 'aria-label': 'Type', onchange: (e) => onChange(e.target.value) },
   KIT_TYPES.map((t) => el('option', { value: t.id, selected: t.id === current }, t.label)));
 
 // Add a file, a canvas item or a script to a project's kit. file / item: what is added (a script has neither).
 // Resolves with the new entry, or null if the dialog is closed.
 export function addToKitDialog({ project = 0, file = null, item = null, script = false, type = '' } = {}) {
-  if (!project) {   // a NeuralCore belongs to a project: there is none for all work
+  if (!project) {   // an asset book belongs to a project: there is none for all work
     alert(`The ${KIT} belongs to a project. Open a project from All projects and keep its characters, places and props there; every module of it shares them.`);
     return Promise.resolve(null);
   }
@@ -88,7 +80,7 @@ export function addToKitDialog({ project = 0, file = null, item = null, script =
   });
 }
 
-// "Keep the result in the Kit as …": a name and a type given before Generate, so what is made goes into the project's
+// "Keep the result in the asset book as …": a name and a type given before Generate, so what is made goes into the project's
 // kit under that name when it is done (a character sheet made by hand, a location plate). A picture can be kept as any
 // type but a voice; a sound only as a voice. show(kind): shown for the kind the workflow makes, hidden for the rest.
 export function keepField() {
@@ -101,7 +93,7 @@ export function keepField() {
   function draw() { row.classList.toggle('hidden', !on.checked); if (on.checked) name.focus(); }
   return {
     node,
-    // inProject: whether the job is in a project; outside one there is no NeuralCore to keep it in
+    // inProject: whether the job is in a project; outside one there is no asset book to keep it in
     show(kindMade, inProject = true) {
       makes = inProject ? kindMade : '';
       const types = !makes ? [] : kindMade === 'audio' ? ['voice'] : kindMade === 'image' ? ['character', 'location', 'prop', 'outfit', 'style'] : [];
@@ -236,7 +228,7 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
   function draw() {
     stamp.textContent = loadedAt ? ago(loadedAt / 1000) : '';
     addButton.classList.toggle('hidden', !projectId());
-    if (!projectId()) {   // all work, in no project: there is no NeuralCore here
+    if (!projectId()) {   // all work, in no project: there is no asset book here
       node.querySelector('.kit-count').textContent = '';
       body.replaceChildren(el('div', { class: 'kit-empty' }, el('p', {}, `The ${KIT} belongs to a project. Open a project from All projects and keep its characters, places and props there; every module of it shares them.`)));
       return;

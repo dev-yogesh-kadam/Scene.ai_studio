@@ -1,7 +1,6 @@
 """Each user's finished work is kept in a folder per project, with one per module inside it (outputs.py): named after
 the project, renamed with it, and deleted with it. The backup's copies are never touched."""
 
-import time
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
@@ -44,44 +43,6 @@ def test_work_is_filed_by_project_and_module_and_follows_them(client):
     client.delete("/api/projects/{}".format(film))                                              # the project: all of it
     assert not (home / "Pocket ({})".format(film)).exists()
     assert (home / path(main_item)).is_file() and backup.is_file()                             # others, and the backup, stay
-
-
-def test_work_from_before_folders_is_filed_once(client):
-    from test_api import register
-    me = register(client)
-    state, db = client.app.state, client.app.state.db
-    home = state.outputs.folder(me["id"])
-    film = client.post("/api/projects", json={"name": "Old"}).json()["id"]
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "flat.png").write_bytes(PNG)
-    (home / ".posters").mkdir(exist_ok=True)
-    (home / ".posters" / "flat.png.jpg").write_bytes(b"p")
-    (home / "loose.png").write_bytes(PNG)
-    db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created, project_id) "
-           "VALUES (?, 'image/x', 'image', 'Flat', 'flat.png', '{}', '{}', ?, ?)", (me["id"], time.time(), film))
-    db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
-           "VALUES (?, 'image/x', 'image', 'Loose', 'loose.png', '{}', '{}', ?)", (me["id"], time.time()))
-    assert state.outputs.file_all() == 2
-    names = sorted(r["filename"] for r in db.all("SELECT filename FROM generations WHERE user_id = ?", (me["id"],)))
-    assert names == ["No project/loose.png", "Old ({})/Module 1/flat.png".format(film)]
-    assert (home / "Old ({})".format(film) / "Module 1" / ".posters" / "flat.png.jpg").is_file()   # its poster went with it
-    assert not (home / ".posters").exists()                                                    # nothing left behind
-    assert state.outputs.file_all() == 0                                                       # nothing left to file
-
-
-def test_work_filed_at_the_top_of_a_project_moves_into_its_main_canvas_folder(client):
-    from test_api import register
-    me = register(client)
-    state, db = client.app.state, client.app.state.db
-    home = state.outputs.folder(me["id"])
-    film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
-    (home / "Film ({})".format(film)).mkdir(parents=True)
-    (home / "Film ({})".format(film) / "shot.png").write_bytes(PNG)                      # where it was filed before
-    db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created, project_id) "
-           "VALUES (?, 'image/x', 'image', 'Shot', ?, '{}', '{}', ?, ?)", (me["id"], "Film ({})/shot.png".format(film), time.time(), film))
-    assert state.outputs.file_all() == 1
-    assert db.one("SELECT filename FROM generations WHERE project_id = ?", (film,))["filename"] == "Film ({})/Module 1/shot.png".format(film)
-    assert [p.name for p in (home / "Film ({})".format(film)).iterdir()] == ["Module 1"]   # the project folder holds folders only
 
 
 def test_the_main_canvas_can_be_renamed_and_its_folder_follows(client):

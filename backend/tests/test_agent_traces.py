@@ -25,7 +25,7 @@ def fake_ollama(monkeypatch, agent, answer=None, error=None):
 
 
 def test_calls_are_written_down_shown_and_replayed(client, monkeypatch):
-    me = register(client)
+    register(client)
     state = client.app.state
     call = state.traces.record("plan", "local-a:8b", None, time.time() - 2,
                                [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "A dog.", "images": ["x", "y"]}],

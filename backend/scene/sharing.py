@@ -2,7 +2,7 @@
 
 A project's owner adds people by email, each with a role. A member works in the whole project: its own canvas and every
 module. What a member makes stays theirs (their credits, their folder of results), filed in the project for everyone in
-it to see. The canvas layout, the timeline and the NeuralCore kit of a project are the owner's, which members open and,
+it to see. The canvas layout, the timeline and the asset book of a project are the owner's, which members open and,
 by their role, change.
 
 Every route that touches a project asks `require` first. Rows of other people are then read for the project only, on
@@ -21,7 +21,7 @@ RANK = {"viewer": 1, "creator": 2, "manager": 3, "owner": 4}
 LABELS = {"viewer": "Viewer", "creator": "Creator", "manager": "Manager", "owner": "Owner"}
 ABOUT = {
     "viewer": "Sees the project, its canvases and what is made there, and downloads it.",
-    "creator": "Also makes things there, adds modules, arranges the canvas and the timeline and edits the NeuralCore.",
+    "creator": "Also makes things there, adds modules, arranges the canvas and the timeline and edits the asset book.",
     "manager": "Also adds and removes people, renames the project and its modules, and deletes modules.",
 }
 # What each action needs, so the routes and the studio say the same thing.

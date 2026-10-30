@@ -210,7 +210,7 @@ export function render(view) {
         picker.textContent = here ? (here.parent_name ? `${here.parent_name} › ${here.name}` : here.name) : 'All work';
         picker.onclick = here ? () => go('/project?id=' + (here.parent_id || here.id)) : null;
         picker.classList.toggle('linked', !!here);
-        picker.title = here ? 'Open the project: its kit and its modules' : 'Everything you have made';
+        picker.title = here ? 'Open the project: its asset book and its modules' : 'Everything you have made';
       }
       tabTitle((projects.projects.find((p) => p.id === project) || { name: 'Timeline' }).name);
       videos = library.items;

@@ -696,7 +696,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   function usesOf(step) {
     const shown = [
       step.start && { url: `/api/library/${step.start.id}/file`, kind: 'image', name: step.start.name, role: 'first frame' },
-      ...(step.uses || []).map((use) => ({ url: use.asset ? `/api/assets/${use.asset}/file` : `/api/library/${use.id}/file`,
+      ...(step.uses || []).map((use) => ({ url: use.asset ? `/api/kit/${use.asset}/file` : `/api/library/${use.id}/file`,
         kind: use.kind || 'image', name: use.name, role: use.label.toLowerCase().split(' (')[0] + (use.cast ? ' · cast' : ''), saved: !!use.asset })),
     ].filter(Boolean);
     if (!shown.length) return null;
@@ -871,7 +871,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
 
   // The prompt, the references and the settings a step was made with, folded under "Generation information".
   function information(step) {
-    const references = [...(step.uses || []).map((use) => ({ url: use.asset ? `/api/assets/${use.asset}/file` : `/api/library/${use.id}/file`,
+    const references = [...(step.uses || []).map((use) => ({ url: use.asset ? `/api/kit/${use.asset}/file` : `/api/library/${use.id}/file`,
       kind: use.kind || 'image', name: use.name })), step.start && { url: `/api/library/${step.start.id}/file`, kind: 'image', name: step.start.name }].filter(Boolean);
     step.info = step.info || {};
     return fold({ glyph: 'film', title: 'Generation', sub: 'information', state: step.info, onToggle: redraw, className: 'info',
@@ -1099,7 +1099,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         drawLog();
         return;
       }
-      const before = step.after ? run.steps[step.after.step] : null;
+      const before = step.after ? run.steps[step.after.step] : step.follows != null ? run.steps[step.follows] : null;
       const uses = (step.uses || []).map((use) => (use.asset ? { asset: use.asset } : { id: use.id }));
       const found = await api('/api/agent/review', { method: 'POST', json: {
         item: take.made, prompt: take.prompt || step.prompt, uses, previous: before ? before.made || null : null, retake: allowRetake } });
@@ -1198,7 +1198,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     step.take2 = { prompt: plan.prompt, queuedAt: Date.now() };
     drawLog();
     try {
-      const settings = { ...plan.settings, refs: { ...(plan.settings.refs || {}) }, ...runOf() };
+      const settings = { ...plan.settings, refs: { ...(plan.settings.refs || {}) } };
       if (plan.start) {   // the review found that the cut jumps: the retake starts on the last frame of the shot before
         const ref = await api(`/api/library/${plan.start.id}/reference`, { method: 'POST' });
         settings.refs[plan.start.slot] = { comfy_name: ref.comfy_name, name: ref.name };
@@ -1227,7 +1227,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   const pick = (table, id) => {
     if (table === 'item') return onFocus(id);
     const dialog = el('dialog', { class: 'asset-preview' },
-      el('div', { class: 'asset-preview-media' }, el('img', { src: `/api/assets/${id}/file`, alt: '' })),
+      el('div', { class: 'asset-preview-media' }, el('img', { src: `/api/kit/${id}/file`, alt: '' })),
       el('div', { class: 'asset-preview-words' }, el('div', { class: 'dialog-buttons' },
         el('button', { class: 'btn small primary', onclick: () => dialog.close() }, 'Close'))));
     dialog.addEventListener('close', () => dialog.remove());
@@ -1260,7 +1260,9 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   const plain = (run) => String(run.reply || '').replace(/\[\[(item|asset):(\d+)\]\]/g, (m, t, n) => ((run.chips || {})[`${t}:${n}`] || {}).name || '');
 
   function reply(run) {
-    const long = run.reply.length > LONG_REPLY || run.reply.split('\n').length > 10;
+    // The newest reply is shown in full; once a newer message is sent, a long one folds under Show more.
+    const newest = run === runs[runs.length - 1] && !pending;
+    const long = !newest && (run.reply.length > LONG_REPLY || run.reply.split('\n').length > 10);
     return el('div', { class: 'turn-reply' + (run.error ? ' error' : '') },
       el('div', { class: 'md' + (long && !run.ui.more ? ' clamped' : '') }, markdown(run.reply, run.chips || {}, pick)),
       long && el('button', { type: 'button', class: 'more-btn', onclick: () => { run.ui.more = !run.ui.more; drawLog(); } },
@@ -1283,11 +1285,6 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
             send({ text: option, shown: option, ids: [], parts: [{ text: option }] });
           } }, option))));
   }
-
-  // Every job of a long run is tagged as the run's (what it spent is kept with it, never shown or limited unless a budget
-  // is set): a retake, a still of the storyboard or a clip animated from it as much as a planned step. A conversation
-  // is a long run once the server has sent its run's spending for it.
-  const runOf = () => (runs.some((r) => r.budget) ? { run_of: session || 'main' } : {});
 
   // The newest plan that waits for approval: its bar goes in the dock.
   const docked = () => [...runs].reverse().find((r) => r.state === 'proposed') || null;
@@ -1603,6 +1600,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     const controller = new AbortController();
     const auto = !!(typed && typed.auto);   // the studio carries a run on by itself: not a message the user wrote
     pending = { instruction, parts, auto, stop: () => controller.abort(), events: [], status: 'Thinking', started: Date.now() };
+    for (const r of runs) if (r.ui) r.ui.more = false;   // a new message folds every earlier long reply, opened ones too
     startWhimsy();
     if (fromBox) input.replaceChildren();
     input.contentEditable = 'false';
@@ -1625,7 +1623,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       if (!answer) throw new Error('The agent stopped before it finished. Try again.');
       made = { instruction, parts, auto, reply: answer.reply, thought: answer.thought, activity: answer.activity || [], seconds: answer.seconds,
         chips: answer.chips || {}, steps: answer.steps, total: answer.total, state: answer.steps.length ? 'proposed' : 'answered', at: Date.now(), ui: {},
-        llm: answer.llm || null, question: answer.question || null, continues: !!answer.continues, budget: answer.budget || null };
+        llm: answer.llm || null, question: answer.question || null, continues: !!answer.continues };
       if (answer.direction) direction = answer.direction;   // the agent kept its notes up to date
       if (store.user && answer.balance != null) { store.user.credits = answer.balance; }   // the message itself may have cost credits
       runs.push(made);
@@ -1664,11 +1662,14 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     let body;
     try {
       const clips = [...(cut.clips || [])];
+      let last = null;   // the shot before, to fade where a new place (a new scene) starts and cut within one
       for (const index of cut.steps || []) {
         const shot = run.steps[index];
         if (!shot || shot.skipped) continue;
         const first = await resultOf(shot);
-        clips.push({ id: usedTake(shot).made || first, start: 0, end: 0 });
+        const fade = Boolean(last && shot.place && last.place && shot.place !== last.place);
+        clips.push({ id: usedTake(shot).made || first, start: 0, end: 0, fade });
+        last = shot;
       }
       const music = cut.music_step != null ? await resultOf(run.steps[cut.music_step]) : cut.music;
       body = { name: cut.name, clips, music, title: cut.title, end: cut.end, look: cut.look, shape: cut.shape, project_id: projectId() || null };
@@ -1724,7 +1725,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
           continue;
         }
         const uses = step.uses || [];
-        const settings = { ...step.settings, refs: {}, parent: step.start ? step.start.id : uses.length ? uses[0].id : null, ...runOf() };
+        const settings = { ...step.settings, refs: {}, parent: step.start ? step.start.id : uses.length ? uses[0].id : null };
         for (const use of uses) {   // each attached item goes into the slot the plan named for it
           if (use.asset) {   // a saved asset from the agent's memory: the server takes it by its id
             settings.refs[use.slot] = { asset_id: use.asset, name: use.name };

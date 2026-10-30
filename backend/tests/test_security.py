@@ -170,3 +170,39 @@ def test_row_level_security_keeps_each_user_to_their_own_rows(client):
         assert raw.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
         assert raw.execute("SELECT COUNT(*) FROM settings").fetchone()[0] >= 0   # tables of the whole installation are open
 
+
+
+def test_secrets_are_kept_encrypted_and_read_back():
+    from scene import vault
+    sealed = vault.seal("sk-123")
+    assert sealed.startswith(vault.MARK) and "sk-123" not in sealed
+    assert vault.seal(sealed) == sealed and vault.reveal(sealed) == "sk-123"
+    assert vault.reveal("plain-from-before") == "plain-from-before" and vault.seal("") == ""
+    assert vault.reveal(vault.MARK + "not-a-token") == ""   # sealed with a key that is gone
+
+
+def test_only_a_browser_on_this_machine_counts_as_local():
+    from types import SimpleNamespace
+    from scene.api.auth import on_this_machine
+
+    def asked(address, host, **headers):
+        return on_this_machine(SimpleNamespace(client=SimpleNamespace(host=address), headers={"host": host, **headers}))
+    assert asked("127.0.0.1", "localhost:8080") and asked("::1", "[::1]:8080")
+    assert not asked("127.0.0.1", "studio.example.com")                                    # a proxy passing the name on
+    assert not asked("127.0.0.1", "localhost:8080", **{"x-forwarded-for": "8.8.8.8"})     # a proxy on this machine
+    assert not asked("127.0.0.1", "localhost:8080", **{"cf-connecting-ip": "8.8.8.8"})    # the tunnel
+    assert not asked("192.168.1.5", "localhost:8080")
+
+
+def test_an_open_page_stops_getting_updates_once_its_session_is_ended(client):
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    account(client)
+    with client.websocket_connect("/api/events") as ws:
+        assert "jobs" in json.loads(ws.receive_text())
+        ws.send_text(json.dumps({"ping": 1}))
+        assert "jobs" in json.loads(ws.receive_text())            # still signed in: answered
+        client.app.state.db.run("DELETE FROM sessions")            # signed out everywhere (an admin, a disabled account)
+        ws.send_text(json.dumps({"ping": 1}))
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_text()
