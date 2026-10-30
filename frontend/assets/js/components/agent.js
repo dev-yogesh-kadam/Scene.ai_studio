@@ -8,7 +8,7 @@ import { store, subscribe, refreshJobs } from '../store.js';
 import { openViewer } from './media.js';
 import { pickLibraryItem } from './assets.js';
 import { KIT } from './kit.js';
-import { chip, clock, fold, markdown, span, workRows } from './conversation.js';
+import { chip, clock, fold, glyphsOf, markdown, span, workRows } from './conversation.js';
 import { go } from '../nav.js';
 
 const KEPT = 60;   // how many turns an agent tab keeps
@@ -130,10 +130,11 @@ export function spendCard(anchor, spent, { above = false } = {}) {
 // projectId(): the current project or 0. onJobs(ids): jobs the agent started. onMemory(): show the project's kit.
 // session: the agent tab this panel holds (its conversation is kept on its own). onSaved({spent, updated}): the
 // conversation was saved, with what it has spent so far. onFocus(itemId): show that item on the canvas.
-// locate(itemId): where the canvas has it, {shot, take}, or null.
+// locate(itemId): where the canvas has it, {shot, take}, or null. tabName(): the tab's name, for its Claude session's title.
 // The page calls attach(item) when a frame is clicked: the item goes into the message as a chip, where the cursor is.
 export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = null, session = null, onSaved = () => {},
-  onFocus = () => {}, locate = () => null, selection = () => [], items = () => [], pickCanvas = null, onUploaded = () => {} } = {}) {
+  onFocus = () => {}, locate = () => null, selection = () => [], items = () => [], pickCanvas = null, onUploaded = () => {},
+  tabName = () => '' } = {}) {
   let direction = '';  // the durable notes of this conversation (what the film is, the style, the shot list), kept beside the turns
   let folded = 0;      // how many turns from the start are folded into the direction and no longer sent
   let runs = [];       // the turns: {instruction, parts, reply, thought, activity, chips, steps, total, state, work, ui}
@@ -145,10 +146,10 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
 
   const status = el('span', { class: 'agent-status slate-text' }, 'checking…');   // the model's name, or why it is offline
   // Which model answers, and what a message to it costs. The choice is this browser's, kept in localStorage.
-  let models = { list: [], current: null, prices: {}, shown: (name) => name };
+  let models = { list: [], current: null, prices: {}, byTokens: [], shown: (name) => name };
   const modelPicker = el('button', { type: 'button', class: 'agent-model-btn hidden', 'aria-haspopup': 'menu', title: 'The model the agent uses',
     onclick: () => openModels() });
-  const priceText = (name) => (models.prices[name] ? `${models.prices[name]} cr a message` : 'Free');
+  const priceText = (name) => (models.prices[name] ? `${models.prices[name]} cr a message` : models.byTokens.includes(name) ? 'Charged by tokens' : 'Free');
   const drawModel = () => {
     modelPicker.replaceChildren(el('span', { class: 'agent-model-name' }, models.shown(models.current || '')), icon('down'));
     modelPicker.title = `The model the agent uses: ${models.shown(models.current || '')} · ${priceText(models.current)}`;
@@ -1426,23 +1427,50 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         el('button', { class: 'btn small primary', onclick: () => approve(run) }, 'Resume')));
   }
 
+  // Under the newest answer, once this tab's Claude session is 80% full: compact it now, or it compacts on its own at
+  // about 90%. Either way it stays the same session (backend/scene/sessions.py).
+  function contextNote(run) {
+    const c = run.context;
+    if (!c || (!c.offer && !c.compacted)) return null;
+    if (c.compacted) return el('div', { class: 'agent-context', role: 'status' }, el('span', { class: 'grow' }, `Compacted. The context is now ${c.percent}% full.`));
+    const button = el('button', { class: 'btn small', disabled: !!c.compacting, onclick: async () => {
+      c.compacting = true;
+      drawLog();
+      try {
+        const done = await api('/api/agent/session/compact', { method: 'POST', json: { run: session || 'main', project_id: projectId() || null } });
+        run.context = { ...done.context, compacted: true };
+      } catch (e) { c.compacting = false; c.error = e.message; }
+      saveRuns();
+      drawLog();
+    } }, c.compacting ? 'Compacting…' : 'Compact now');
+    return el('div', { class: 'agent-context', role: 'status' },
+      el('span', { class: 'grow' }, c.error || `${c.percent}% of the context is filled. Compact it now, or it will compact on its own at around 90%.`),
+      button);
+  }
+
   // One turn: the message, what the agent did and thought, its reply, its plan, the work after approval, and its cost.
   function turn(run) {
     run.ui = run.ui || {};
     const ui = run.ui;
     const done = run.activity || [];
-    const thoughts = done.filter((e) => e.type === 'thought');
-    const thought = thoughts[thoughts.length - 1];
-    const before = done.filter((e) => e !== thought);
-    const lastStep = [...before].reverse().find((e) => e.type === 'activity');
+    // Thinking and working are one quiet row above the reply: the marks of what it did, how long, and its last step.
+    // Opened, it lists the steps with the thoughts among them; what the model read and wrote, in tokens, is kept to its
+    // foot, out of the way of the reply.
+    const tally = done.filter((e) => e.type === 'activity' && e.icon === 'info');
+    const steps = done.filter((e) => !tally.includes(e));
+    const lastAny = [...done].reverse().find((e) => e.type === 'activity');
+    const lastStep = [...steps].reverse().find((e) => e.type === 'activity');
+    const onlyThought = steps.length === 1 && steps[0].type === 'thought';
     const after = run.work || [];
     return el('div', { class: 'turn' },
       said(run),
-      before.length > 0 && fold({ glyph: 'wrench', title: `Worked ${span(run.seconds != null ? run.seconds : (lastStep || {}).at)}`, sub: lastStep ? lastStep.text : '',
-        state: (ui.work = ui.work || {}), onToggle: redraw, className: 'work', body: workRows(before, (ui.workItems = ui.workItems || {}), redraw) }),
-      thought && fold({ glyph: 'bulb', title: `Thought for ${span(thought.seconds)}`, state: (ui.thought = ui.thought || {}), onToggle: redraw,
-        className: 'thought', body: thought.text ? el('p', { class: 'fold-text' }, thought.text) : null }),
+      done.length > 0 && fold({ glyphs: glyphsOf(steps.length ? steps : done),
+        title: onlyThought ? `Thought for ${span(steps[0].seconds)}` : `Worked ${span(run.seconds != null ? run.seconds : (lastAny || {}).at)}`,
+        sub: lastStep ? lastStep.text : '', state: (ui.work = ui.work || {}), onToggle: redraw, className: 'work',
+        body: [...(onlyThought ? [steps[0].text && el('p', { class: 'fold-text' }, steps[0].text)] : workRows(steps, (ui.workItems = ui.workItems || {}), redraw)),
+          tally.length > 0 && el('p', { class: 'work-foot' }, tally.map((e) => e.text).join(' · '))].filter(Boolean) }),
       run.reply && reply(run),
+      run === runs[runs.length - 1] && contextNote(run),
       run.question && asked(run),
       run.steps.length > 0 && plan(run),
       after.length > 0 && fold({ glyph: 'wrench', title: `Worked ${span((after[after.length - 1].at - (run.approvedAt || after[0].at)) / 1000)}`,
@@ -1475,12 +1503,11 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     const clockText = el('span', { class: 'fold-sub' });
     const body = el('div', { class: 'fold-body' });
     const work = el('div', { class: 'fold work open hidden' },
-      el('div', { class: 'fold-head' }, icon('wrench'), el('span', { class: 'fold-title' }, 'Working'), clockText), body);
-    const thoughts = el('div', { class: 'live-thoughts' });
+      el('div', { class: 'fold-head' }, el('span', { class: 'live-spinner', 'aria-hidden': 'true' }), el('span', { class: 'fold-title' }, 'Working'), clockText), body);
     const word = el('span', { class: 'thinking-word' });
     const say = el('span', { class: 'thinking-say' }, word);
-    parts = { clockText, body, work, thoughts, word, say, rows: 0, thought: 0, shown: null };
-    const turnEl = el('div', { class: 'turn live' }, said(pending), work, thoughts,
+    parts = { clockText, body, work, word, say, seen: 0, shown: null };
+    const turnEl = el('div', { class: 'turn live' }, said(pending), work,
       el('div', { class: 'agent-thinking', role: 'status', 'aria-live': 'polite' },
         el('span', { class: 'thinking-dots', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')), say));
     fillLive(false);
@@ -1489,18 +1516,14 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   // fresh: what is added now is new (it fades in); false when the turn was just built again with what it had.
   function fillLive(fresh = true) {
     const p = pending;
-    const steps = p.events.filter((e) => e.type === 'activity');
-    const thoughts = p.events.filter((e) => e.type === 'thought');
-    if (steps.length > parts.rows) {
-      const rows = workRows(steps.slice(parts.rows), {}, redraw);
+    // Steps and thoughts go into the one card in the order they came; the count of tokens waits for the finished turn.
+    const news = p.events.slice(parts.seen).filter((e) => e.type === 'thought' || (e.type === 'activity' && e.icon !== 'info'));
+    parts.seen = p.events.length;
+    if (news.length) {
+      const rows = workRows(news, {}, redraw);
       if (fresh) rows.forEach((row) => row.classList.add('row-in'));
       parts.body.append(...rows);
-      parts.rows = steps.length;
       parts.work.classList.remove('hidden');
-    }
-    if (thoughts.length > parts.thought) {
-      parts.thoughts.append(...thoughts.slice(parts.thought).map((t) => fold({ glyph: 'bulb', title: `Thought for ${span(t.seconds)}`, className: 'thought' })));
-      parts.thought = thoughts.length;
     }
     parts.clockText.textContent = span((Date.now() - p.started) / 1000);
     const word = thinkingWord(p).replace(/…$/, '');
@@ -1611,7 +1634,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     try {
       let answer = null;
       await apiLines('/api/agent/plan', { signal: controller.signal, json: { instruction: text, project_id: projectId() || null, selection: ids,
-        model: localStorage.getItem('scene.agent.model') || null, direction, run: session || 'main',
+        model: localStorage.getItem('scene.agent.model') || null, direction, run: session || 'main', tab: tabName(),
         history: recalled().map((r) => ({ instruction: r.instruction, reply: r.reply,
           steps: r.steps.map((s) => ({ name: s.name, uses: (s.uses || []).map((u) => u.name) })) })) } }, (event) => {
         if (event.type === 'error') throw new Error(event.message);
@@ -1623,7 +1646,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       if (!answer) throw new Error('The agent stopped before it finished. Try again.');
       made = { instruction, parts, auto, reply: answer.reply, thought: answer.thought, activity: answer.activity || [], seconds: answer.seconds,
         chips: answer.chips || {}, steps: answer.steps, total: answer.total, state: answer.steps.length ? 'proposed' : 'answered', at: Date.now(), ui: {},
-        llm: answer.llm || null, question: answer.question || null, continues: !!answer.continues };
+        llm: answer.llm || null, question: answer.question || null, continues: !!answer.continues, context: answer.context || null };
       if (answer.direction) direction = answer.direction;   // the agent kept its notes up to date
       if (store.user && answer.balance != null) { store.user.credits = answer.balance; }   // the message itself may have cost credits
       runs.push(made);
@@ -1795,7 +1818,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       // A hosted model is named "<service>/<name>"; it is shown as its name and the service it is asked of.
       const services = Object.fromEntries((state.hosted || []).map((s) => [s.id, s.name]));
       const shown = (name) => { const [sid, ...rest] = name.split('/'); return rest.length && services[sid] ? `${rest.join('/')} · ${services[sid]}` : name; };
-      models = { list: names, current, prices: state.prices || {}, shown };
+      models = { list: names, current, prices: state.prices || {}, byTokens: state.by_tokens || [], shown };
       drawModel();
       modelPicker.classList.toggle('hidden', !names.length);
       status.classList.toggle('hidden', state.online && names.length > 0);

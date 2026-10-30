@@ -19,6 +19,8 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import unquote, urlsplit, urlunsplit
 
+from . import refs
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -139,6 +141,36 @@ CREATE TABLE IF NOT EXISTS agent_calls (
     tool TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
     chars INTEGER NOT NULL DEFAULT 0
+);
+-- The Claude session of an agent tab (sessions.py): one for each tab of a project, kept for good, for admins to watch.
+-- ref is its own id (SES...), agent the tab's (AGT...), claude_id the session Claude Code keeps it in.
+CREATE TABLE IF NOT EXISTS claude_sessions (
+    id INTEGER PRIMARY KEY,
+    ref TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL DEFAULT 0,   -- 0: all work, in no project
+    run TEXT NOT NULL,
+    agent TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    claude_id TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    context_tokens INTEGER NOT NULL DEFAULT 0,
+    context_window INTEGER NOT NULL DEFAULT 0,
+    messages INTEGER NOT NULL DEFAULT 0,
+    compacts INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'idle',
+    started REAL NOT NULL,
+    active REAL NOT NULL
+);
+-- What happened in a Claude session, in order: the user's messages, what Claude wrote and thought, the tools it
+-- called and what they gave, its answers, compactions, model changes and errors. Kept for good.
+CREATE TABLE IF NOT EXISTS claude_events (
+    id INTEGER PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    at REAL NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    data TEXT NOT NULL DEFAULT ''
 );
 -- Moderation (moderation.py): a verdict on an item ("fine", "removed"), or a prompt refused before it was made.
 CREATE TABLE IF NOT EXISTS moderation (
@@ -315,6 +347,8 @@ COLUMNS = [
     ("jobs", "resumes", "INTEGER NOT NULL DEFAULT 0"),
     # A workflow offered to admins alone, to try it before users see it (with `enabled` still 1).
     ("workflow_pricing", "admins_only", "INTEGER NOT NULL DEFAULT 0"),
+    # A project's or module's public id, what its links show (refs.py): PRJ... for a project, MOD... for a module.
+    ("projects", "ref", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 # Indexes for what the studio looks up often, made once the columns of later releases are there (some are on those).
@@ -328,6 +362,10 @@ CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS audit_log_action ON audit_log(action, ip, created);
 CREATE INDEX IF NOT EXISTS agent_calls_started ON agent_calls(started);
+CREATE INDEX IF NOT EXISTS projects_ref ON projects(ref);
+CREATE UNIQUE INDEX IF NOT EXISTS claude_sessions_tab ON claude_sessions(user_id, run, project_id);
+CREATE INDEX IF NOT EXISTS claude_sessions_active ON claude_sessions(active);
+CREATE INDEX IF NOT EXISTS claude_events_session ON claude_events(session_id, id);
 CREATE INDEX IF NOT EXISTS agent_calls_run ON agent_calls(run);
 CREATE INDEX IF NOT EXISTS moderation_item ON moderation(generation_id);
 """
@@ -381,6 +419,8 @@ def _seed(db, starting_credits):
             db.add_column(table, column, definition)
             if (table, column) == ("users", "credits"):  # accounts from before credits existed
                 db.run("UPDATE users SET credits = ?", (starting_credits,))
+    with as_everyone():
+        refs.fill_projects(db)
     if not db.one("SELECT 1 FROM servers"):
         for server in SERVERS:
             db.run("INSERT INTO servers (name, cpu, gpu, vram_gb, role, renders, generation_power_w, created) "

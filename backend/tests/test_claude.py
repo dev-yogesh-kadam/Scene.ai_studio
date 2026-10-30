@@ -69,7 +69,7 @@ def test_claude_answers_in_the_agents_shape_with_its_own_tools_off(monkeypatch):
                                                               {"input_tokens": 10, "cache_read_input_tokens": 300, "output_tokens": 20})))
     answer = asyncio.run(brain.ask("You plan.", "hi", ["video/h3_all_in_one"], model="claude/sonnet"))
     assert answer["reply"] == "Hello." and answer["model"] == "claude/sonnet"
-    assert answer["tokens"] == {"prompt": 310, "cached": 300, "answer": 20}
+    assert answer["tokens"] == {"prompt": 310, "cached": 300, "written": 0, "answer": 20}
     args = runs[0]["args"]
     assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--tools") + 1] == ""   # it only answers
     assert args[args.index("--setting-sources") + 1] == "" and "--strict-mcp-config" in args and "--no-session-persistence" in args
@@ -207,37 +207,60 @@ def state_with_a_user(tmp_path):
     return SimpleNamespace(agent=brain_with_claude(), db=db)
 
 
-def test_a_conversation_goes_on_in_its_thread_until_it_changes(tmp_path):
+def test_a_tab_goes_on_in_one_session_whatever_the_claude_model(tmp_path):
     from scene.api.workspace import _keep_thread, _thread
     state = state_with_a_user(tmp_path)
     user, body = {"id": 1}, {"run": "tab1", "history": []}
     first = _thread(state, user, 3, body, "claude/sonnet", "SYSTEM")
     assert first["id"] is None
-    first.update(id="s-1", full="the whole first message")
+    first.update(id="s-1", full="the whole first message", size=900_000)
     _keep_thread(state, user, 3, body, "claude/sonnet", first, "Hello.")
     went_on = {"run": "tab1", "history": [{"instruction": "hi", "reply": "Hello."}]}
     kept = _thread(state, user, 3, went_on, "claude/sonnet", "SYSTEM")
-    assert kept["id"] == "s-1" and "full" not in kept                                                       # kept in the database
+    assert kept["id"] == "s-1" and "full" not in kept and kept["missed"] == []                             # kept in the database
     assert _thread(state, user, 3, dict(went_on, run="tab2"), "claude/sonnet", "SYSTEM")["id"] is None   # another tab
     assert _thread(state, user, 4, went_on, "claude/sonnet", "SYSTEM")["id"] is None                        # another project
-    assert _thread(state, user, 3, went_on, "claude/opus", "SYSTEM")["id"] is None                          # another model
+    assert _thread(state, user, 3, went_on, "claude/opus", "SYSTEM")["id"] == "s-1"                         # another Claude model
+    assert _thread(state, user, 3, went_on, "claude/sonnet", "OTHER SYSTEM")["id"] == "s-1"                 # a long skill came
+    assert _thread(state, user, 3, went_on, "claude/sonnet", "SYSTEM")["size"] == 900_000                   # long: compacted, not let go
     assert _thread(state, user, 3, {"run": "tab1", "history": []}, "claude/sonnet", "SYSTEM")["id"] is None  # a new chat
-    assert _thread(state, user, 3, went_on, "claude/sonnet", "OTHER SYSTEM")["id"] is None                  # a long skill came
-    _keep_thread(state, user, 3, body, "claude/sonnet", dict(first, size=claude.SESSION_TOKENS + 1), "Hello.")
-    assert _thread(state, user, 3, went_on, "claude/sonnet", "SYSTEM")["id"] is None                        # grown too long
-    _keep_thread(state, user, 3, body, "claude/sonnet", first, None)                                       # Ollama stood in
-    assert _thread(state, user, 3, went_on, "claude/sonnet", "SYSTEM")["id"] is None
     assert _thread(state, user, 3, went_on, "qwen3.6:35b", "SYSTEM") is None                                 # local: no thread
 
+    # Gemini answered two turns in between: the session goes on, and they are sent along with the next message
+    later = {"run": "tab1", "history": [{"instruction": "hi", "reply": "Hello."}, {"instruction": "a", "reply": "A by Gemini"},
+                                        {"instruction": "b", "reply": "B by Gemini"}]}
+    back = _thread(state, user, 3, later, "claude/sonnet", "SYSTEM")
+    assert back["id"] == "s-1" and [t["reply"] for t in back["missed"]] == ["A by Gemini", "B by Gemini"]
+    _keep_thread(state, user, 3, later, "claude/sonnet", dict(back, stood_in=True), "Ollama stood in")   # not Claude's answer
+    assert _thread(state, user, 3, later, "claude/sonnet", "SYSTEM")["id"] == "s-1"                          # the thread stays as it was
 
-def test_a_deleted_tab_lets_its_claude_sessions_go(tmp_path, monkeypatch):
-    from types import SimpleNamespace
+
+def test_missed_turns_are_told_to_the_session():
+    from scene.api.workspace import _missed_text
+    said = _missed_text([{"instruction": "make it blue", "reply": "Made it blue."}])
+    assert "another model answered" in said and "[user] make it blue" in said and "[assistant] Made it blue." in said
+    assert _missed_text([]) == ""
+
+
+def test_threads_from_before_one_per_model_are_taken_up(tmp_path):
     from scene import runs
+    state = state_with_a_user(tmp_path)
+    runs.write(state.db, 1, "tab1", "/claude/p3-claude.sonnet", {"id": "old", "last": "x"}, "studio", trusted=True)
+    assert runs.kept_thread(state.db, 1, "tab1", 3)["id"] == "old"
+    runs.keep_thread(state.db, 1, "tab1", 3, {"id": "new"})
+    assert runs.kept_thread(state.db, 1, "tab1", 3)["id"] == "new"
+
+
+def test_a_deleted_tab_lets_its_claude_sessions_go_and_keeps_their_story(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scene import runs, sessions
     from scene.api import workspace
     state = state_with_a_user(tmp_path)
-    runs.keep_thread(state.db, 1, "tab1", 3, "claude/sonnet", {"id": "s-1"})
-    runs.keep_thread(state.db, 1, "tab1", 3, "claude/opus", {"id": "s-2"})
-    runs.keep_thread(state.db, 1, "tab2", 3, "claude/opus", {"id": "s-3"})
+    runs.keep_thread(state.db, 1, "tab1", 3, {"id": "s-1"})
+    runs.write(state.db, 1, "tab1", "/claude/p4-claude.opus", {"id": "s-2"}, "studio", trusted=True)
+    runs.keep_thread(state.db, 1, "tab2", 3, {"id": "s-3"})
+    row = sessions.open_row(state.db, 1, 3, "tab1", "claude/sonnet", 1_000_000)
+    sessions.record(state.db, row["id"], "user", "hello")
     forgotten = []
     monkeypatch.setattr(claude, "forget", lambda s, session: forgotten.append(session))
     monkeypatch.setattr(workspace, "_project_id", lambda *a: 3)
@@ -245,6 +268,8 @@ def test_a_deleted_tab_lets_its_claude_sessions_go(tmp_path, monkeypatch):
     asyncio.run(workspace.delete_board("agent-tab1", request, 3, {"id": 1}))
     assert sorted(forgotten) == ["s-1", "s-2"]
     assert runs.threads_of(state.db, 1, "tab1") == [] and runs.threads_of(state.db, 1, "tab2") == [{"id": "s-3"}]
+    assert sessions.one(state.db, row["ref"])["status"] == "deleted"
+    assert [e["kind"] for e in sessions.events(state.db, row["id"])] == ["user", "note"]   # kept for good
 
 
 def test_forget_removes_the_session_file_claude_code_keeps(tmp_path, monkeypatch):
@@ -463,3 +488,92 @@ def test_idle_sessions_are_closed_and_the_tools_run_in_their_messages_request(mo
     claude.live["k1"].used = time.monotonic() - claude.IDLE - 1
     asyncio.run(brain.ask_with_tools("You plan.", "go", ["w"], {}, model="claude/sonnet", thread={"key": "k2", "id": None}))
     assert opened[0].closed and list(claude.live) == ["k2"]
+
+
+# ---------------------------------------------------------------- the story of a session, compacting, settings
+
+def test_studio_sessions_have_memory_off_and_compact_at_ninety_percent(monkeypatch):
+    s = {"window": 1_000_000}
+    assert json.loads(claude.session_settings(s)) == {"autoMemoryEnabled": False, "autoCompactWindow": 900_000}
+    assert json.loads(claude.session_settings({"window": 200_000}))["autoCompactWindow"] == 180_000
+    runs = fake_claude(monkeypatch, printed(answered({"reply": "hi"})))
+    asyncio.run(brain_with_claude().ask("You plan.", "hi", [], model="claude/sonnet"))
+    args = runs[0]["args"]
+    assert json.loads(args[args.index("--settings") + 1])["autoMemoryEnabled"] is False
+    assert claude.NO_MEMORY == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+
+
+def test_what_claude_does_in_a_live_session_is_told_to_its_story(monkeypatch):
+    brain = brain_with_claude()
+    thinking = sdk.AssistantMessage(content=[sdk.ThinkingBlock(thinking="Look her up.", signature=""),
+                                             sdk.ToolUseBlock(id="t1", name="mcp__studio__find_assets", input={"query": "Mira"})],
+                                    model="claude-sonnet")
+    tool_result = sdk.UserMessage(content=[sdk.ToolResultBlock(tool_use_id="t1", content=[{"type": "text", "text": "item 7"}])])
+    compacted = sdk.SystemMessage(subtype="compact_boundary", data={"compact_metadata": {"trigger": "auto", "pre_tokens": 900_000,
+                                                                                          "post_tokens": 20_000}})
+    said = sdk.AssistantMessage(content=[sdk.TextBlock(text="Found her.")], model="claude-sonnet")
+    fake_live(monkeypatch, [thinking, tool_result, compacted, said, result(dict(PLAN, reply="Mira is item 7."))])
+    story = []
+    thread = {"key": "k", "id": None, "record": lambda kind, text="", data=None: story.append((kind, text, data))}
+    asyncio.run(brain.ask_with_tools("You plan.", "who is Mira", ["w"], {}, model="claude/sonnet", thread=thread))
+    assert [k for k, _, _ in story] == ["thinking", "tool_call", "tool_result", "compact", "text"]
+    assert story[1][1] == "find_assets" and story[1][2]["input"] == {"query": "Mira"} and story[2][1] == "item 7"
+    assert story[3][2]["post_tokens"] == 20_000 and thread["compacted"] == 1
+
+
+def test_compact_now_goes_on_in_the_same_session(monkeypatch):
+    # its program is running: /compact goes to it
+    opened = fake_live(monkeypatch, [result(dict(PLAN, reply="a"))],
+                       [sdk.SystemMessage(subtype="compact_boundary", data={"compact_metadata": {"trigger": "manual", "pre_tokens": 850_000,
+                                                                                                   "post_tokens": 12_000}}),
+                        result(None)])
+    brain = brain_with_claude()
+    thread = {"key": "k", "id": None}
+    asyncio.run(brain.ask_with_tools("You plan.", "go", ["w"], {}, model="claude/sonnet", thread=thread))
+    s = brain.services["claude"]
+    assert asyncio.run(claude.compact(s, thread)) == 12_000
+    assert opened[0].sent == ["go", "/compact"] and len(opened) == 1 and thread["size"] == 12_000 and thread["id"] == "s-1"
+
+    # none running: a run of its own goes on with the session
+    claude.live.clear()
+    started = []
+
+    def run(args, line, room, timeout):
+        started.append(args)
+        return Run(printed({"type": "system", "subtype": "compact_boundary", "compact_metadata": {"trigger": "manual", "post_tokens": 9_000}},
+                           {"type": "result", "subtype": "success", "is_error": False, "session_id": "s-1", "result": ""}))
+    monkeypatch.setattr(claude, "_run", run)
+    told = []
+    thread = {"key": "k2", "id": "s-1", "record": lambda kind, text="", data=None: told.append(kind)}
+    assert asyncio.run(claude.compact(dict(s, window=1_000_000), thread)) == 9_000
+    args = started[0]
+    assert args[args.index("-p") + 1] == "/compact" and args[args.index("--resume") + 1] == "s-1" and told == ["compact"]
+
+    monkeypatch.setattr(claude, "_run", lambda *a: Run(printed({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                                                                  "result": "No conversation found with session ID: s-1"})))
+    with pytest.raises(claude.Lost):
+        asyncio.run(claude.compact(s, {"key": "k3", "id": "s-1"}))
+    with pytest.raises(claude.Failed):
+        asyncio.run(claude.compact(s, {"key": "k4", "id": None}))
+
+
+def test_a_session_row_keeps_its_story_and_says_how_full_it_is(tmp_path):
+    from scene import refs, sessions
+    state = state_with_a_user(tmp_path)
+    row = sessions.open_row(state.db, 1, 3, "tab1", "claude/sonnet", 1_000_000)
+    assert refs.looks_like(row["ref"], refs.SESSION) and row["agent"] == "AGTtab1"
+    assert sessions.open_row(state.db, 1, 3, "tab1", "claude/opus", 1_000_000)["id"] == row["id"]   # one for the tab
+    assert sessions.open_row(state.db, 1, 0, "tab1", "claude/opus", 1_000_000)["id"] != row["id"]   # all work: its own
+    sessions.record(state.db, row["id"], "user", "hello")
+    sessions.record(state.db, row["id"], "tool_call", "find_assets", {"input": {"query": "Mira"}})
+    sessions.update(state.db, row["id"], claude_id="s-1", messages=1, context_tokens=850_000)
+    sessions.update(state.db, row["id"], compacts=1)
+    found = sessions.one(state.db, row["ref"])
+    assert found["claude_id"] == "s-1" and found["messages"] == 1 and found["compacts"] == 1 and found["user_name"] == "A"
+    first, second = sessions.events(state.db, row["id"])
+    assert (first["kind"], second["data"]) == ("user", {"input": {"query": "Mira"}})
+    assert [e["kind"] for e in sessions.events(state.db, row["id"], after=first["id"])] == ["tool_call"]
+    assert [r["ref"] for r in sessions.listing(state.db, q="s-1")] == [row["ref"]] and sessions.listing(state.db, q="nobody") == []
+    assert sessions.context(850_000, 1_000_000) == {"tokens": 850_000, "window": 1_000_000, "percent": 85, "offer": True}
+    assert sessions.context(500_000, 1_000_000)["offer"] is False and sessions.context(5, 0)["percent"] == 0
+    assert sessions.title("Agent 2", "Film › Episode 1", "Ada") == "Studio · Agent 2 · Film › Episode 1 · Ada"

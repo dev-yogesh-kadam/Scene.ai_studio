@@ -1,10 +1,10 @@
-// A project's analytics (/analytics?id=<project>): what it spent and made in a period, by day and kind of thing made,
+// A project's analytics (/analytics/<project's id>, or /analytics?id=<number> from before): what it spent and made in a period, by day and kind of thing made,
 // and by module. Reached from the project's page; Back to project returns there.
 
 import { api } from '../api.js';
 import { el, icon, segmented } from '../dom.js';
 import { columnChart } from '../components/charts.js';
-import { go } from '../nav.js';
+import { placeId, placePath, showAddress } from '../nav.js';
 
 const PERIODS = [{ id: 'today', label: 'Today' }, { id: '7', label: 'Last 7 days' }, { id: '30', label: 'Last 30 days' }, { id: 'month', label: 'This month' }];
 // One colour per kind of thing made, the same in the chart, the legend and a module's breakdown.
@@ -13,7 +13,7 @@ const number = (n) => Number(n || 0).toLocaleString();
 const day = (t) => new Date(t * 1000).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
 
 export function render(view) {
-  const id = Number(new URLSearchParams(location.search).get('id')) || 0;
+  const id = placeId() || Number(new URLSearchParams(location.search).get('id')) || 0;
   let period = (() => { try { return localStorage.getItem('scene.analytics.period') || '7'; } catch (e) { return '7'; } })();
   const body = el('div', { class: 'an-body' }, el('p', { class: 'muted' }, 'Loading…'));
   const periodBox = el('div');
@@ -85,9 +85,10 @@ export function render(view) {
   async function load() {
     try {
       const d = await api(`/api/projects/${id}/analytics?period=${period}`);
-      if (d.project.id !== id) return go(`/analytics?id=${d.project.id}`, { replace: true });   // a module's address shows its project
+      showAddress(placePath('/analytics', d.project));   // a module's address, or an old one, shows the project's id
+      back.href = placePath('/project', d.project);
       document.title = `Analytics · ${d.project.name} · Scene.ai`;
-      window.dispatchEvent(new CustomEvent('scene:crumbs', { detail: [{ label: 'Projects', href: '/projects' }, { label: d.project.name, href: '/project?id=' + id }, { label: 'Analytics' }] }));
+      window.dispatchEvent(new CustomEvent('scene:crumbs', { detail: [{ label: 'Projects', href: '/projects' }, { label: d.project.name, href: placePath('/project', d.project) }, { label: 'Analytics' }] }));
       body.replaceChildren(
         el('div', { class: 'an-showing muted small' }, icon('clock'), 'Showing ', el('b', {}, `${day(d.start)} – ${day(d.end)}`)),
         tiles(d), daily(d), modules(d));

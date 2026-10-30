@@ -16,7 +16,8 @@ def test_a_projects_spend_by_kind_and_module(client):
     client.app.state.db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created, project_id) "
                             "VALUES (?, 'video/h3_all_in_one', 'video', 'Shot', 'shot.mp4', '{}', '{}', ?, ?)", (me["id"], time.time(), one))
     found = client.get("/api/projects/{}/analytics?period=today".format(one)).json()   # a module's address shows its project
-    assert found["project"] == {"id": film, "name": "Pocket"} and found["period"] == "today"
+    assert found["project"] == {"id": film, "ref": found["project"]["ref"], "name": "Pocket"} and found["period"] == "today"
+    assert found["project"]["ref"].startswith("PRJ")
     assert found["spend"] == 203 and found["generations"] == 1 and found["contributors"] == 1 and found["change"] is None
     kinds = {t["id"]: (t["credits"], t["generations"]) for t in found["types"]}
     assert kinds["video"] == (200, 1) and kinds["llm"] == (3, 0)

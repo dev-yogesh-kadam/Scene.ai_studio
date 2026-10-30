@@ -117,18 +117,31 @@ function prose(text, chips, onPick) {
 }
 
 // A row that folds open: an icon, a title, a quieter word after it, and what it holds. `state` keeps whether it is open
-// (state.open), so it stays open when the conversation is drawn again. Without a body it is a plain row.
-export function fold({ glyph, title, sub = '', state = {}, body = null, className = '', onToggle = () => {} }) {
+// (state.open), so it stays open when the conversation is drawn again. Without a body it is a plain row. `glyphs`, in
+// place of one glyph, shows a small overlapping stack of marks: one for each kind of thing the fold holds.
+export function fold({ glyph, glyphs = null, title, sub = '', state = {}, body = null, className = '', onToggle = () => {} }) {
   const has = Boolean(body);
+  const marks = glyphs && glyphs.length ? el('span', { class: 'fold-glyphs', 'aria-hidden': 'true' }, glyphs.map((g) => el('span', {}, icon(g))))
+    : glyph && icon(glyph);
   const head = el(has ? 'button' : 'div', { class: 'fold-head', ...(has ? { type: 'button', 'aria-expanded': String(Boolean(state.open)),
     onclick: () => { state.open = !state.open; onToggle(); } } : {}) },
-    glyph && icon(glyph), el('span', { class: 'fold-title' }, title), sub && el('span', { class: 'fold-sub' }, sub),
+    marks, el('span', { class: 'fold-title' }, title), sub && el('span', { class: 'fold-sub' }, sub),
     has && el('span', { class: 'fold-caret', 'aria-hidden': 'true' }, icon(state.open ? 'down' : 'right')));
   return el('div', { class: 'fold ' + className + (state.open ? ' open' : '') }, head, has && state.open && el('div', { class: 'fold-body' }, body));
 }
 
 const WORK_ICONS = { attach: 'attachment', book: 'book', look: 'eye', skill: 'skill', retry: 'retry', skip: 'skip', plan: 'check',
   queue: 'queue', wait: 'clock', ready: 'film', check: 'check', warn: 'skip', status: 'wrench' };
+
+// The marks of some work, one of each kind it did and at most three: what a closed fold shows in front of its title.
+export function glyphsOf(entries) {
+  const names = [];
+  for (const entry of entries) {
+    const name = entry.type === 'thought' ? 'bulb' : WORK_ICONS[entry.icon] || 'wrench';
+    if (!names.includes(name)) names.push(name);
+  }
+  return names.slice(0, 3);
+}
 
 // The rows of the agent's work. A thought among them is a fold of its own.
 export function workRows(entries, states, redraw) {

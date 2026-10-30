@@ -5,6 +5,7 @@
 import { api } from '../api.js';
 import { ago, ask, el, field, icon, openDialog } from '../dom.js';
 import { addMenu } from './agent.js';
+import { Spring, rubberband } from '../spring.js';
 
 export const KIT = 'Asset book';   // what the feature is called wherever the user reads it
 export const KIT_TYPES = [
@@ -150,7 +151,6 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
   let loadedAt = 0;
   let looks = 0;               // how many times it looked again for descriptions
   let lookTimer = null;
-  let dragged = null;          // the entry being dragged to a new place
   let filter = localStorage.getItem(FIND_KEY) || '';
   const stamp = el('span', { class: 'slate-text' });
   const search = el('input', { type: 'search', class: 'kit-search', placeholder: 'Search by name or what it shows', 'aria-label': `Search the ${KIT}`, oninput: () => draw() });
@@ -204,16 +204,69 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
 
   function changed(reload = true) { onChange(); if (reload) load(); else draw(); }
 
+  // Drag an entry by its grip: it follows the pointer, the others slide up or down to show where it will go, and when
+  // it is let go the list is drawn in its new order with every row gliding from where it was.
+  const slide = (row) => (y) => { row.style.translate = y ? `0 ${y}px` : ''; };
+  function dragRow(e, entry) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const grip = e.currentTarget;
+    const rows = [...node.querySelectorAll('.kit-row')];
+    const row = grip.closest('.kit-row');
+    const index = rows.indexOf(row);
+    if (index < 0) return;
+    const rects = rows.map((r) => r.getBoundingClientRect());
+    const step = rects.length > 1 ? (index < rects.length - 1 ? rects[index + 1].top - rects[index].top : rects[index].top - rects[index - 1].top) : 0;
+    const low = rects[0].top - rects[index].top;
+    const high = rects[rects.length - 1].top - rects[index].top;
+    const shifts = rows.map((r) => new Spring(0, slide(r)));
+    const aims = rows.map(() => 0);
+    const from = e.clientY;
+    let to = index;
+    grip.setPointerCapture(e.pointerId);
+    row.classList.add('lifted');
+    const onMove = (ev) => {
+      const dy = ev.clientY - from;
+      const y = dy < low ? low - rubberband(low - dy, 120) : dy > high ? high + rubberband(dy - high, 120) : dy;
+      shifts[index].set(y);
+      const middle = rects[index].top + y + rects[index].height / 2;
+      to = rects.filter((r, i) => i !== index && r.top + r.height / 2 < middle).length;
+      rows.forEach((r, i) => {
+        if (i === index) return;
+        const aim = i > index && i <= to ? -step : i < index && i >= to ? step : 0;
+        if (aim !== aims[i]) { aims[i] = aim; shifts[i].to(aim, { response: 0.3 }); }
+      });
+    };
+    const end = () => {
+      grip.removeEventListener('pointermove', onMove);
+      grip.removeEventListener('pointerup', end);
+      grip.removeEventListener('pointercancel', end);
+      shifts.forEach((s) => s.stop());
+      if (to === index) {
+        shifts.forEach((s) => s.to(0, { response: 0.3, done: () => row.classList.remove('lifted') }));
+        return;
+      }
+      // The entry it now goes before: the one shown at that place, or, at the end of what is shown, the one after it.
+      const others = rows.filter((r) => r !== row).map((r) => r.kitEntry);
+      const last = others[others.length - 1];
+      const target = others[to] || found.entries.filter((x) => x.id !== entry.id)[found.entries.filter((x) => x.id !== entry.id).indexOf(last) + 1] || null;
+      const was = new Map(rows.map((r) => [r.kitEntry.id, r.getBoundingClientRect().top]));
+      moveBefore(entry, target);   // draws the list again at once, then saves the order
+      for (const r of node.querySelectorAll('.kit-row')) {
+        const dy = (was.get(r.kitEntry.id) ?? r.getBoundingClientRect().top) - r.getBoundingClientRect().top;
+        if (dy) new Spring(dy, slide(r)).to(0, { response: 0.3, damping: r.kitEntry.id === entry.id ? 0.8 : 1 });
+      }
+    };
+    grip.addEventListener('pointermove', onMove);
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+  }
+
   function row(entry) {
     const name = el('input', { class: 'kit-name', value: entry.name, maxlength: 60, 'aria-label': 'Name',
       onchange: (e) => { if (e.target.value.trim()) change(entry, { name: e.target.value }); } });
-    return el('div', { class: 'kit-row' + (entry.named ? '' : ' unnamed') + (entry.always ? ' always' : ''), draggable: 'true',
-      ondragstart: (e) => { dragged = entry; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.classList.add('dragging'); },
-      ondragend: (e) => { dragged = null; e.currentTarget.classList.remove('dragging'); },
-      ondragover: (e) => { if (dragged && dragged !== entry) { e.preventDefault(); e.currentTarget.classList.add('drop-before'); } },
-      ondragleave: (e) => e.currentTarget.classList.remove('drop-before'),
-      ondrop: (e) => { e.preventDefault(); e.currentTarget.classList.remove('drop-before'); if (dragged && dragged !== entry) moveBefore(dragged, entry); } },
-      el('span', { class: 'kit-grip', title: 'Drag to change the order', 'aria-hidden': 'true' }, '⋮⋮'),
+    const line = el('div', { class: 'kit-row' + (entry.named ? '' : ' unnamed') + (entry.always ? ' always' : '') },
+      el('span', { class: 'kit-grip', title: 'Drag to change the order', 'aria-hidden': 'true', onpointerdown: (e) => dragRow(e, entry) }, '⋮⋮'),
       el('span', { class: 'memory-thumb kit-thumb' }, kitThumb(entry)),
       el('div', { class: 'kit-main' },
         el('div', { class: 'kit-line' }, name, !entry.named && el('span', { class: 'kit-flag', title: 'The agent will ask who or what this is' }, 'needs a name')),
@@ -223,6 +276,8 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
         el('button', { type: 'button', class: 'kit-about small muted', title: 'What it shows, and how to use it', onclick: () => cardDialog(entry, load) },
           entry.use_note || entry.about || (entry.kind === 'image' || entry.kind === 'video' ? 'Being looked at…' : 'Add what it is'))),
       el('button', { class: 'icon-btn kit-remove', title: `Take it out of the ${KIT}`, 'aria-label': `Take ${entry.name} out of the ${KIT}`, onclick: () => remove(entry) }, '×'));
+    line.kitEntry = entry;   // the entry a dragged row stands for
+    return line;
   }
 
   function draw() {

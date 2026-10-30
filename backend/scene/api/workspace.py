@@ -11,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import agent, camera, claude, credits, edits, gpu, kit, media, memory, motion, review, runs, sequence, sharing, skills
+from .. import agent, camera, claude, credits, edits, gpu, kit, media, memory, motion, review, runs, sequence, sessions, sharing, skills
 from ..db import as_everyone
 from ..comfy import workflows
 from .deps import current_user
@@ -120,7 +120,52 @@ async def delete_board(kind: str, request: Request, project: int = 0, user: dict
     for thread in runs.threads_of(state.db, user["id"], run):
         claude.forget(hosted, thread.get("id"))
     runs.delete(state.db, user["id"], run, runs.THREADS, trusted=True)
+    # Its story stays, for admins: the session is only marked deleted.
+    with as_everyone():
+        rows = state.db.all("SELECT id FROM claude_sessions WHERE user_id = ? AND run = ?", (user["id"], run))
+    for row in rows:
+        sessions.record(state.db, row["id"], "note", "The tab was deleted")
+        sessions.update(state.db, row["id"], status="deleted")
     return {"ok": True}
+
+
+@router.post("/agent/session/compact")
+async def compact_session(body: dict, request: Request, user: dict = Depends(current_user)):
+    """Compact an agent tab's Claude session now (the user's "Compact now"): Claude Code sums up the conversation so far
+    and goes on from that, in the same session. Body: {"run", "project_id"}. Returns {"context"} as a plan gives it."""
+    return await _patient(_compact_session(body, request, user))
+
+
+async def _compact_session(body, request, user):
+    state = request.app.state
+    project = _project_id(request, user, body.get("project_id"))
+    run, hosted = _thread_run(body), _hosted_claude(state)
+    thread = runs.kept_thread(state.db, user["id"], run, project) if run else None
+    if not hosted or not thread or not thread.get("id"):
+        raise HTTPException(400, "This conversation has no Claude session to compact yet.")
+    thread["key"] = "{}:{}:{}".format(user["id"], run, project or 0)
+    row = _session_of(state, user, project, body, row_model(state, user, project, run), thread)
+    thread["record"]("note", "Compact asked by the user, at {}% full".format(
+        round(100 * sessions.fullness(thread.get("size") or 0, hosted["window"]))))
+    try:
+        await claude.compact(hosted, thread)
+    except claude.Busy as error:
+        raise HTTPException(429, str(error))
+    except claude.Lost:
+        raise HTTPException(400, "This conversation's Claude session is gone: the next message starts a new one.")
+    except claude.Failed as error:
+        thread["record"]("error", str(error))
+        raise HTTPException(502, str(error))
+    runs.keep_thread(state.db, user["id"], run, project, {k: v for k, v in thread.items() if k not in THREAD_NOT_KEPT})
+    sessions.update(state.db, row["id"], context_tokens=thread.get("size") or 0)
+    return {"context": sessions.context(thread.get("size") or 0, hosted["window"])}
+
+
+def row_model(state, user, project, run):
+    """The Claude model a tab's session last used ("" when it has none yet)."""
+    with as_everyone():
+        row = state.db.one("SELECT model FROM claude_sessions WHERE user_id = ? AND run = ? AND project_id = ?", (user["id"], run, int(project or 0)))
+    return row["model"] if row else ""
 
 
 @router.post("/timeline/export")
@@ -337,9 +382,11 @@ async def agent_status(request: Request, user: dict = Depends(current_user)):
         # "model" is the one used when the user has not picked another; "models" is what they can pick from.
         brain = request.app.state.agent
         models = await brain.models()
-        prices = request.app.state.credits.llm_prices()
+        credits = request.app.state.credits
+        prices = credits.llm_prices()
         return {"online": True, "model": await brain.pick_model(), "models": models, "hosted": brain.hosted(),
-                "prices": {m: prices[m] for m in models if m in prices}}   # credits per message; a model not listed is free
+                "prices": {m: prices[m] for m in models if m in prices},   # credits per message; a model not listed is free
+                "by_tokens": [m for m in models if m not in prices and credits.token_prices(m)]}   # charged by the tokens they use
     except agent.AgentError as error:
         return {"online": False, "detail": str(error)}
 
@@ -360,33 +407,90 @@ def _thread_run(body):
 
 
 def _thread(state, user, project, body, model, system):
-    """The thread of this conversation with Claude ({"id", "sent", "seen", "full", "system", "last"}, see Agent.chat),
-    or None for a model that does not keep one. A conversation is its run's (a tab of the agent panel), with one
-    thread for each project and model, kept in the run's state so it outlives a restart of the studio. It starts
-    again (no session id) when it is new, when the earlier turns the browser sent do not end with the reply the
-    thread gave last (a new chat, or one taken up elsewhere), when the system prompt is not the one it began with (a
-    long skill came or went), or when its session has grown past claude.SESSION_TOKENS: the new one opens with the
-    studio's own short account of the conversation (its direction and latest turns), so no message of a long
-    conversation reads more than that."""
+    """The thread of this conversation with Claude ({"id", "sent", "seen", "full", "system", "last", "size"}, see
+    Agent.chat), or None for a model that does not keep one. A conversation is its run's (a tab of the agent panel),
+    with one thread in each project whatever the Claude model, kept in the run's state so it goes on across days and
+    restarts of the studio. A change of Claude model, or of the system prompt (a long skill came or went), goes on in
+    the same session. Turns another model answered since Claude's last reply (the user picked Gemini for a while) are
+    in "missed": they go to the session with the next message. It starts again (no session id) only when the
+    conversation the browser sent does not hold the reply the thread gave last: a new chat, or one cleared. A session
+    that grows near its context window is compacted, not let go (sessions.COMPACT)."""
     run = _thread_run(body)
     if not run or not state.agent.keeps_threads(model):
         return None
     history = [t for t in body.get("history") or [] if isinstance(t, dict)] if isinstance(body.get("history"), list) else []
     signature = hashlib.sha1(system.encode("utf-8")).hexdigest()[:16]
-    thread = runs.kept_thread(state.db, user["id"], run, project, model)
-    if (not thread or not history or thread.get("last") != _said(history[-1].get("reply")) or thread.get("system") != signature
-            or (thread.get("size") or 0) > claude.SESSION_TOKENS):
-        thread = {"id": None, "sent": 1, "seen": {}, "full": "", "system": signature, "last": None}
-    thread["key"] = "{}:{}:{}:{}".format(user["id"], run, project or 0, model)   # its live session (claude.converse)
+    thread = runs.kept_thread(state.db, user["id"], run, project)
+    said = [_said(turn.get("reply")) for turn in history]
+    missed = []
+    if thread and thread.get("id") and thread.get("last") in said:
+        missed = history[len(said) - said[::-1].index(thread["last"]):]   # the turns after Claude's last reply
+    else:
+        thread = {"id": None, "sent": 1, "seen": {}, "full": "", "last": None}
+    thread.update(system=signature, missed=missed)
+    thread["key"] = "{}:{}:{}".format(user["id"], run, project or 0)   # its live session (claude.converse)
     return thread
 
 
 def _keep_thread(state, user, project, body, model, thread, reply):
-    """Remember the thread once its message is answered: the next one goes on with it when its history ends with
-    `reply` (None: Claude did not give this answer, so the session does not hold it, and the next one starts anew)."""
-    kept = {k: v for k, v in thread.items() if k not in ("full", "stood_in", "key")}   # the whole message is made anew each time
-    kept["last"] = _said(reply) if reply is not None else None
-    runs.keep_thread(state.db, user["id"], _thread_run(body), project, model, kept)
+    """Remember the thread once its message is answered: the next one goes on with it while the conversation holds
+    `reply`. When Claude did not give this answer (another model stood in for it), the thread stays as it was: the
+    session does not hold this turn, and the next message sends it along as missed."""
+    if thread.get("stood_in"):
+        return
+    kept = {k: v for k, v in thread.items() if k not in THREAD_NOT_KEPT}   # the whole message is made anew each time
+    kept["last"] = _said(reply)
+    runs.keep_thread(state.db, user["id"], _thread_run(body), project, kept)
+
+
+THREAD_NOT_KEPT = ("full", "stood_in", "key", "record", "row", "missed")
+
+
+def _hosted_claude(state):
+    return (getattr(state.agent, "services", None) or {}).get("claude")
+
+
+def _project_name(state, project):
+    """"Film › Episode 1" for a module, "Film" for a project, "" for all work."""
+    if not project:
+        return ""
+    with as_everyone():
+        row = state.db.one("SELECT p.name, pp.name AS parent FROM projects p LEFT JOIN projects pp ON pp.id = p.parent_id WHERE p.id = ?",
+                           (project,))
+    return "" if row is None else "{} › {}".format(row["parent"], row["name"]) if row["parent"] else row["name"]
+
+
+def _soon(work):
+    """Run `work` (a coroutine) beside the request; a failure is printed, never raised."""
+    async def run():
+        try:
+            await work
+        except Exception as error:
+            print("Not done beside the request: {}".format(error))
+    asyncio.get_running_loop().create_task(run())
+
+
+def _session_of(state, user, project, body, model, thread):
+    """The tab's session row (sessions.py), and the thread made to tell it what happens: thread["record"]."""
+    hosted = _hosted_claude(state) or {}
+    row = sessions.open_row(state.db, user["id"], project, _thread_run(body), model, hosted.get("window"))
+    db, row_id = state.db, row["id"]
+
+    def record(kind, text="", data=None):
+        sessions.record(db, row_id, kind, text, data)
+        if kind == "compact":
+            sessions.update(db, row_id, compacts=1, context_tokens=(data or {}).get("post_tokens"))
+    thread.update(record=record, row=row_id)
+    return row
+
+
+def _missed_text(missed):
+    """The turns another model answered while the session was away, as the next message carries them."""
+    turns = agent.past_turns(missed)
+    if not turns:
+        return ""
+    return ("While you were away, another model answered these turns of this conversation. They are not in your "
+            "session; read them as part of it:\n" + "\n".join("[{}] {}".format(t["role"], t["content"]) for t in turns))
 
 
 def _looks(state, body):
@@ -953,18 +1057,24 @@ async def _planning(request, user, body, instruction, project):
     if not offers:
         raise HTTPException(400, "There is no workflow the agent can use yet.")
     hears = agent.takes_sound(offers)   # the workflows that work on a sound file (separate a voice, transcribe)
-    # A message costs what the chosen model costs: the user must have it before the model is asked.
+    # A message costs what the chosen model costs: the user must have it before the model is asked. A Claude model is
+    # priced by the tokens it uses, known only once it has answered: the user must have some credits to ask it at all.
     chosen_model = body.get("model") or state.agent.model or ""
-    if state.credits.llm_prices():   # only worth asking which model answers when some model has a price
-        try:
-            chosen_model = await state.agent.pick_model(body.get("model"))
-        except agent.AgentError:
-            pass   # the model is asked below, and that says what is wrong
+    try:
+        chosen_model = await state.agent.pick_model(body.get("model"))
+    except agent.AgentError:
+        pass   # the model is asked below, and that says what is wrong
     price = state.credits.llm_cost(chosen_model)
     if price:
         if state.credits.balance(user["id"]) < price:
             raise HTTPException(400, "A message to {} costs {} cr, and you have {} cr.".format(chosen_model, price, state.credits.balance(user["id"])))
         problem = state.credits.cap_problem(user["id"], price)
+        if problem:
+            raise HTTPException(400, problem)
+    elif state.credits.token_prices(chosen_model):
+        if state.credits.balance(user["id"]) < 1:
+            raise HTTPException(400, "Messages to {} are charged by the tokens they use, and you have no credits left.".format(chosen_model))
+        problem = state.credits.cap_problem(user["id"], 1)
         if problem:
             raise HTTPException(400, problem)
     charged = {"credits": 0, "model": chosen_model}
@@ -1380,23 +1490,66 @@ async def _planning(request, user, body, instruction, project):
         if thread is None:
             answer = await asked_with(full)
         else:
+            # The tab's session is kept for admins to watch (sessions.py): what is asked and sent, and (claude.py) all
+            # Claude does in it.
+            row = _session_of(state, user, project, body, chosen_model, thread)
+            record, hosted = thread["record"], _hosted_claude(state) or {}
+            window = hosted.get("window") or claude.WINDOW
+            if row["model"] != chosen_model and row["messages"]:
+                record("model", "Model changed: {} → {}".format(row["model"], chosen_model), {"from": row["model"], "to": chosen_model})
+            record("user", message)
             going_on = bool(thread.get("id"))
+            # Near the end of its context the session is compacted first (Claude Code also does it by itself, at the
+            # same point, in the middle of a turn): it goes on, the same session, from a summary of what came before.
+            if going_on and sessions.fullness(thread.get("size") or 0, window) >= sessions.COMPACT:
+                before = thread.get("size") or 0
+                try:
+                    after = await claude.compact(hosted, thread)
+                    noted("book", "Compacted this conversation's context: it was {}% full{}".format(
+                        round(100 * before / window), ", now {}%".format(round(100 * after / window)) if after else ""))
+                except (claude.Failed, claude.Busy) as error:
+                    record("error", "Could not compact: {}".format(error))
+                except claude.Lost:
+                    thread["id"], going_on = None, False
             asking = agent.follow_up(parts, thread["seen"]) if going_on else full
+            if going_on and thread.get("missed"):
+                asking = _missed_text(thread["missed"]) + "\n\n" + asking
+                record("note", "Sent along {} turns another model answered".format(len(thread["missed"])))
             thread.update(seen=agent.fingerprints(parts), full=full)
+            record("prompt", asking, {"going_on": going_on, "model": chosen_model})
+            started_with = thread.get("id")
             try:
                 answer = await asked_with(asking)
             except agent.ContextLost:   # its session is gone: the conversation starts a new one, with the whole message
+                record("note", "The Claude session was gone: a new one starts, with the whole message")
                 thread["id"] = None
+                started_with = None
                 answer = await asked_with(full)
-            # A turn another model answered (Claude was busy) is not in the session: the next message starts a new one.
+            except Exception as error:
+                record("error", str(error) or type(error).__name__)
+                raise
+            # A turn another model answered (Claude was busy) is not in the session: the next message sends it along.
             thread["stood_in"] = answer.get("model") != chosen_model
+            record("answer", str(answer.get("reply") or ""), {"model": answer.get("model") or chosen_model, "steps": len(answer.get("steps") or []),
+                                                             "question": bool(answer.get("question")), "tokens": answer.get("tokens")})
+            if not thread["stood_in"]:
+                sessions.update(state.db, row["id"], claude_id=thread.get("id"), model=chosen_model, messages=1,
+                                context_tokens=thread.get("size") or 0, context_window=window)
+                thread["context"] = sessions.context(thread.get("size") or 0, window)
+                if thread.get("id") and thread["id"] != started_with:   # a new session: it gets its title, for VS Code's list
+                    name = sessions.title(body.get("tab"), _project_name(state, project), user.get("name"))
+                    sessions.update(state.db, row["id"], title=name)
+                    _soon(claude.rename(hosted, dict(thread), name))
             if going_on:
                 noted("book", "Went on with this conversation's Claude session: sent only what is new")
         seconds = time.monotonic() - asked
-        # Each answer is charged at the price of the model that gave it (another one may have stood in for a busy one).
+        # Each answer is charged at the price of the model that gave it (another one may have stood in for a busy one): a
+        # flat price per message, or a Claude model's tokens. The tokens were used already, so a user who has fewer
+        # credits than they cost gives all they have.
         used = answer.get("model") or chosen_model
-        cost = state.credits.llm_cost(used)
-        if cost and state.credits.charge(user["id"], cost, "agent", note=used, project_id=project or None):
+        cost = state.credits.message_cost(used, answer.get("tokens"))
+        if cost:
+            cost = state.credits.charge_up_to(user["id"], cost, "agent", note=used, project_id=project or None)
             charged["credits"] += cost
             charged["model"] = used
         steps, dropped = await build(answer["steps"])
@@ -1521,7 +1674,9 @@ async def _planning(request, user, body, instruction, project):
            # a turn that made nothing but saved its work (a stage of planning) goes on at once
            "continues": bool(run and long_skill and not answer.get("question")
                              and (steps or runs.saved_since(state.db, user["id"], run, since))),
-           "tokens": tokens}
+           "tokens": tokens,
+           # how full the Claude session's context is: past 80% the panel offers to compact it now
+           "context": next((t.get("context") for t in threaded if t.get("context")), None)}
 
 
 async def _plan_step(state, proposed, instruction, steps, made_by, schemas, names, kinds, videos, pinned, project, shapes, assets=None, menu=None):

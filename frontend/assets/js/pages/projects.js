@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { ask, still, el, icon, ago, initials, spill } from '../dom.js';
 import { subscribe } from '../store.js';
 import { projectDialog } from '../components/projects.js';
-import { go } from '../nav.js';
+import { go, placePath } from '../nav.js';
 
 export function render(view) {
   let projects = [];
@@ -13,21 +13,21 @@ export function render(view) {
   const search = el('input', { type: 'text', style: 'width:240px', placeholder: 'Search projects', 'aria-label': 'Search projects',
     oninput: (e) => { query = e.target.value.trim().toLowerCase(); draw(); } });
   const tools = el('div', { class: 'row' }, search,
-    el('button', { class: 'btn', title: 'Everything you have made, in or out of a project', onclick: () => open(0) }, 'Open all work'),
+    el('button', { class: 'btn', title: 'Everything you have made, in or out of a project', onclick: () => open(null) }, 'Open all work'),
     el('button', { class: 'btn primary', onclick: create }, 'New project'));
   const light = spill();   // the cover of the project worked on last lights the top of the page
   view.replaceChildren(light.node, el('div', { class: 'page-head' }, el('h1', {}, 'All projects'), tools), body);
 
   // A project opens on its page (its kit and its modules); "Open all work" opens the canvas of everything.
-  function open(id) {
-    if (id) return go('/project?id=' + id);
+  function open(p) {
+    if (p) return go(placePath('/project', p));
     localStorage.setItem('scene.project', '');
     go('/canvas');
   }
   const run = (action) => action().then(load).catch((e) => alert(e.message));
   async function create() {
     const made = await projectDialog();
-    if (made) open(made.id);   // a new project opens straight away, on its empty canvas
+    if (made) open(made);   // a new project opens straight away, on its empty canvas
   }
   const rename = async (p) => { if (await projectDialog({ project: p })) load(); };
   const remove = async (p) => {
@@ -40,7 +40,7 @@ export function render(view) {
   const cover = (p) => (p.cover_id ? still(`/api/library/${p.cover_id}/file`, p.cover_kind, p.name) : initials(p.name));
 
   const card = (p) => el('div', { class: 'pcard', role: 'button', tabindex: '0', 'aria-label': 'Open ' + p.name,
-    onclick: () => open(p.id), onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(p.id); } },
+    onclick: () => open(p), onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) open(p); } },
     el('div', { class: 'pcard-cover' }, cover(p),
       p.owner_name ? el('span', { class: 'proj-badge shared', title: `${p.owner_name}'s project, shared with you as ${p.role}` }, icon('people'), 'Shared')
         : p.members ? el('span', { class: 'proj-badge shared', title: `Shared with ${p.members} ${p.members === 1 ? 'person' : 'people'}` }, icon('people'), String(p.members + 1)) : null),

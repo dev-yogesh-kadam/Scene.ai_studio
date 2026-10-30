@@ -36,9 +36,9 @@ export async function projects(ctx) {
   const found = (await api('/api/admin/projects?q=' + encodeURIComponent(s.q))).projects;
   return [
     el('div', { class: 'card' },
-      el('div', { class: 'card-head' }, el('h2', {}, 'Projects'), searchBox('Project, person or email', s.q, (v) => { s.q = v; ctx.draw(); })),
+      el('div', { class: 'card-head' }, el('h2', {}, 'Projects'), searchBox('Project, person, email or id', s.q, (v) => { s.q = v; ctx.draw(); })),
       table(['Project', 'Owner', 'Modules', 'Asset book', 'Items', 'Space', 'Jobs', 'Last job'], found.map((p) => [
-        p.name, person(p.user_name, p.user_email), number(p.modules), number(p.kit), number(p.items), bytes(p.bytes), number(p.jobs), p.last_job ? ago(p.last_job) : 'never']),
+        person(p.name, p.ref), person(p.user_name, p.user_email), number(p.modules), number(p.kit), number(p.items), bytes(p.bytes), number(p.jobs), p.last_job ? ago(p.last_job) : 'never']),
       { onRow: (i) => openProject(found[i].id), empty: s.q ? 'No project matches.' : 'No projects yet.' }),
       el('p', { class: 'muted small', style: 'margin-top:10px' }, 'Counts take in each project\'s modules, which share its asset book. Select a project for its asset book and latest items.')),
   ];

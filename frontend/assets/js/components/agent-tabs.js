@@ -9,6 +9,18 @@ import { agentPanel, popover, spendCard } from './agent.js';
 const MAX_TABS = 30;   // conversations kept per project; the oldest closed one goes when there are more
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+// A tab's id in links is AGT and its own: the canvas's address shows the tab open (?agent=AGT...), to keep or send.
+const AGENT = 'AGT';
+const tabInAddress = () => {
+  const named = new URLSearchParams(location.search).get('agent') || '';
+  return named.startsWith(AGENT) ? named.slice(AGENT.length) : null;
+};
+function showTab(id) {
+  const query = new URLSearchParams(location.search);
+  if (query.get('agent') === AGENT + id) return;
+  query.set('agent', AGENT + id);
+  history.replaceState(null, '', location.pathname + '?' + query);
+}
 function age(time) {
   const s = Math.max(0, (Date.now() - (time || 0)) / 1000);
   if (s < 60) return 'just now';
@@ -56,6 +68,7 @@ export function agentTabs({ projectId = () => 0, onJobs = () => {}, onMemory = n
   function panelOf(id) {
     if (!panels.has(id)) {
       const made = agentPanel({ projectId, onMemory, session: id, onFocus, locate, selection, items, pickCanvas, onUploaded,
+        tabName: () => (tab(id) || {}).name || '',
         onJobs: (ids) => { jobsOf.set(id, ids); onJobs([...new Set([...jobsOf.values()].flat())]); },
         onSaved: ({ spent, updated }) => {
           const t = tab(id);
@@ -75,6 +88,7 @@ export function agentTabs({ projectId = () => 0, onJobs = () => {}, onMemory = n
     if (!tab(id)) return;
     if (!index.open.includes(id)) index.open.push(id);
     index.active = id;
+    showTab(id);
     for (const [pid, p] of panels) p.node.classList.toggle('hidden', pid !== id);
     panelOf(id).node.classList.remove('hidden');
     drawStrip();
@@ -204,7 +218,8 @@ export function agentTabs({ projectId = () => 0, onJobs = () => {}, onMemory = n
       }
       index.open = index.open.filter((id) => tab(id));
       if (!index.open.length) index.open = [index.tabs[0].id];
-      show(tab(index.active) ? index.active : index.open[0]);
+      const named = tabInAddress();   // a link to one tab (?agent=AGT...) opens on it
+      show(tab(named) ? named : tab(index.active) ? index.active : index.open[0]);
     })();
     await run;
   }

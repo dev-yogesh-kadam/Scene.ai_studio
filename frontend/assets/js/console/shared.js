@@ -1,6 +1,7 @@
 // Helpers shared by the admin console sections.
 
 import { el } from '../dom.js';
+import { Spring, project, rubberband, tracker } from '../spring.js';
 
 export const STATUS = { queued: 'Waiting', running: 'Running', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' };
 
@@ -52,18 +53,58 @@ export function searchBox(placeholder, value, onChange) {
 
 export const exportLink = (name) => el('a', { class: 'btn small', href: `/api/admin/export/${name}.csv`, download: '' }, 'Export CSV');
 
-// A panel that slides in from the right for the details of one user or job.
+// A panel that slides in from the right for the details of one user or job. It rides on a spring: its head can be
+// dragged and flicked to the right to put it away, it leaves the way it came, and the shade behind it follows it.
 export function drawer(title, content) {
-  const close = () => { backdrop.remove(); document.removeEventListener('keydown', onKey); };
+  let closing = false;
+  const close = (velocity) => {
+    if (closing) return;
+    closing = true;
+    document.removeEventListener('keydown', onKey);
+    backdrop.style.pointerEvents = 'none';
+    spring.to(width(), { response: 0.3, velocity: typeof velocity === 'number' ? velocity : undefined, done: () => backdrop.remove() });
+  };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   const body = el('div', { class: 'drawer-body' }, content);
-  const backdrop = el('div', { class: 'drawer-backdrop', onclick: (e) => { if (e.target === backdrop) close(); } },
-    el('aside', { class: 'drawer', role: 'dialog', 'aria-label': title },
-      el('div', { class: 'drawer-head' }, el('h2', {}, title), el('button', { class: 'btn small', onclick: close }, 'Close')), body));
+  const head = el('div', { class: 'drawer-head' }, el('h2', {}, title), el('button', { class: 'btn small', onclick: () => close() }, 'Close'));
+  const panel = el('aside', { class: 'drawer', role: 'dialog', 'aria-label': title }, head, body);
+  const backdrop = el('div', { class: 'drawer-backdrop', onclick: (e) => { if (e.target === backdrop) close(); } }, panel);
   document.querySelectorAll('.drawer-backdrop').forEach((d) => d.remove());
   document.body.append(backdrop);
   document.addEventListener('keydown', onKey);
-  return { close, replace: (...nodes) => body.replaceChildren(...nodes.flat().filter(Boolean)) };
+  const width = () => panel.offsetWidth || 580;
+  const spring = new Spring(width(), (x) => {
+    panel.style.transform = x ? `translateX(${x}px)` : '';
+    backdrop.style.setProperty('--shown', Math.max(0, Math.min(1, 1 - x / width())));
+  });
+  spring.to(0, { response: 0.35 });
+
+  // The head is the handle. Past the left edge it gives a little; let go far enough or fast enough and it goes away.
+  head.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('button, a, input, select, textarea') || closing) return;
+    head.setPointerCapture(e.pointerId);
+    spring.stop();
+    const from = { pointer: e.clientX, x: spring.x };
+    const speed = tracker();
+    speed.add(e.clientX);
+    const onMove = (ev) => {
+      speed.add(ev.clientX);
+      const x = from.x + ev.clientX - from.pointer;
+      spring.set(x < 0 ? -rubberband(-x, width()) : x);
+    };
+    const end = () => {
+      head.removeEventListener('pointermove', onMove);
+      head.removeEventListener('pointerup', end);
+      head.removeEventListener('pointercancel', end);
+      const velocity = speed.velocity().x;
+      if (spring.x + project(velocity) > width() / 3) close(velocity);
+      else spring.to(0, { response: 0.3, damping: Math.abs(velocity) > 400 ? 0.8 : 1, velocity });
+    };
+    head.addEventListener('pointermove', onMove);
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
+  });
+  return { close: () => close(), replace: (...nodes) => body.replaceChildren(...nodes.flat().filter(Boolean)) };
 }
 
 export const section = (title, ...content) => el('div', { class: 'drawer-section' }, el('h3', {}, title), ...content);

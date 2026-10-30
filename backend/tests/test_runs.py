@@ -195,5 +195,5 @@ def test_a_long_skill_goes_first_and_the_tokens_are_counted(client, monkeypatch,
     plan = client.post("/api/agent/plan", json={"instruction": "run pocket motion", "run": "pm-1"}).json()
     system, message = seen[0][0]["content"], seen[0][1]["content"]
     assert "A rule of the run." in system and "A rule of the run." not in message
-    assert plan["tokens"] == {"prompt": 18000, "cached": 8000, "answer": 100}
+    assert plan["tokens"] == {"prompt": 18000, "cached": 8000, "written": 0, "answer": 100}
     assert any(e.get("text") == "Read 18,000 tokens (8,000 from the cache) and wrote 100" for e in plan["activity"])

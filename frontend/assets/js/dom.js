@@ -74,6 +74,8 @@ const ICONS = {
   attachment: '<path d="M8 12.5l6.5-6.5a3 3 0 0 1 4.2 4.2l-8 8a5 5 0 0 1-7-7l7.5-7.5"/>',
   upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4.5 14.5v4a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-4"/>',
   menu: '<path d="M8 10l4 4 4-4"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19.5h14"/>',
+  more: '<circle cx="6" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
 };
 
 export function icon(name) {
@@ -283,6 +285,14 @@ export function openDialog(...content) {
 }
 
 // Light, dark or the computer's own ('system'), kept for the next visit (theme.js applies it before the page paints).
+// The Motion setting: 'full', 'calm', or 'system' (what the computer asks for). theme.js puts it on the page.
+export const MOTIONS = [{ id: 'full', label: 'Full' }, { id: 'calm', label: 'Less' }, { id: 'system', label: 'Auto', hint: 'Same as this computer' }];
+export const motionChoice = () => { try { return localStorage.getItem('scene.motion') || 'system'; } catch (e) { return 'system'; } };
+export function applyMotion(choice) {
+  try { if (choice === 'system') localStorage.removeItem('scene.motion'); else localStorage.setItem('scene.motion', choice); } catch (e) { /* no storage */ }
+  if (window.sceneMotion) window.sceneMotion();
+}
+
 export function applyTheme(theme) {
   if (theme === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;

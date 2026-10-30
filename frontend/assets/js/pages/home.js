@@ -5,7 +5,7 @@ import { el, segmented, ago, initials, still, spill } from '../dom.js';
 import { store, subscribe } from '../store.js';
 import { openViewer } from '../components/media.js';
 import { composer } from '../components/composer.js';
-import { go } from '../nav.js';
+import { go, placePath } from '../nav.js';
 
 const RECENT = 8;    // projects shown
 const MADE = 60;     // finished items shown
@@ -35,9 +35,9 @@ export function render(view) {
       grid));
 
   const openProject = (project) => {
-    if (project.modules) return go('/project?id=' + project.id);   // a project with modules opens on its page, to pick one
+    if (project.modules) return go(placePath('/project', project));   // a project with modules opens on its page, to pick one
     localStorage.setItem('scene.project', project.id);
-    go('/canvas');
+    go(placePath('/canvas', project));
   };
 
   const cover = (id, itemKind, name) => still(`/api/library/${id}/file`, itemKind, name);

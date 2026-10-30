@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import audit, fetch, media, kit, sharing
+from .. import audit, fetch, media, kit, refs, sharing
 from ..db import as_everyone
 from ..catalog import KINDS
 from ..outputs import MAIN_CANVAS
@@ -275,7 +275,7 @@ async def list_projects(request: Request, user: dict = Depends(current_user)):
     where = "p.user_id = ?" + (" OR p.id IN ({})".format(", ".join("?" * len(shared))) if shared else "")
     with as_everyone() if shared else contextlib.nullcontext():
         rows = db.all(
-        "SELECT p.id, p.name, p.canvas_name, p.created, p.parent_id, p.user_id, pp.name AS parent_name, ow.name AS owner_name, "
+        "SELECT p.id, p.ref, p.name, p.canvas_name, p.created, p.parent_id, p.user_id, pp.name AS parent_name, pp.ref AS parent_ref, ow.name AS owner_name, "
         "(SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = COALESCE(p.parent_id, p.id)) AS members, "
         "(SELECT COUNT(*) FROM projects m WHERE m.parent_id = p.id) AS modules, "
         "(SELECT COUNT(*) FROM generations g WHERE " + _IN_PROJECT + " AND g.run = '') AS items, "
@@ -293,6 +293,20 @@ async def list_projects(request: Request, user: dict = Depends(current_user)):
     return {"projects": rows}
 
 
+@router.get("/refs/{ref}")
+async def find_ref(ref: str, request: Request, user: dict = Depends(current_user)):
+    """The project or module a link's id (PRJ..., MOD...) names, if the user may see it: {"id", "ref", "parent_id",
+    "parent_ref"}. 404 for an id that names nothing, or something the user is not in."""
+    db = request.app.state.db
+    with as_everyone():
+        row = db.one("SELECT p.id, p.ref, p.parent_id, pp.ref AS parent_ref FROM projects p LEFT JOIN projects pp ON pp.id = p.parent_id "
+                     "WHERE p.ref = ?", (ref,)) if refs.looks_like(ref, refs.PROJECT, refs.MODULE) else None
+    if not row:
+        raise HTTPException(404, "No such project.")
+    _own_project(request, user, row["id"], "viewer")
+    return row
+
+
 @router.get("/projects/{project_id}")
 async def get_project(project_id: int, request: Request, user: dict = Depends(current_user)):
     """A project's page: the project, its own canvas as the first module ("main"), then its modules, each with its items,
@@ -305,11 +319,11 @@ async def get_project(project_id: int, request: Request, user: dict = Depends(cu
         stats = db.one("SELECT COUNT(*) AS items, MAX(created) AS updated FROM generations WHERE project_id = ? AND run = ''", (row["id"],))
         cover = db.one("SELECT id, kind FROM generations WHERE project_id = ? AND run = '' ORDER BY created DESC LIMIT 1", (row["id"],))
         name = (row["canvas_name"] or MAIN_CANVAS) if main else row["name"]   # the project's own canvas goes by its own name
-        return {"id": row["id"], "name": name, "created": row["created"], "main": main, "items": stats["items"],
+        return {"id": row["id"], "ref": row["ref"], "name": name, "created": row["created"], "main": main, "items": stats["items"],
                 "updated": stats["updated"], "cover_id": cover and cover["id"], "cover_kind": cover and cover["kind"]}
     with as_everyone():   # what everyone in the project made, now that the user is found to be in it
         modules = [counted(top, True)] + [counted(m) for m in db.all("SELECT * FROM projects WHERE parent_id = ? ORDER BY created", (top["id"],))]
-    return {"project": {"id": top["id"], "name": top["name"], "created": top["created"], "role": top["role"], "members": sharing.members(db, top["id"]),
+    return {"project": {"id": top["id"], "ref": top["ref"], "name": top["name"], "created": top["created"], "role": top["role"], "members": sharing.members(db, top["id"]),
                         "items": sum(m["items"] for m in modules), "updated": max((m["updated"] or 0 for m in modules), default=0) or None,
                         **next(({"cover_id": m["cover_id"], "cover_kind": m["cover_kind"]} for m in sorted(modules, key=lambda m: -(m["updated"] or 0))
                                 if m["cover_id"]), {"cover_id": None, "cover_kind": None})},
@@ -402,7 +416,7 @@ def _project_analytics(db, user, project_id, period):
                      "credits": sum(x[3] for x in mine), "types": {t: v for t, v in types.items() if v["credits"] or v["generations"]}})
     rows.sort(key=lambda r: (-r["credits"], -r["generations"], r["number"]))
     return {
-        "project": {"id": root, "name": project["name"]}, "period": period, "start": start, "end": end, "owner": user["email"],
+        "project": {"id": root, "ref": project["ref"], "name": project["name"]}, "period": period, "start": start, "end": end, "owner": user["email"],
         "spend": spent, "spend_before": spent_before,
         "change": None if not spent_before else round(100 * (spent - spent_before) / spent_before),
         "generations": len(made), "active_modules": sum(1 for r in rows if r["generations"] or r["credits"]),
@@ -440,12 +454,14 @@ async def duplicate_project(project_id: int, request: Request, user: dict = Depe
     db = request.app.state.db
     row = _own_project(request, user, project_id)
     root = db.one("SELECT * FROM projects WHERE id = ?", (row["parent_id"] or project_id,))
-    copy = db.run("INSERT INTO projects (user_id, name, created, canvas_name) VALUES (?, ?, ?, ?)",
-                  (user["id"], (root["name"] + " copy")[:60], time.time(), root["canvas_name"]))
+    ref = refs.of_project(None)
+    copy = db.run("INSERT INTO projects (user_id, name, created, canvas_name, ref) VALUES (?, ?, ?, ?, ?)",
+                  (user["id"], (root["name"] + " copy")[:60], time.time(), root["canvas_name"], ref))
     for m in db.all("SELECT name FROM projects WHERE parent_id = ? ORDER BY id", (root["id"],)):
-        db.run("INSERT INTO projects (user_id, name, created, parent_id) VALUES (?, ?, ?, ?)", (user["id"], m["name"], time.time(), copy))
+        db.run("INSERT INTO projects (user_id, name, created, parent_id, ref) VALUES (?, ?, ?, ?, ?)",
+               (user["id"], m["name"], time.time(), copy, refs.of_project(copy)))
     kit.copy_entries(db, user["id"], root["id"], copy)
-    return {"id": copy, "name": (root["name"] + " copy")[:60]}
+    return {"id": copy, "ref": ref, "name": (root["name"] + " copy")[:60]}
 
 
 @router.post("/projects")
@@ -461,11 +477,13 @@ async def create_project(body: dict, request: Request, user: dict = Depends(curr
             raise HTTPException(400, "A module goes inside a project, not inside another module.")
     # A new project's own canvas is its first module, "Module 1"; the modules added to it go on from "Module 2".
     # A module of a shared project is the project owner's, like the project: everyone in it works there.
+    ref = refs.of_project(parent and parent["id"])
     with as_everyone():
-        project_id = request.app.state.db.run("INSERT INTO projects (user_id, name, created, parent_id, canvas_name) VALUES (?, ?, ?, ?, ?)",
+        project_id = request.app.state.db.run("INSERT INTO projects (user_id, name, created, parent_id, canvas_name, ref) VALUES (?, ?, ?, ?, ?, ?)",
                                               (parent["owner_id"] if parent else user["id"], name, time.time(), parent and parent["id"],
-                                               "" if parent else FIRST_MODULE))
-    return {"id": project_id, "name": name, "parent_id": parent and parent["id"]}
+                                               "" if parent else FIRST_MODULE, ref))
+    return {"id": project_id, "ref": ref, "name": name, "parent_id": parent and parent["id"],
+            "parent_ref": parent and parent.get("ref")}
 
 
 @router.put("/projects/{project_id}")

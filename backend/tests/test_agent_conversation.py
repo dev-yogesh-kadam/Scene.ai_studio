@@ -3,6 +3,7 @@ the frames shown under a result and the thumbs on a result."""
 
 import asyncio
 import json
+import math
 
 from scene import agent, media, memory
 from scene.api import workspace
@@ -118,7 +119,7 @@ def test_a_video_shows_its_frames_and_a_result_can_be_rated(client):
 def test_a_message_costs_what_its_model_costs(client, monkeypatch):
     me = register(client)
     prices = console(client).put("/api/admin/pricing/llm", json={"model": "gemini/flash", "credits": 3}).json()
-    assert {"model": "gemini/flash", "credits": 3, "available": False} in prices["models"]
+    assert {"model": "gemini/flash", "credits": 3, "available": False, "tokens": None} in prices["models"]
     assert console(client).put("/api/admin/pricing/llm", json={"model": "local:9b", "credits": 1}).status_code == 200
     assert console(client).put("/api/admin/pricing/llm", json={"model": "x", "credits": 1.5}).status_code == 400   # whole credits only
     assert console(client).put("/api/admin/pricing/llm", json={"model": "", "credits": 1}).status_code == 400
@@ -141,6 +142,41 @@ def test_a_message_costs_what_its_model_costs(client, monkeypatch):
     assert console(client).put("/api/admin/pricing/llm", json={"model": "gemini/flash", "credits": 0}).status_code == 200
     model(monkeypatch, client, {"thought": "", "reply": "Hello.", "steps": [], "model": "gemini/flash"})
     assert client.post("/api/agent/plan", json={"instruction": "hi"}).json()["llm"]["credits"] == 0
+
+
+def test_a_message_to_claude_costs_the_tokens_it_used(client, monkeypatch):
+    me = register(client)
+    credits = client.app.state.credits
+    # 1,000 fresh, 9,000 written to the cache, 90,000 read from it and 2,000 written out, at Opus 5.5's prices:
+    # $0.004 + $0.072 + $0.018 + $0.04 = $0.134, at ₹88 a dollar ₹11.79, at ₹100 for 1,000 credits 118 credits
+    used = {"prompt": 100_000, "cached": 90_000, "written": 9_000, "answer": 2_000}
+    assert credits.token_cost("claude/opus", used) == 118
+    assert credits.token_cost("claude/claude-opus-4-8", used) == math.ceil((5_000 + 90_000 + 45_000 + 50_000) / 1e6 * 88 * 10)
+    assert credits.token_cost("claude/haiku", used) == 4   # $0.0037: a credit at least
+    assert credits.token_cost("gemini/flash", used) == 0 and credits.token_cost("local:9b", used) == 0
+    assert credits.token_cost("claude/opus", {}) == 0
+
+    async def pick(wanted=None):
+        return wanted or "claude/opus"
+    monkeypatch.setattr(client.app.state.agent, "pick_model", pick)
+    model(monkeypatch, client, {"thought": "", "reply": "Hello.", "steps": [], "model": "claude/opus", "tokens": used})
+    plan = client.post("/api/agent/plan", json={"instruction": "hi"}).json()
+    assert plan["llm"] == {"credits": 118, "model": "claude/opus"} and plan["balance"] == 500 - 118
+    # the rupees a dollar buys are the admin's to set
+    assert console(client).put("/api/admin/pricing", json={"inr_per_usd": 44}).json()["inr_per_usd"] == 44
+    assert credits.token_cost("claude/opus", used) == 59
+    llm = console(client).get("/api/admin/pricing/llm").json()
+    assert llm["inr_per_usd"] == 44
+    # the tokens were used already: a user with fewer credits than they cost gives all they have, then is refused
+    client.app.state.db.run("UPDATE users SET credits = 20 WHERE id = ?", (me["id"],))
+    plan = client.post("/api/agent/plan", json={"instruction": "hi"}).json()
+    assert plan["llm"]["credits"] == 20 and plan["balance"] == 0
+    refused = client.post("/api/agent/plan", json={"instruction": "hi"})
+    assert refused.status_code == 400 and "charged by the tokens" in refused.json()["detail"]
+    # a flat price set in the console is charged in the place of the tokens
+    client.app.state.db.run("UPDATE users SET credits = 100 WHERE id = ?", (me["id"],))
+    assert console(client).put("/api/admin/pricing/llm", json={"model": "claude/opus", "credits": 5}).status_code == 200
+    assert client.post("/api/agent/plan", json={"instruction": "hi"}).json()["llm"] == {"credits": 5, "model": "claude/opus"}
 
 
 def test_the_conversation_keeps_many_turns_with_what_each_used_and_drops_the_oldest_past_its_budget():

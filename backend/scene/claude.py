@@ -8,7 +8,11 @@ does with Claude. A call refused at the limit is AgentBusy in agent.py, so the s
 
 A conversation of the studio is one session of Claude Code's (a thread, see agent.py): its first message carries
 everything, and each later one only what is new; Claude Code keeps the rest and its cache holds it, so the turns
-before are neither sent again by the studio nor read again at the full rate."""
+before are neither sent again by the studio nor read again at the full rate.
+
+A conversation's session runs in the studio's own folder (`home`), so it is listed with the sessions of the folder in
+Claude Code's other places (VS Code, `claude --resume`), titled "Studio · tab · project · user". Its owner's memory is
+off in it, and it is compacted, still the same session, when its context is COMPACT full (sessions.py)."""
 
 import asyncio
 import contextvars
@@ -29,7 +33,9 @@ except ImportError:
 
 PARALLEL = 3   # calls running at once; more wait their turn (each is a program of its own, and all share one account)
 MAX_TURNS = 3  # an answer in a schema takes two turns of Claude Code's (the answer, then its check)
-SESSION_TOKENS = 120_000  # a session that has grown past this is let go: the next message starts a new one (agent.py)
+WINDOW = 1_000_000   # tokens of context the models have (Sonnet 5, Opus 4.7, Haiku 5.5 and later); claude_context in config.json
+COMPACT = 0.9        # a session is compacted when its context is this full (sessions.COMPACT)
+NO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}   # the owner's own notes of the folder never reach a studio session
 LIMITED = re.compile(r"usage limit|rate.?limit|limit reached|out of (extra )?usage|overloaded|try again later|429|529", re.IGNORECASE)
 SIGNED_OUT = re.compile(r"log ?in|logged out|not signed|authenticat|oauth|invalid api key|401", re.IGNORECASE)
 
@@ -63,11 +69,12 @@ def find(path=""):
     return ""
 
 
-def service(models, path="", timeout=600, fast="", home=""):
+def service(models, path="", timeout=600, fast="", home="", window=WINDOW):
     """The Claude service for Agent(services=...), or None when it is off (no models named) or Claude Code isn't here.
     models: the names to offer, comma separated, as Claude Code takes them ("sonnet, opus, haiku", or full model ids).
     fast: the one for the agent's small jobs (captions, notes, checks); empty = the one in use.
-    home: the folder its sessions are kept under (Claude Code files a session by the folder it ran in)."""
+    home: the folder its sessions run in (Claude Code files a session by that folder, and lists it with the folder's
+    others). window: the tokens of context its models have."""
     names = [m.strip() for m in str(models or "").split(",") if m.strip()]
     if not names or names[0].lower() in ("off", "none"):
         return None
@@ -78,7 +85,14 @@ def service(models, path="", timeout=600, fast="", home=""):
         return None
     return {"id": "claude", "name": "Claude", "url": "claude-code", "key": "", "models": names, "only": "", "cli": program,
             "timeout": max(30, int(timeout or 600)), "fast": str(fast or "").strip(),
-            "home": str(home or Path(tempfile.gettempdir()) / "scene-claude")}
+            "home": str(home or Path(tempfile.gettempdir()) / "scene-claude"), "window": int(window or WINDOW)}
+
+
+def session_settings(s):
+    """The settings of Claude Code for the studio's sessions, as JSON: the owner's memory off, and compacted on its own
+    when the context is COMPACT full."""
+    window = int((s or {}).get("window") or WINDOW)
+    return json.dumps({"autoMemoryEnabled": False, "autoCompactWindow": max(100_000, min(1_000_000, int(window * COMPACT)))})
 
 
 def prompt_of(messages):
@@ -115,7 +129,8 @@ async def ask(s, model, messages, schema, images=(), thread=None):
                                                                                 "data": picture}} for picture in images)]
     line = json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False)
     args = [s["cli"], "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", model,
-            "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--max-turns", str(MAX_TURNS)]
+            "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--max-turns", str(MAX_TURNS),
+            "--settings", session_settings(s)]
     if going_on:
         args += ["--resume", thread["id"]]
     elif thread is None:
@@ -143,7 +158,7 @@ async def ask(s, model, messages, schema, images=(), thread=None):
 
 
 def _run(args, line, room, timeout):
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}   # the studio may itself be started from Claude Code
+    env = {**{k: v for k, v in os.environ.items() if k != "CLAUDECODE"}, **NO_MEMORY}   # the studio may itself be started from Claude Code
     try:
         return subprocess.run(args, input=line + "\n", capture_output=True, text=True, encoding="utf-8", errors="replace",
                               cwd=room, env=env, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -187,9 +202,9 @@ def judged(result, limits, printed=""):
     answer = result.get("structured_output")
     usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     number = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
-    cached = number(usage.get("cache_read_input_tokens"))
-    tokens = {"prompt": number(usage.get("input_tokens")) + number(usage.get("cache_creation_input_tokens")) + cached,
-              "cached": cached, "answer": number(usage.get("output_tokens"))}
+    cached, written = number(usage.get("cache_read_input_tokens")), number(usage.get("cache_creation_input_tokens"))
+    tokens = {"prompt": number(usage.get("input_tokens")) + written + cached,
+              "cached": cached, "written": written, "answer": number(usage.get("output_tokens"))}
     calls = [c for c in usage.get("iterations") or [] if isinstance(c, dict)]
     last = calls[-1] if calls else usage
     size = sum(number(last.get(k)) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
@@ -217,6 +232,7 @@ class _Live:
         self.lock = asyncio.Lock()
         self.used = time.monotonic()
         self.tools, self.called, self.context, self.result_chars = {}, [], None, 8000
+        self.record, self.compacted = None, []   # record(kind, text, data): what happens in it, for its story (sessions.py)
 
 
 live = {}   # a conversation's key (thread["key"]) -> its _Live
@@ -257,7 +273,7 @@ async def _open(s, settings):
         mcp_servers={TOOLS_SERVER: sdk.create_sdk_mcp_server(TOOLS_SERVER, tools=tools)} if tools else {},
         strict_mcp_config=True, setting_sources=[], cwd=s["home"], resume=settings["resume"] or None,
         max_turns=settings["max_turns"], output_format={"type": "json_schema", "schema": settings["schema"]},
-        extra_args={"disable-slash-commands": None})
+        settings=session_settings(s), env=dict(NO_MEMORY))
     client = sdk.ClaudeSDKClient(options)
     await asyncio.wait_for(client.connect(), 60)
     return client
@@ -291,12 +307,48 @@ async def _tidy():
         await _close(min(idle)[1])
 
 
+def _events_of(message):
+    """[(kind, text, data)] of one message of a live session, for its story (sessions.KINDS)."""
+    found = []
+    if isinstance(message, sdk.AssistantMessage):
+        for block in message.content or []:
+            if isinstance(block, sdk.TextBlock) and block.text.strip():
+                found.append(("text", block.text, None))
+            elif isinstance(block, sdk.ThinkingBlock) and block.thinking.strip():
+                found.append(("thinking", block.thinking, None))
+            elif isinstance(block, sdk.ToolUseBlock):
+                found.append(("tool_call", str(block.name).split("__")[-1], {"input": block.input, "id": block.id}))
+    elif isinstance(message, sdk.UserMessage) and isinstance(message.content, list):
+        for block in message.content:
+            if isinstance(block, sdk.ToolResultBlock):
+                content = block.content
+                text = content if isinstance(content, str) else " ".join(
+                    str(part.get("text") or "") for part in content or [] if isinstance(part, dict))
+                found.append(("tool_result", text, {"id": block.tool_use_id, "error": bool(block.is_error)}))
+    elif isinstance(message, sdk.SystemMessage) and message.subtype == "compact_boundary":
+        meta = (message.data or {}).get("compact_metadata") or {}
+        found.append(("compact", "Compacted the context ({})".format(meta.get("trigger") or "auto"), meta))
+    return found
+
+
+def _told(entry, message):
+    for kind, text, data in _events_of(message):
+        if kind == "compact":
+            entry.compacted.append(data)
+        if entry.record:
+            try:
+                entry.record(kind, text, data)
+            except Exception as error:   # the story is kept beside the conversation: a failure there never stops it
+                print("A Claude session's event was not kept: {}".format(error))
+
+
 async def _turn(entry, text):
     """One message to the live session; returns (its result as a result event, the last rate limit event)."""
     result, limits = None, None
     async with gate:
         await entry.client.query(text)
         async for message in entry.client.receive_response():
+            _told(entry, message)
             if isinstance(message, sdk.RateLimitEvent):
                 info = message.rate_limit_info
                 limits = dict(info.raw or {"status": info.status, "resetsAt": info.resets_at})
@@ -317,6 +369,8 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
     gate = gate or asyncio.Semaphore(PARALLEL)
     key = thread.get("key") or thread.get("id") or "default"
     signature = json.dumps([model, system, schema, sorted(about), max_turns], sort_keys=True)
+    if text.lstrip().startswith("/"):   # a message is never taken for a command of Claude Code's (/compact): command() runs those
+        text = "Message:\n" + text
     await _tidy()
     entry = live.get(key)
     if entry is not None and (entry.signature != signature or entry.session != thread.get("id")):
@@ -326,6 +380,7 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
         entry = live[key] = _Live(signature)
     async with entry.lock:
         entry.tools, entry.called, entry.context, entry.result_chars = tools, [], contextvars.copy_context(), result_chars
+        entry.record, entry.compacted = thread.get("record"), []
         try:
             if entry.client is None:
                 entry.client = await _open(s, {"model": model, "system": system, "schema": schema, "tools": about,
@@ -351,9 +406,76 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
         finally:
             entry.used = time.monotonic()
         entry.session = got["session"] or thread.get("id")
-    thread.update(id=entry.session, size=got["size"])
+    thread.update(id=entry.session, size=got["size"], compacted=len(entry.compacted) + (thread.get("compacted") or 0))
     total = {k: got["tokens"][k] + (tokens or {}).get(k, 0) for k in got["tokens"]}
     return got["answer"], total, got["limits"], list(entry.called)
+
+
+async def command(s, thread, text):
+    """A command of Claude Code's (/compact, /rename ...) in a conversation's session: in its live program when it has
+    one, else in a run of its own that goes on with the session. Returns {"compacted": the compact_metadata of a
+    compaction (pre_tokens, post_tokens) or None, "session": its id}."""
+    global gate
+    gate = gate or asyncio.Semaphore(PARALLEL)
+    key = thread.get("key") or thread.get("id") or "default"
+    entry = live.get(key)
+    if entry is not None and entry.client is not None and entry.session == thread.get("id"):
+        async with entry.lock:
+            entry.record, entry.compacted = thread.get("record"), []
+            try:
+                await _turn(entry, text)
+            except Exception as error:
+                await _close(key)
+                raise Failed("Claude Code could not do {}: {}".format(text.split()[0], " ".join(str(error).split())[:300]))
+            finally:
+                entry.used = time.monotonic()
+            done = entry.compacted[-1] if entry.compacted else None
+        return {"compacted": done, "session": entry.session}
+    if not thread.get("id"):
+        raise Failed("This conversation has no Claude session yet.")
+    args = [s["cli"], "-p", text, "--resume", thread["id"], "--output-format", "stream-json", "--verbose", "--tools", "",
+            "--strict-mcp-config", "--setting-sources", "", "--settings", session_settings(s)]
+    Path(s["home"]).mkdir(parents=True, exist_ok=True)
+    async with gate:
+        run = await asyncio.to_thread(_run, args, "", s["home"], s["timeout"])
+    done, session = None, thread["id"]
+    for raw in str(run.stdout or "").splitlines():
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "system" and event.get("subtype") == "compact_boundary":
+            done = event.get("compact_metadata") or {}
+            if thread.get("record"):
+                thread["record"]("compact", "Compacted the context ({})".format(done.get("trigger") or "manual"), done)
+        elif event.get("type") == "result":
+            session = event.get("session_id") or session
+            if event.get("is_error"):
+                said = " ".join(str(event.get("result") or "").split())
+                if "no conversation found" in said.lower():
+                    raise Lost("The conversation's Claude session is gone.")
+                raise Failed("Claude Code could not do {}: {}".format(text.split()[0], said[:300]))
+    return {"compacted": done, "session": session}
+
+
+async def compact(s, thread):
+    """Compact a conversation's session now: Claude Code sums up the turns so far and goes on from that, in the same
+    session. Returns the tokens its context holds after (None when Claude Code did not say)."""
+    done = (await command(s, thread, "/compact"))["compacted"]
+    after = (done or {}).get("post_tokens")
+    if isinstance(after, int):
+        thread["size"] = after
+    thread["compacted"] = (thread.get("compacted") or 0) + 1
+    return after
+
+
+async def rename(s, thread, title):
+    """Give a conversation's session its title, as Claude Code's other places list it (VS Code)."""
+    clean = " ".join(str(title or "").split())[:120]
+    if clean and thread.get("id"):
+        await command(s, thread, "/rename " + clean)
 
 
 def forget(s, session):

@@ -1,13 +1,14 @@
 // A project's page: on the left its cover, its analytics, its details and what can be done with it; on the right its
 // modules. A module is a canvas of its own, with its own timeline and agent tabs, inside the project; the project's own
-// canvas is the first one, "Main". The page is /project?id=<project id>; opening a module goes to its canvas.
+// canvas is the first one, "Main". The page is /project/<project's id> (/project?id=<number> from before); opening a
+// module goes to its canvas.
 
 import { api } from '../api.js';
 import { ask, el, icon, still, ago, initials, spill } from '../dom.js';
 import { store, subscribe } from '../store.js';
 import { projectDialog } from '../components/projects.js';
 import { shareDialog } from '../components/share.js';
-import { go } from '../nav.js';
+import { go, placeId, placePath, showAddress } from '../nav.js';
 
 // What the user's role in the project lets them do (the server checks it too: sharing.py).
 const RANK = { viewer: 1, creator: 2, manager: 3, owner: 4 };
@@ -17,7 +18,7 @@ const may = (role, need) => RANK[role || 'owner'] >= RANK[need];
 const TINTS = [['#ef6b8a', '#d12f7c'], ['#6b8bef', '#3f4fd1'], ['#3fbf9a', '#14876a'], ['#f0a25a', '#d0612b'], ['#a77bef', '#6a3fd1'], ['#4fb8e8', '#1f78b8']];
 
 export function render(view) {
-  const id = Number(new URLSearchParams(location.search).get('id')) || 0;
+  const id = placeId() || Number(new URLSearchParams(location.search).get('id')) || 0;
   let data = null;
   let query = '';
   const light = spill();
@@ -32,7 +33,7 @@ export function render(view) {
       grid))));
 
   // A module opens on its canvas; the project's own canvas is "Main".
-  const open = (module) => { localStorage.setItem('scene.project', module.id); go('/canvas'); };
+  const open = (module) => { localStorage.setItem('scene.project', module.id); go(placePath('/canvas', module, data.project.ref)); };
   const run = (action) => action().then(load).catch((e) => alert(e.message));
   async function addModule() {
     const made = await projectDialog({ parent: data.project, count: data.modules.length });
@@ -67,7 +68,7 @@ export function render(view) {
     side.replaceChildren(
       el('div', { class: 'proj-cover' }, p.cover_id ? still(`/api/library/${p.cover_id}/file`, p.cover_kind, p.name) : el('span', {}, initials(p.name)),
         el('div', { class: 'proj-title' }, el('h1', {}, p.name), el('span', {}, `${modules} ${modules === 1 ? 'module' : 'modules'} · ${p.items} items`))),
-      el('a', { class: 'proj-analytics', href: '/analytics?id=' + p.id },
+      el('a', { class: 'proj-analytics', href: placePath('/analytics', p) },
         el('span', { class: 'proj-analytics-icon' }, icon('bars')),
         el('span', { class: 'grow' }, el('b', {}, 'View analytics'), el('span', { class: 'muted small' }, 'Spend, generations, modules')),
         el('span', { class: 'proj-arrow', 'aria-hidden': 'true' }, '→')),
@@ -89,7 +90,7 @@ export function render(view) {
         may(p.role, 'manager') && el('button', { class: 'btn block', onclick: async () => { if (await projectDialog({ project: p })) load(); } }, icon('pencil'), 'Edit details'),
         may(p.role, 'owner') && el('button', { class: 'btn block', onclick: async (e) => {
           e.currentTarget.disabled = true;
-          try { const copy = await api(`/api/projects/${p.id}/duplicate`, { method: 'POST' }); go('/project?id=' + copy.id); } catch (err) { alert(err.message); }
+          try { const copy = await api(`/api/projects/${p.id}/duplicate`, { method: 'POST' }); go(placePath('/project', copy)); } catch (err) { alert(err.message); }
         } }, icon('frame'), 'Duplicate project'),
         may(p.role, 'owner') && el('button', { class: 'btn block quiet danger', onclick: async () => {
           if (await ask({ title: `Delete "${p.name}"?`, danger: true, confirm: 'Delete project',
@@ -111,7 +112,7 @@ export function render(view) {
   async function load() {
     try {
       data = await api('/api/projects/' + id);
-      if (data.project.id !== id) return go('/project?id=' + data.project.id, { replace: true });   // a module's address shows its project
+      showAddress(placePath('/project', data.project));   // a module's address, or an old one, shows the project's id
       light.show(data.project.cover_id, data.project.cover_kind);
       document.title = data.project.name + ' · Scene.ai';
       window.dispatchEvent(new CustomEvent('scene:crumbs', { detail: [{ label: 'Projects', href: '/projects' }, { label: data.project.name }] }));

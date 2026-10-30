@@ -5,6 +5,8 @@ import { ask, still, el, icon, duration, when } from '../dom.js';
 import { store } from '../store.js';
 import { KIT, addToKitDialog } from './kit.js';
 import { go } from '../nav.js';
+import { Spring } from '../spring.js';
+import { popover } from './agent.js';
 
 const title = (text) => String(text).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 const fileSize = (bytes) => (bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : bytes >= 1e6 ? (bytes / 1e6).toFixed(1) + ' MB' : Math.round((bytes || 0) / 1e3) + ' KB');
@@ -53,8 +55,73 @@ export function detailsOf(item, { owner } = {}) {
   ].filter((row) => row && row[1] != null && row[1] !== '');
 }
 
+// The viewer grows out of the picture that was clicked and goes back into it when it closes, so it is always clear
+// where it came from. The last press anywhere is remembered to find that picture.
+let pressed = null;
+document.addEventListener('pointerdown', (e) => { pressed = e.target; }, true);
+
+// The picture under the last press: an image or a video shown in what was pressed.
+function pressedPicture() {
+  const holder = pressed && pressed.isConnected && pressed.closest('button, a, [role="button"], .frame, .media, .made, .thumb');
+  const pic = holder && holder.querySelector('img, video');
+  if (!pic || !pic.getBoundingClientRect().width) return null;
+  const size = pic.tagName === 'IMG' ? [pic.naturalWidth, pic.naturalHeight] : [pic.videoWidth, pic.videoHeight];
+  return size[0] && size[1] ? { pic, w: size[0], h: size[1] } : null;
+}
+
+// A still of the picture to fly: the image itself, or the frame a video is showing.
+function snapshot(pic, w, h) {
+  if (pic.tagName === 'IMG') return el('img', { src: pic.currentSrc || pic.src, alt: '' });
+  try {
+    const canvas = el('canvas', { width: w, height: h });
+    canvas.getContext('2d').drawImage(pic, 0, 0, w, h);
+    return canvas;
+  } catch { return null; }
+}
+
+// Where the picture will sit in the viewer: as large as fits, never larger than it is, in the middle.
+function landing(area, w, h) {
+  const box = area.getBoundingClientRect();
+  const pad = parseFloat(getComputedStyle(area).paddingLeft) || 0;
+  const scale = Math.min(1, (box.width - pad * 2) / w, (Math.min(box.height, innerHeight) - pad * 2) / h);
+  return { x: box.left + (box.width - w * scale) / 2, y: box.top + (Math.min(box.height, innerHeight) - h * scale) / 2, w: w * scale, h: h * scale };
+}
+
+// The still flies between the thumbnail and the viewer on one spring, 0 at the thumbnail and 1 in the viewer. Closing
+// while it is still opening turns it round from where it is.
+function flyFrom(dialog, area, source) {
+  const flyer = snapshot(source.pic, source.w, source.h);
+  if (!flyer) return null;
+  flyer.classList.add('viewer-flyer');
+  dialog.append(flyer);
+  dialog.classList.add('flying');
+  let from = source.pic.getBoundingClientRect();
+  const to = landing(area, source.w, source.h);
+  const put = (p) => {
+    const w = from.width + (to.w - from.width) * p;
+    const h = from.height + (to.h - from.height) * p;
+    flyer.style.transform = `translate(${from.left + (to.x - from.left) * p}px, ${from.top + (to.y - from.top) * p}px)`;
+    flyer.style.width = w + 'px';
+    flyer.style.height = h + 'px';
+    dialog.style.setProperty('--open', Math.max(0, Math.min(1, p)));
+  };
+  const spring = new Spring(0, put, 0.001);
+  spring.to(1, { response: 0.42, done: () => { dialog.classList.remove('flying'); flyer.remove(); } });
+  return {
+    back(done) {
+      if (!source.pic.isConnected) return false;
+      from = source.pic.getBoundingClientRect();   // it may have moved while the viewer was open
+      if (!flyer.isConnected) { dialog.append(flyer); put(spring.x); }
+      dialog.classList.add('flying', 'leaving');
+      spring.to(0, { response: 0.36, done });
+      return true;
+    },
+  };
+}
+
 // base: where the file is served from. owner: show who made it (admin). actions: extra buttons.
 export function openViewer(item, { base = '/api/library', owner = false, actions = [] } = {}) {
+  const source = pressedPicture();
   const url = `${base}/${item.id}/file`;
   const media = item.kind === 'video' ? el('video', { src: url, controls: true, autoplay: true, loop: true })
     : item.kind === 'audio' ? el('audio', { src: url, controls: true, autoplay: true })
@@ -88,7 +155,7 @@ export function openViewer(item, { base = '/api/library', owner = false, actions
     el('div', { class: 'viewer-grid' },
       el('div', { class: 'viewer-media' }, media),
       el('aside', { class: 'viewer-panel' },
-        el('div', { class: 'viewer-title' }, el('h2', {}, item.name), el('button', { class: 'icon-btn', title: 'Close', 'aria-label': 'Close', onclick: () => dialog.close() }, '×')),
+        el('div', { class: 'viewer-title' }, el('h2', {}, item.name), el('button', { class: 'icon-btn', title: 'Close', 'aria-label': 'Close', onclick: () => leave() }, '×')),
         el('div', { class: 'viewer-scroll' },
           promptText && el('div', { class: 'viewer-section' }, el('div', { class: 'label-row' }, el('h3', {}, 'Prompt'), copy), el('p', { class: 'prose' }, promptText)),
           el('div', { class: 'viewer-section' }, el('h3', {}, 'Details'),
@@ -104,9 +171,22 @@ export function openViewer(item, { base = '/api/library', owner = false, actions
     download.click();
   });
   // A click in the dark around the picture closes it, as a click outside a smaller dialog would.
-  dialog.addEventListener('click', (e) => { if (e.target === dialog || e.target.classList.contains('viewer-media')) dialog.close(); });
+  dialog.addEventListener('click', (e) => { if (e.target === dialog || e.target.classList.contains('viewer-media')) leave(); });
+  // Esc, the close button and a click outside send the picture back to where it came from before the viewer closes.
+  let trip = null;
+  let leaving = false;
+  const leave = () => {
+    if (leaving) return;
+    leaving = true;
+    if (!trip || !trip.back(() => dialog.close())) dialog.close();
+  };
+  dialog.addEventListener('cancel', (e) => { e.preventDefault(); leave(); });
   document.body.append(dialog);
   dialog.showModal();
+  // The viewer itself takes the focus, not its close button: the Enter that opened it must not close it again.
+  dialog.tabIndex = -1;
+  dialog.focus();
+  if (source && (item.kind === 'image' || item.kind === 'video')) trip = flyFrom(dialog, dialog.querySelector('.viewer-media'), source);
   return dialog;
 }
 
@@ -144,22 +224,39 @@ export function mediaCard(item, { manage, projects = [], onChanged } = {}) {
     !edited && seedOf(item) != null && { label: 'Reuse seed', run: (dialog) => { dialog.close(); reuseSeed(item); } },
     !sound && { label: next, run: async (dialog) => { if (await useAsFirstFrame(item)) dialog.close(); } },
   ].filter(Boolean) });
+  // The card is the picture and its name. Its actions wait on the picture until the pointer is on it (always shown on
+  // a touch screen): the next step as one clear button, Download, and the rest in a "…" menu.
+  const project = projects.find((p) => p.id === item.project_id);
+  const moveMenu = (anchor) => popover(anchor, [el('div', { class: 'pop-title' }, 'Move to project'),
+    ...[{ id: 0, name: 'No project' }, ...projects].map((p) => el('button', { type: 'button', class: 'pop-item', role: 'menuitemradio',
+      'aria-checked': String((item.project_id || 0) === p.id),
+      onclick: (e) => { e.currentTarget.closest('.pop').close(); move({ target: { value: p.id } }); } },
+      el('span', {}, el('b', {}, p.parent_name ? `${p.parent_name} › ${p.name}` : p.name)), (item.project_id || 0) === p.id && icon('check')))]);
+  const more = el('button', { type: 'button', class: 'card-tool', title: 'More', 'aria-label': `More for ${item.name}`, 'aria-haspopup': 'menu',
+    onclick: (e) => {
+      e.stopPropagation();
+      const close = () => box.close();
+      const row = (glyph, label, run, cls = '') => el('button', { type: 'button', class: 'pop-item ' + cls, role: 'menuitem', onclick: () => { close(); run(); } }, icon(glyph), label);
+      const box = popover(more, [
+        !edited && row('retry', 'Re-run with the same settings', rerun),
+        manage && row('folder', project ? `Move from ${project.name}…` : 'Move to a project…', () => moveMenu(more)),
+        manage && item.kind !== 'text' && item.project_id && row('memory', `Add to ${KIT}`, () => addToKitDialog({ project: item.project_id || 0, item })),
+        manage && el('div', { class: 'menu-sep' }),
+        manage && row('trash', 'Delete', remove, 'danger'),
+      ].filter(Boolean), 'card-menu');
+    } }, icon('more'));
+  const tools = el('div', { class: 'card-tools' },
+    el('a', { class: 'card-tool', href: fileUrl + '?download=true', download: item.filename, title: 'Download', 'aria-label': `Download ${item.name}`,
+      onclick: (e) => e.stopPropagation() }, icon('download')),
+    (!edited || manage) && more);
+  const nextButton = !sound && el('button', { type: 'button', class: 'card-go', title: item.kind === 'video' ? 'Start a new video on the last frame of this one' : 'Start a video on this image',
+    onclick: (e) => { e.stopPropagation(); useAsFirstFrame(item, e.currentTarget); } }, icon('forward'), next);
   return el('div', { class: 'media' },
     el('div', { class: 'thumb', onclick: view }, thumb, el('span', { class: 'kind' }, item.kind),
       item.rating ? el('span', { class: 'rated' + (item.rating < 0 ? ' bad' : ''), title: item.rating > 0 ? 'You liked it' : 'You turned it down' },
-        icon(item.rating > 0 ? 'thumbup' : 'thumbdown')) : null),
+        icon(item.rating > 0 ? 'thumbup' : 'thumbdown')) : null,
+      tools, nextButton),
     el('div', { class: 'meta' },
       el('div', { class: 'title', title: item.name }, item.name),
-      el('div', { class: 'sub' }, [item.summary, item.seconds && 'took ' + duration(item.seconds)].filter(Boolean).join(' · ') || when(item.created)),
-      el('div', { class: 'row' },
-        el('a', { class: 'btn small', href: fileUrl + '?download=true', download: item.filename }, 'Download'),
-        !edited && el('button', { class: 'btn small', onclick: rerun, title: 'Open Create with the same settings' }, 'Re-run'),
-        !sound && el('button', { class: 'btn small', onclick: (e) => useAsFirstFrame(item, e.currentTarget),
-          title: item.kind === 'video' ? 'Start a new video on the last frame of this one' : 'Start a video on this image' }, next)),
-      manage && el('div', { class: 'row' },
-        el('select', { class: 'small', title: 'Project', onchange: move },
-          el('option', { value: '' }, 'No project'),
-          projects.map((p) => el('option', { value: p.id, selected: p.id === item.project_id }, p.parent_name ? `${p.parent_name} › ${p.name}` : p.name))),
-        item.kind !== 'text' && item.project_id && el('button', { class: 'btn small', onclick: () => addToKitDialog({ project: item.project_id || 0, item }) }, `Add to ${KIT}`),
-        el('button', { class: 'btn small quiet danger', onclick: remove }, 'Delete'))));
+      el('div', { class: 'sub' }, [manage && project ? project.name : '', item.summary, item.seconds && 'took ' + duration(item.seconds)].filter(Boolean).join(' · ') || when(item.created))));
 }

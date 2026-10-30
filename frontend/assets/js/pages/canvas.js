@@ -12,7 +12,8 @@ import { bulkPanel } from '../components/bulk.js';
 import { quickActions } from '../components/quick.js';
 import { agentTabs } from '../components/agent-tabs.js';
 import { KIT, addToKitDialog, kitPanel } from '../components/kit.js';
-import { go } from '../nav.js';
+import { go, placePath, showAddress } from '../nav.js';
+import { Spring, project as carry, rubberband, tracker } from '../spring.js';
 
 const FRAME = 240;      // width of every frame, in canvas units
 const SLATE = 24;       // room under a frame for its line of facts
@@ -68,8 +69,9 @@ export function render(view) {
   // The canvas shows one project, the one opened from All projects; its name is shown, and it does not switch.
   const picker = el('b', { class: 'canvas-project', title: 'This project. Open another from All projects.' });
   const count = el('span', { class: 'slate-text' });
+  const timelineLink = el('a', { class: 'btn small quiet', href: '/timeline', title: 'Put this project\'s videos in order' }, 'Timeline');
   const context = el('div', { class: 'float canvas-context hidden' });
-  const zoomLabel = el('button', { class: 'btn small quiet', title: 'Zoom to 100% (0)', onclick: () => zoomTo(1) });
+  const zoomLabel = el('button', { class: 'btn small quiet canvas-zoom', title: 'Zoom to 100% (0)', onclick: () => zoomTo(1) });
   const map = el('div', { class: 'minimap hidden', 'aria-hidden': 'true' });
   const hint = el('p', { class: 'canvas-hint muted' }, 'Use the panel on the right to make a shot. Everything you make lands here.');
   // The balance, at the top right like on every page; here it leads the tool bar that is already there.
@@ -254,12 +256,12 @@ export function render(view) {
     libraryButton, filePicker);
 
   view.replaceChildren(stage,
-    el('div', { class: 'float canvas-bar' }, picker, count, shareButton, el('a', { class: 'btn small quiet', href: '/timeline', title: 'Put this project\'s videos in order' }, 'Timeline')),
+    el('div', { class: 'float canvas-bar' }, picker, count, shareButton, timelineLink),
     tools, drawer, toolNote,
     context,
     el('div', { class: 'float canvas-view' },
       balance,
-      el('button', { class: 'btn small quiet', title: 'Fit everything (1)', onclick: () => fit() }, 'Fit'),
+      el('button', { class: 'btn small quiet canvas-zoom', title: 'Fit everything (1)', onclick: () => fit(true) }, 'Fit'),
       zoomLabel, panelButton),
     map, hint, panel);
 
@@ -505,7 +507,6 @@ export function render(view) {
 
   // Glide to one item and select it: it comes to the middle of the part of the canvas the panel leaves free, at a size
   // it can be seen at, with a ring that shows which one it is.
-  let glide = null;
   async function focusItem(id) {
     if (!boxes.has(id)) {   // made a moment ago, it may not be drawn yet
       try { await loadItems(); draw(); } catch { /* said below */ }
@@ -515,13 +516,8 @@ export function render(view) {
     const rect = stage.getBoundingClientRect();
     const covered = isOpen() ? panelWidth + 12 : 0;
     const room = { w: Math.max(200, rect.width - covered), h: rect.height };
-    cam.k = clamp(Math.min((room.w * 0.55) / FRAME, (room.h * 0.62) / (box.h + SLATE)), 0.35, 1.6);
-    cam.x = room.w / 2 - (box.x + FRAME / 2) * cam.k;
-    cam.y = room.h / 2 - (box.y + (box.h + SLATE) / 2) * cam.k;
-    world.classList.add('gliding');
-    applyCamera();
-    clearTimeout(glide);
-    glide = setTimeout(() => world.classList.remove('gliding'), 650);
+    const k = clamp(Math.min((room.w * 0.55) / FRAME, (room.h * 0.62) / (box.h + SLATE)), 0.35, 1.6);
+    glideTo({ k, x: room.w / 2 - (box.x + FRAME / 2) * k, y: room.h / 2 - (box.y + (box.h + SLATE) / 2) * k });
     selected.clear();
     selected.add(id);
     selectionChanged();
@@ -531,6 +527,46 @@ export function render(view) {
   }
 
   // ------------------------------------------------------------ camera
+
+  // The camera moves on springs: a flicked board carries on and settles, and Fit or a result picked in the conversation
+  // glides there. Touching the board, the wheel or a zoom catches it where it is.
+  let moves = [];
+  function stopCamera() { moves.forEach((spring) => spring.stop()); moves = []; }
+  function glideTo(to) {
+    stopCamera();
+    const from = { ...cam };
+    moves = [new Spring(0, (p) => {
+      cam.x = from.x + (to.x - from.x) * p;
+      cam.y = from.y + (to.y - from.y) * p;
+      cam.k = from.k + (to.k - from.k) * p;
+      applyCamera();
+    }, 0.001).to(1, { response: 0.5 })];
+  }
+
+  // How far the board can be pushed: some of the work always stays in sight, so it is never lost off an edge.
+  function limits() {
+    if (!boxes.size) return null;
+    const all = bounds([...boxes.values()]);
+    const rect = stage.getBoundingClientRect();
+    const keep = 160;
+    return { minX: keep - all.right * cam.k, maxX: rect.width - keep - (all.x - LABEL) * cam.k, w: rect.width,
+      minY: keep - all.bottom * cam.k, maxY: rect.height - keep - all.y * cam.k, h: rect.height };
+  }
+  // Past a limit the board follows the pointer less and less.
+  const soft = (raw, low, high, size) => (raw < low ? low - rubberband(low - raw, size) : raw > high ? high + rubberband(raw - high, size) : raw);
+
+  // A drag let go: the board carries on at the pointer's speed and settles inside its limits.
+  function throwCamera(velocity) {
+    stopCamera();
+    const edge = limits();
+    if (!edge) return;
+    const axis = (key, speed, low, high) => {
+      const out = cam[key] < low || cam[key] > high;
+      return new Spring(cam[key], (value) => { cam[key] = value; applyCamera(); })
+        .to(clamp(cam[key] + carry(speed), low, high), { response: out ? 0.45 : 0.8, velocity: speed });
+    };
+    moves = [axis('x', velocity.x, edge.minX, edge.maxX), axis('y', velocity.y, edge.minY, edge.maxY)];
+  }
 
   function applyCamera() {
     world.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})`;
@@ -544,6 +580,7 @@ export function render(view) {
   }
 
   function zoomAt(clientX, clientY, k) {
+    stopCamera();
     const rect = stage.getBoundingClientRect();
     const px = clientX - rect.left;
     const py = clientY - rect.top;
@@ -565,21 +602,25 @@ export function render(view) {
       right: Math.max(...list.map((b) => b.x + FRAME)), bottom: Math.max(...list.map((b) => b.y + b.h + SLATE)) };
   }
 
-  function fit() {
-    if (!boxes.size) { cam.x = 96; cam.y = 96; cam.k = 1; return applyCamera(); }
+  // animate: glide there (Fit, the 1 key); otherwise jump, as when the page opens or the panel is resized.
+  function fit(animate = false) {
+    if (!boxes.size) { stopCamera(); cam.x = 96; cam.y = 96; cam.k = 1; return applyCamera(); }
     const all = bounds([...boxes.values()]);
     all.x -= LABEL;   // the names of the shots are part of the picture
     const rect = stage.getBoundingClientRect();
     const covered = isOpen() ? panelWidth + 12 : 0;   // the open panel covers the right side
     const room = { w: rect.width - 160 - covered, h: rect.height - 160 };
-    cam.k = clamp(Math.min(room.w / (all.right - all.x), room.h / (all.bottom - all.y)), MIN_ZOOM, 1);
-    cam.x = (rect.width - covered - (all.right - all.x) * cam.k) / 2 - all.x * cam.k;
-    cam.y = 80 + (room.h - (all.bottom - all.y) * cam.k) / 2 - all.y * cam.k;
+    const k = clamp(Math.min(room.w / (all.right - all.x), room.h / (all.bottom - all.y)), MIN_ZOOM, 1);
+    const to = { k, x: (rect.width - covered - (all.right - all.x) * k) / 2 - all.x * k, y: 80 + (room.h - (all.bottom - all.y) * k) / 2 - all.y * k };
+    if (animate) return glideTo(to);
+    stopCamera();
+    Object.assign(cam, to);
     applyCamera();
   }
 
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();
+    stopCamera();
     if (e.ctrlKey || e.metaKey) return zoomAt(e.clientX, e.clientY, cam.k * Math.exp(-e.deltaY * 0.01));
     cam.x -= e.deltaX;
     cam.y -= e.deltaY;
@@ -589,17 +630,24 @@ export function render(view) {
   // Drag the empty canvas to pan; a click on it clears the selection.
   stage.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    stopCamera();
     const from = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y };
+    const edge = limits();
+    const speed = tracker();
+    speed.add(e.clientX, e.clientY);
     let moved = false;
     stage.classList.add('panning');
     track((ev) => {
+      speed.add(ev.clientX, ev.clientY);
       moved = moved || Math.abs(ev.clientX - from.x) + Math.abs(ev.clientY - from.y) > 3;
       cam.x = from.cx + ev.clientX - from.x;
       cam.y = from.cy + ev.clientY - from.y;
+      if (edge) { cam.x = soft(cam.x, edge.minX, edge.maxX, edge.w); cam.y = soft(cam.y, edge.minY, edge.maxY, edge.h); }
       applyCamera();
     }, () => {
       stage.classList.remove('panning');
-      if (!moved && selected.size) { selected.clear(); selectionChanged(); }
+      if (moved) throwCamera(speed.velocity());
+      else if (selected.size) { selected.clear(); selectionChanged(); }
     });
   });
 
@@ -624,12 +672,25 @@ export function render(view) {
   const gapLine = (i) => (i === 0 ? bands[0].y - GAP / 2 : (bands[i - 1].y + bands[i - 1].h + SLATE + bands[i].y) / 2);
   const insertMark = el('div', { class: 'insert-mark' }, el('span', {}, 'New shot here'));
 
+  // After a drop every frame that changed place slides from where it was to its new spot, so the eye can follow it;
+  // the dropped ones land with a little give.
+  function settleFrom(was, dropped) {
+    for (const [box, at] of was) {
+      const dx = at.x - box.x;
+      const dy = at.y - box.y;
+      if (!box.node.isConnected || (!dx && !dy)) continue;
+      new Spring(1, (t) => { box.node.style.translate = t ? `${dx * t}px ${dy * t}px` : ''; }, 0.002)
+        .to(0, { response: 0.35, damping: dropped.has(box) ? 0.8 : 1 });
+    }
+  }
+
   function grab(e, id) {
     if (e.button !== 0) return;
     e.stopPropagation();
     if (e.shiftKey) { selected.has(id) ? selected.delete(id) : selected.add(id); }
     else if (!selected.has(id)) { selected.clear(); selected.add(id); }
     selectionChanged();
+    stopCamera();
     const from = { x: e.clientX, y: e.clientY };
     const moving = [...selected].map((key) => boxes.get(key)).filter(Boolean).map((box) => ({ box, x: box.x, y: box.y }));
     let moved = false;
@@ -643,6 +704,7 @@ export function render(view) {
       const dy = (ev.clientY - from.y) / cam.k;
       moved = moved || Math.abs(dx) + Math.abs(dy) > 3 / cam.k;
       if (!moved) return;
+      if (!moving[0].box.node.classList.contains('lifted')) moving.forEach((m) => m.box.node.classList.add('lifted'));
       context.classList.add('hidden');
       gap = gapAt(startY + dy);
       if (gap >= 0) {   // over the line between two shots: it lights up, and the frames will start a new shot there
@@ -661,6 +723,8 @@ export function render(view) {
       // canvas" with nothing selected), the click gives it this frame.
       if (!moved && picking) { const done = picking; stopPicking(); done(items.find((i) => i.id === id)); return; }
       if (!moved) return;
+      moving.forEach((m) => m.box.node.classList.remove('lifted'));
+      const was = new Map([...boxes.values()].map((box) => [box, { x: box.x, y: box.y }]));
       // Dropped frames join the shot they were dropped on, at that place in the row; below the last row they start a new shot.
       const dropped = boxes.get(id);
       const middle = dropped.y + dropped.h / 2;
@@ -675,6 +739,7 @@ export function render(view) {
       const row = fresh || (band ? band.row : newRow());
       row.keys.splice(Math.min(fresh ? 0 : at, row.keys.length), 0, ...ids);
       update();
+      settleFrom(was, new Set(moving.map((m) => m.box)));
       save();
     });
   }
@@ -731,10 +796,19 @@ export function render(view) {
     requestAnimationFrame(() => { overlayQueued = false; drawContext(); drawMap(); });
   }
 
+  // The bar over the selection. It is built again only when the selection changes; while the board moves (every frame
+  // of a pan or a glide) it is only moved.
+  let contextKey = '';
   function drawContext() {
     const chosen = items.filter((i) => selected.has(i.id) && boxes.has(i.id));
     context.classList.toggle('hidden', !chosen.length);
-    if (!chosen.length) return;
+    if (!chosen.length) { contextKey = ''; return; }
+    const area = bounds(chosen.map((i) => boxes.get(i.id)));
+    context.style.left = Math.max(8, cam.x + area.x * cam.k) + 'px';
+    context.style.top = Math.max(56, cam.y + area.y * cam.k - 48) + 'px';
+    const key = chosen.map((i) => i.id).join(',') + '|' + project;
+    if (key === contextKey) return;
+    contextKey = key;
     const videos = chosen.filter((i) => i.kind === 'video');
     const one = chosen.length === 1 ? chosen[0] : null;
     context.replaceChildren(...[
@@ -752,24 +826,32 @@ export function render(view) {
       one && project && el('button', { class: 'btn small quiet', title: `Keep it in this project's ${KIT} under a name`,
         onclick: async () => { if (await addToKitDialog({ project, item: one })) { shared.load(); dock.recast(); } } }, `Add to ${KIT}`),
     ].filter(Boolean));
-    const area = bounds(chosen.map((i) => boxes.get(i.id)));
-    context.style.left = Math.max(8, cam.x + area.x * cam.k) + 'px';
-    context.style.top = Math.max(56, cam.y + area.y * cam.k - 48) + 'px';
   }
 
+  // The minimap: a mark for each frame, in canvas units inside one layer that is scaled to fit, and the box of what is
+  // in view. The marks are made again only when frames move or the selection changes; a moving camera only changes the
+  // layer's scale and the box.
+  const mapLayer = el('div', { class: 'minimap-layer' });
+  const mapView = el('b');
+  map.append(mapLayer, mapView);
+  let mapKey = '';
   function drawMap() {
     map.classList.toggle('hidden', boxes.size < 2);
     if (boxes.size < 2) return;
+    const marks = [...boxes.values()];
+    const key = marks.map((b) => `${b.key}:${b.x}:${b.y}:${b.h}:${selected.has(b.key) ? 1 : 0}`).join('|');
+    if (key !== mapKey) {
+      mapKey = key;
+      mapLayer.replaceChildren(...marks.map((b) => el('i', { class: selected.has(b.key) ? 'on' : '', style: `left:${b.x}px;top:${b.y}px;width:${FRAME}px;height:${b.h}px` })));
+    }
     const rect = stage.getBoundingClientRect();
     const seen = { x: -cam.x / cam.k, y: -cam.y / cam.k, h: rect.height / cam.k, right: (rect.width - cam.x) / cam.k, bottom: (rect.height - cam.y) / cam.k };
     const all = bounds([...boxes.values()]);
     const left = Math.min(all.x, seen.x);
     const top = Math.min(all.y, seen.y);
     const scale = Math.min(120 / (Math.max(all.right, seen.right) - left), 72 / (Math.max(all.bottom, seen.bottom) - top));
-    const at = (x, y, w, h) => `left:${(x - left) * scale}px;top:${(y - top) * scale}px;width:${w * scale}px;height:${h * scale}px`;
-    map.replaceChildren(
-      ...[...boxes.values()].map((b) => el('i', { class: selected.has(b.key) ? 'on' : '', style: at(b.x, b.y, FRAME, b.h) })),
-      el('b', { style: at(seen.x, seen.y, seen.right - seen.x, seen.bottom - seen.y) }));
+    mapLayer.style.transform = `scale(${scale}) translate(${-left}px, ${-top}px)`;
+    mapView.style.cssText = `left:${(seen.x - left) * scale}px;top:${(seen.y - top) * scale}px;width:${(seen.right - seen.x) * scale}px;height:${(seen.bottom - seen.y) * scale}px`;
   }
 
   // ------------------------------------------------------------ loading and saving
@@ -796,8 +878,10 @@ export function render(view) {
       {
         const here = projects.find((p) => p.id === project);
         picker.textContent = here ? (here.parent_name ? `${here.parent_name} › ${here.name}` : here.canvas_name ? `${here.name} › ${here.canvas_name}` : here.name) : 'All work';
-        picker.onclick = here ? () => go('/project?id=' + (here.parent_id || here.id)) : null;
+        picker.onclick = here ? () => go(placePath('/project', here)) : null;
         picker.classList.toggle('linked', !!here);
+        showAddress(placePath('/canvas', here));   // the address names this project and module, to keep or send
+        timelineLink.href = placePath('/timeline', here);
         shareButton.classList.toggle('hidden', !project);   // an asset book belongs to a project: none for all work
         picker.title = here ? 'Open the project: its asset book and its modules' : 'Everything you have made';
       }
@@ -814,7 +898,7 @@ export function render(view) {
   const onKey = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); return showPanel(!isOpen()); }
     if (e.target.closest('input, textarea, select, dialog, [contenteditable]') || e.metaKey || e.ctrlKey) return;
-    if (e.key === '1') fit();
+    if (e.key === '1') fit(true);
     else if (e.key === '0') zoomTo(1);
     else if (e.key === 'Escape' && picking) stopPicking();
     else if (e.key === 'Escape' && selected.size) { selected.clear(); selectionChanged(); }

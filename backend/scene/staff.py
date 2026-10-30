@@ -21,7 +21,7 @@ AREAS = {
     "workflows": "Workflows", "agent": "Agent", "skills": "Skills",
     "audit": "Audit log", "backups": "Backups", "storage": "Storage", "announcement": "Announcement",
 }
-ADMIN_ONLY = {"roles", "settings", "maintenance", "endpoints"}   # never given to another role
+ADMIN_ONLY = {"roles", "settings", "maintenance", "endpoints", "sessions"}   # never given to another role
 
 BASE = {"overview", "search", "projects", "assets"}
 BUILT_IN = {
@@ -44,7 +44,7 @@ BUILT_IN = {
 FIELDS_FOR = {"users": {"note", "disabled", "sign-out"}, "credits": {"add_credits", "daily_cap"}}
 
 # The console's sections and the area each one reads.
-SECTIONS = {"overview": "overview", "jobs": "jobs", "system": "system", "users": "users", "credits": "credits",
+SECTIONS = {"overview": "overview", "jobs": "jobs", "system": "system", "sessions": "sessions", "users": "users", "credits": "credits",
             "library": "library", "projects": "projects", "moderation": "moderation", "pricing": "pricing",
             "economics": "economics", "workflows": "workflows", "agent": "agent", "skills": "skills",
             "audit": "audit", "roles": "roles", "endpoints": "endpoints", "settings": "settings"}

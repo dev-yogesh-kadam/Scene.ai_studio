@@ -409,6 +409,22 @@ def test_video_thumbnails_are_small_posters_the_browser_keeps(client):
     assert not media.poster_path(folder / "clip.mp4").exists()
 
 
+def test_a_jpeg_picture_has_a_poster_too(client):
+    """ffmpeg reads nothing from a still JPEG after any -ss, even 0: its thumbnail was broken."""
+    import asyncio
+    from scene import media
+
+    me = register(client)
+    folder = client.app.state.outputs.folder(me["id"])
+    folder.mkdir(parents=True)
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=blue:s=640x360", "-frames:v", "1", folder / "still.jpg"))
+    item = client.app.state.db.run(
+        "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
+        "VALUES (?, 'upload/file', 'image', 'still', 'still.jpg', '{}', '{}', 1)", (me["id"],))
+    poster = client.get("/api/library/%d/poster" % item)
+    assert poster.status_code == 200 and poster.content[:2] == b"\xff\xd8"
+
+
 def test_agent_plans_are_checked_and_priced_and_nothing_is_queued(client, monkeypatch):
     register(client)
     asked = {}
@@ -652,7 +668,7 @@ def test_the_agent_uses_the_model_the_user_picked_when_the_server_has_it(client,
     monkeypatch.setattr(brain, "ask", fake_ask)
     monkeypatch.setattr(brain, "model", "small:9b")
     found = client.get("/api/agent/status").json()
-    assert found == {"online": True, "model": "small:9b", "models": ["small:9b", "large:27b"], "hosted": [], "prices": {}}
+    assert found == {"online": True, "model": "small:9b", "models": ["small:9b", "large:27b"], "hosted": [], "prices": {}, "by_tokens": []}
     for picked in ("large:27b", "not-installed", "", None):
         client.post("/api/agent/plan", json={"instruction": "hi", "model": picked})
     assert used == ["large:27b", "small:9b", "small:9b", "small:9b"]
@@ -688,7 +704,7 @@ def test_a_hosted_model_is_listed_beside_the_local_ones_and_asked_over_its_api(m
     assert sent.pop()["url"] == "https://g.example.com/openai/chat/completions" and sent.pop()["auth"] == "Bearer g-key"
     answer = asyncio.run(brain.ask("You plan.", "hi", ["video/h3_all_in_one"], model="kimi/kimi-k2.6"))
     assert answer == {"thought": "", "reply": "Hello.", "steps": [], "model": "kimi/kimi-k2.6", "direction": "", "question": None,
-                      "tokens": {"prompt": 0, "cached": 0, "answer": 0}}
+                      "tokens": {"prompt": 0, "cached": 0, "written": 0, "answer": 0}}
     assert [s["url"] for s in sent] == ["https://api.example.com/v1/chat/completions"] * 2 and sent[0]["auth"] == "Bearer secret-key"
     assert sent[1]["body"]["model"] == "kimi-k2.6" and "temperature" not in sent[1]["body"]            # asked again without it
     assert sent[1]["body"]["response_format"] == {"type": "json_object"} and '"required": ["thought", "reply", "steps", "direction", "question"]' in sent[1]["body"]["messages"][0]["content"]

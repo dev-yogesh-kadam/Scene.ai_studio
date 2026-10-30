@@ -41,6 +41,10 @@ class Settings:
     claude_fast_model: str = ""   # one of claude_models for the small jobs (captions, notes, checks), e.g. "haiku"; empty = the one in use
     claude_path: str = ""         # the claude program; empty = the one on PATH, else the VS Code extension's
     claude_timeout: int = 600     # seconds one call to Claude may take
+    # The folder the agent tabs' Claude sessions run in: VS Code lists them with this folder's sessions. Empty = the
+    # studio's own folder.
+    claude_home: str = ""
+    claude_context: int = 1000000   # tokens of context the Claude models have; a session is compacted at 90% of it
     host: str = "0.0.0.0"
     port: int = 8080
     # The admin console is a site of its own, on its own port, with its own sign-in. It listens only where console_host

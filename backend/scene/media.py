@@ -115,8 +115,11 @@ async def _make_poster(video, target):
     target.parent.mkdir(exist_ok=True)
     target.unlink(missing_ok=True)
     scale = "scale='min({},iw)':-2".format(POSTER_WIDTH)
-    for start in ("0.1", "0"):   # a clip shorter than 0.1 s has no frame there
-        await _ffmpeg("-loglevel", "error", "-ss", start, "-i", video, "-frames:v", "1", "-vf", scale, "-q:v", "3",
+    # A clip shorter than 0.1 s has no frame there. A still picture (a JPEG) gives nothing after any -ss, even 0, so the
+    # last try reads it without one.
+    for start in ("0.1", "0", None):
+        seek = ("-ss", start) if start else ()
+        await _ffmpeg("-loglevel", "error", *seek, "-i", video, "-frames:v", "1", "-vf", scale, "-q:v", "3",
                       "-update", "1", target, check=False)
         if target.is_file() and target.stat().st_size:
             return target

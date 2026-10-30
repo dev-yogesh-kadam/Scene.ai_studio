@@ -2,8 +2,8 @@
 // the second step when it is on). Only an admin can sign in. One section per address: /overview, /users, /jobs…
 
 import { api } from '../api.js';
-import { go, here, linkClicks } from '../nav.js';
-import { applyTheme, el, field, icon, segmented } from '../dom.js';
+import { go, here, linkClicks, pageOf } from '../nav.js';
+import { MOTIONS, applyMotion, applyTheme, el, field, icon, motionChoice, segmented } from '../dom.js';
 import { signInSet } from '../pages/auth.js';
 import { session } from './session.js';
 import { overview } from './overview.js';
@@ -17,12 +17,15 @@ import { economics } from './economics.js';
 import { skills } from './skills.js';
 import { roles } from './roles.js';
 import { servers } from './servers.js';
+import { sessions } from './sessions.js';
+import { Spring, project, tracker } from '../spring.js';
 
 // `live`: how often the section redraws itself while it is open, in ms. `group` is the heading it sits under.
 const SECTIONS = [
   { id: 'overview', label: 'Overview', icon: 'home', draw: overview, live: 15000, group: 'Live' },
   { id: 'jobs', label: 'Jobs', icon: 'clock', draw: jobs, live: 5000, group: 'Live' },
   { id: 'system', label: 'System', icon: 'bolt', draw: system, live: 10000, group: 'Live' },
+  { id: 'sessions', label: 'Sessions', icon: 'chat', draw: sessions, group: 'Live' },
   { id: 'users', label: 'Users', icon: 'eye', draw: users, group: 'People' },
   { id: 'credits', label: 'Credits', icon: 'gem', draw: credits, group: 'People' },
   { id: 'library', label: 'Library', icon: 'grid', draw: library, group: 'People' },
@@ -51,7 +54,7 @@ function showSignIn(message) {
   leave = null;
   session.user = null;
   title();
-  const wanted = SECTIONS.some((s) => '/' + s.id === here()) ? here() : FIRST;   // a section's address opened before signing in
+  const wanted = SECTIONS.some((s) => '/' + s.id === pageOf()) ? here() : FIRST;   // a section's address opened before signing in
   if (here() !== '/signin') history.replaceState(null, '', '/signin');
   let second = null;   // {email, password} once the password was right and a code is asked for
 
@@ -136,7 +139,7 @@ function showConsole(user) {
   showPeople(false);
 
   const drawSidebar = () => {
-    const at = here().slice(1);
+    const at = pageOf().slice(1);
     nav.replaceChildren(...mine.flatMap((s, i) => [
       s.group !== (mine[i - 1] || {}).group && el('div', { class: 'nav-label' }, s.group),
       el('a', { href: '/' + s.id, class: s.id === at ? 'on' : '' }, icon(s.icon), el('span', { class: 'grow' }, s.label),
@@ -155,6 +158,7 @@ function showConsole(user) {
       el('div', { class: 'menu-sep' }),
       el('a', { href: studio, target: '_blank', rel: 'noopener' }, icon('forward'), el('span', { class: 'grow' }, 'Open the studio')),
       el('div', { class: 'menu-row' }, 'Theme', segmented(THEMES, localStorage.getItem('scene.theme') || 'system', (theme) => { applyTheme(theme); drawSidebar(); })),
+      el('div', { class: 'menu-row' }, 'Motion', segmented(MOTIONS, motionChoice(), (choice) => { applyMotion(choice); drawSidebar(); })),
       el('button', { class: 'menu-item', onclick: signOut }, icon('logout'), 'Sign out'));
   };
 
@@ -165,16 +169,16 @@ function showConsole(user) {
     days: 30,
     state: {
       users: { q: '', show: '' }, jobs: { status: 'active', q: '', offset: 0 }, library: { kind: '', q: '', owner: '', project: '', offset: 0 },
-      credits: { reason: '', q: '' }, audit: { q: '' }, workflows: { show: '' }, agent: { days: 7 }, projects: { q: '' }, moderation: { show: 'review' },
+      credits: { reason: '', q: '' }, audit: { q: '' }, workflows: { show: '' }, agent: { days: 7 }, projects: { q: '' }, moderation: { show: 'review' }, sessions: { q: '', state: '' },
     },
     draw,
     go(target, changes) {
       if (changes) Object.assign(ctx.state[target], changes);
-      if (here() === '/' + target) draw();
+      if (pageOf() === '/' + target) draw();
       else go('/' + target);
     },
   };
-  const current = () => mine.find((s) => '/' + s.id === here());
+  const current = () => mine.find((s) => '/' + s.id === pageOf());
 
   async function draw() {
     const shown = current();
@@ -220,7 +224,7 @@ function showConsole(user) {
     // Redraw the section if it shows what changed, unless the admin is in the middle of something.
     const follow = (...ids) => {
       const busy = document.querySelector('dialog[open], .drawer-backdrop') || body.contains(document.activeElement);
-      if (ids.includes(here().slice(1)) && !busy) draw();
+      if (ids.includes(pageOf().slice(1)) && !busy) draw();
     };
     socket.onmessage = (e) => {
       const message = JSON.parse(e.data);
@@ -316,7 +320,8 @@ function showConsole(user) {
   route();
 }
 
-// A short notice at the bottom right: an alert that opened or closed while the console is open. It goes by itself.
+// A short notice at the bottom right: an alert that opened or closed while the console is open. It goes by itself, or
+// is swiped away to the right; it rides a spring, so a swipe let go too soon slides back.
 const LEVELS = { critical: 'Critical', serious: 'Serious', warning: 'Warning', resolved: 'Resolved' };
 function toast(level, text, onOpen) {
   let stack = document.querySelector('.toasts');
@@ -324,11 +329,45 @@ function toast(level, text, onOpen) {
     stack = el('div', { class: 'toasts', role: 'status', 'aria-live': 'polite' });
     document.body.append(stack);
   }
+  let swiped = false;   // a swipe ends with a click on the body: it does not open the alert
   const note = el('div', { class: 'toast ' + level },
-    el('button', { class: 'toast-body', onclick: () => { note.remove(); onOpen(); } }, el('b', {}, LEVELS[level] || level), el('span', {}, text)),
-    el('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => note.remove() }, '×'));
+    el('button', { class: 'toast-body', onclick: () => { if (swiped) return; note.remove(); onOpen(); } }, el('b', {}, LEVELS[level] || level), el('span', {}, text)),
+    el('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => away() }, '×'));
+  const width = () => note.offsetWidth || 380;
+  const x = new Spring(0, (v) => {
+    note.style.transform = v ? `translateX(${v}px)` : '';
+    note.style.opacity = v > 0 ? String(Math.max(0, 1 - v / width())) : '';
+  });
+  const away = (velocity = 0) => x.to(width() + 24, { response: 0.3, velocity, done: () => note.remove() });
+  note.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    x.stop();
+    const from = { pointer: e.clientX, x: x.x };
+    const speed = tracker();
+    swiped = false;
+    const onMove = (ev) => {
+      const dx = ev.clientX - from.pointer;
+      if (!swiped && Math.abs(dx) < 6) return;
+      if (!swiped) { swiped = true; note.setPointerCapture(e.pointerId); }
+      speed.add(ev.clientX);
+      x.set(Math.max(0, from.x + dx) - Math.max(0, -(from.x + dx)) * 0.15);   // it barely moves to the left
+    };
+    const end = () => {
+      note.removeEventListener('pointermove', onMove);
+      note.removeEventListener('pointerup', end);
+      note.removeEventListener('pointercancel', end);
+      if (!swiped) return;
+      setTimeout(() => { swiped = false; });
+      const velocity = speed.velocity().x;
+      if (x.x + project(velocity) > width() / 2) away(velocity);
+      else x.to(0, { response: 0.3, velocity });
+    };
+    note.addEventListener('pointermove', onMove);
+    note.addEventListener('pointerup', end);
+    note.addEventListener('pointercancel', end);
+  });
   stack.append(note);
-  setTimeout(() => note.remove(), level === 'critical' ? 20000 : 9000);
+  setTimeout(() => { if (note.isConnected) away(); }, level === 'critical' ? 20000 : 9000);
 }
 
 async function signOut() {

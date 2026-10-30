@@ -15,9 +15,10 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, edits, endpoints, errors, health, kit, media, moderation, phone, roles, skills, staff, vault, versions
+from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, media, moderation, phone, roles, sessions, skills, staff, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
+from ..config import ROOT
 from ..comfy import workflows
 from ..comfy.workflows import WorkflowError
 from .. import credits as credits_module
@@ -964,14 +965,16 @@ IN_PROJECT = "({0}.project_id = p.id OR {0}.project_id IN (SELECT m.id FROM proj
 
 @router.get("/projects")
 async def list_projects(request: Request, q: str = "", user: dict = Depends(admin_user)):
-    """Every user's projects, the most recently used first: their modules, asset book, items, jobs and space."""
+    """Every user's projects, the most recently used first: their modules, asset book, items, jobs and space. `q` finds
+    a project by its name, its owner, or its id or one of its modules' (PRJ..., MOD..., from a link)."""
     where, params = "p.parent_id IS NULL", []
     if q.strip():
-        where += " AND (LOWER(p.name) LIKE ? ESCAPE '\\' OR LOWER(u.name) LIKE ? ESCAPE '\\' OR LOWER(u.email) LIKE ? ESCAPE '\\')"
-        params = [_like(q.lower())] * 3   # lower case on both sides: PostgreSQL's LIKE minds case
+        where += (" AND (LOWER(p.name) LIKE ? ESCAPE '\\' OR LOWER(u.name) LIKE ? ESCAPE '\\' OR LOWER(u.email) LIKE ? ESCAPE '\\'"
+                  " OR p.ref = ? OR p.id IN (SELECT m.parent_id FROM projects m WHERE m.ref = ?))")
+        params = [_like(q.lower())] * 3 + [q.strip()] * 2   # lower case on both sides: PostgreSQL's LIKE minds case
     # Sorted outside: PostgreSQL takes a column's alias (last_job) in ORDER BY alone, not inside an expression.
     rows = request.app.state.db.all(
-        "SELECT * FROM (SELECT p.id, p.name, p.created, u.id AS user_id, u.name AS user_name, u.email AS user_email, "
+        "SELECT * FROM (SELECT p.id, p.ref, p.name, p.created, u.id AS user_id, u.name AS user_name, u.email AS user_email, "
         "(SELECT COUNT(*) FROM projects m WHERE m.parent_id = p.id) AS modules, "
         "(SELECT COUNT(*) FROM assets a WHERE a.project_id = p.id) AS kit, "
         "(SELECT COUNT(*) FROM generations g WHERE " + IN_PROJECT.format("g") + ") AS items, "
@@ -991,7 +994,7 @@ async def project_detail(project_id: int, request: Request, user: dict = Depends
                      "WHERE p.id = ?", (project_id,))
     if project is None:
         raise HTTPException(404, "No such project.")
-    modules = db.all("SELECT m.id, m.name, m.created, (SELECT COUNT(*) FROM generations g WHERE g.project_id = m.id) AS items, "
+    modules = db.all("SELECT m.id, m.ref, m.name, m.created, (SELECT COUNT(*) FROM generations g WHERE g.project_id = m.id) AS items, "
                      "(SELECT COUNT(*) FROM jobs j WHERE j.project_id = m.id) AS jobs FROM projects m WHERE m.parent_id = ? ORDER BY m.id",
                      (project["parent_id"] or project_id,))
     root = project["parent_id"] or project_id
@@ -1366,7 +1369,7 @@ def _pricing(state, items):
             # What it comes to: the rate in force, and the price of one image or of five seconds.
             "base": base, "per_second": per_second, "multiplier": multiplier, "example": credits.cost(item["id"], 5)})
     return {"rates": credits.rates(), "per_job": list(PER_JOB), "inr_per_1000_credits": credits.inr_per_1000,
-            "electricity_inr_per_kwh": credits.electricity_rate, "workflows": listed,
+            "electricity_inr_per_kwh": credits.electricity_rate, "inr_per_usd": credits.inr_per_usd, "workflows": listed,
             "packages": db.all("SELECT * FROM credit_packages ORDER BY price_inr, id"),
             "servers": db.all("SELECT * FROM servers ORDER BY id")}
 
@@ -1386,8 +1389,11 @@ async def get_llm_pricing(request: Request, user: dict = Depends(admin_user)):
     except AgentError:
         models = []
     prices = state.credits.llm_prices()
-    return {"models": [{"model": m, "credits": prices.get(m, 0), "available": m in models} for m in [*models, *(p for p in prices if p not in models)]],
-            "inr_per_1000_credits": state.credits.inr_per_1000}
+    # A Claude model with no flat price is charged by its tokens: "tokens" is Anthropic's price per million of each kind, in $.
+    tokens = lambda m: dict(zip(("input", "output", "cache_read", "cache_write"), state.credits.token_prices(m) or ())) or None
+    return {"models": [{"model": m, "credits": prices.get(m, 0), "available": m in models, "tokens": tokens(m)}
+                       for m in [*models, *(p for p in prices if p not in models)]],
+            "inr_per_1000_credits": state.credits.inr_per_1000, "inr_per_usd": state.credits.inr_per_usd}
 
 
 @router.put("/pricing/llm")
@@ -1409,14 +1415,16 @@ async def put_llm_pricing(body: dict, request: Request, user: dict = Depends(adm
 
 @router.put("/pricing")
 async def put_pricing(body: dict, request: Request, user: dict = Depends(admin_user)):
-    """Change the rate of a kind, what credits are worth, or the price of electricity."""
+    """Change the rate of a kind, what credits are worth, the price of electricity, or the rupees a US dollar buys (what
+    Claude's tokens are charged at)."""
     state = request.app.state
     changed = []
     given = body.get("rates") if isinstance(body.get("rates"), dict) else {}
     values = {"rate_" + kind: given[kind] for kind in RATES if kind in given}
-    values.update({key: body[key] for key in ("inr_per_1000_credits", "electricity_inr_per_kwh") if key in body})
+    values.update({key: body[key] for key in ("inr_per_1000_credits", "electricity_inr_per_kwh", "inr_per_usd") if key in body})
     before = {**{"rate_" + k: v for k, v in state.credits.rates().items()},
-              "inr_per_1000_credits": state.credits.inr_per_1000, "electricity_inr_per_kwh": state.credits.electricity_rate}
+              "inr_per_1000_credits": state.credits.inr_per_1000, "electricity_inr_per_kwh": state.credits.electricity_rate,
+              "inr_per_usd": state.credits.inr_per_usd}
     for key, value in values.items():
         label = key.replace("rate_", "").replace("_", " ")
         value = _amount(value, label.capitalize(), maximum=1e6)
@@ -1778,3 +1786,52 @@ async def delete_role(role_id: str, request: Request, user: dict = Depends(admin
     audit.record(request, user, "Deleted a role", role_id)
     return {"roles": staff.described()}
 
+
+
+# ---------------------------------------------------------------- the agent tabs' Claude sessions (sessions.py)
+
+def _session_state(row):
+    """What a session is doing now: "answering" (Claude is working on a message), "live" (its program is running,
+    waiting for the next message), "idle" (closed; the next message opens it again) or "deleted" (its tab is gone)."""
+    if row["status"] == "deleted":
+        return "deleted"
+    entry = claude.live.get("{}:{}:{}".format(row["user_id"], row["run"], row["project_id"] or 0))
+    if entry is None:
+        return "idle"
+    return "answering" if entry.lock.locked() else "live"
+
+
+def _session_out(request, row):
+    """A session row as the console shows it, with what it is doing now, how full it is, and the command that opens it
+    in a terminal: from the folder its sessions run in (Claude Code finds a session by its folder)."""
+    hosted = (getattr(request.app.state.agent, "services", None) or {}).get("claude") or {}
+    settings = request.app.state.settings
+    home = hosted.get("home") or (settings.path("claude_home") if settings.claude_home else ROOT)
+    out = dict(row, state=_session_state(row), percent=round(100 * sessions.fullness(row["context_tokens"], row["context_window"])))
+    if row["claude_id"]:
+        out["resume"] = 'cd "{}" && claude --resume {}'.format(home, row["claude_id"])
+    return out
+
+
+@router.get("/sessions")
+async def list_sessions(request: Request, q: str = "", state: str = "", user: dict = Depends(admin_user)):
+    """Every agent tab's Claude session, the most recently active first: who, where, which model, how full its context
+    is and what it is doing now. `state` keeps only answering, live, idle or deleted ones."""
+    rows = [_session_out(request, row) for row in sessions.listing(request.app.state.db, q)]
+    if state:
+        rows = [row for row in rows if row["state"] == state]
+    counts = {}
+    for row in rows:
+        counts[row["state"]] = counts.get(row["state"], 0) + 1
+    return {"sessions": rows, "counts": counts}
+
+
+@router.get("/sessions/{ref}")
+async def session_detail(ref: str, request: Request, after: int = 0, user: dict = Depends(admin_user)):
+    """One session and what happened in it after the event `after` (0: from the start), at most 500 events at a time."""
+    db = request.app.state.db
+    row = sessions.one(db, ref)
+    if row is None:
+        raise HTTPException(404, "No such session.")
+    found = sessions.events(db, row["id"], after)
+    return {"session": _session_out(request, row), "events": found, "more": len(found) == 500}

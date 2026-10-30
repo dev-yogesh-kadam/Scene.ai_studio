@@ -81,11 +81,12 @@ export async function pricing(ctx) {
   // ---- what credits are worth, and the rate of each kind
   const value = el('input', { type: 'number', min: 0, step: 'any', value: data.inr_per_1000_credits });
   const power = el('input', { type: 'number', min: 0, step: 'any', value: data.electricity_inr_per_kwh });
+  const dollar = el('input', { type: 'number', min: 0, step: 'any', value: data.inr_per_usd });
   const rates = Object.fromEntries(KINDS.map((k) => [k.id, el('input', { type: 'number', min: 0, step: 'any', value: data.rates[k.id] })]));
   const notice = el('p', { class: 'notice' });
   const saveRates = async () => {
     try {
-      await api('/api/admin/pricing', { method: 'PUT', json: { inr_per_1000_credits: value.value, electricity_inr_per_kwh: power.value,
+      await api('/api/admin/pricing', { method: 'PUT', json: { inr_per_1000_credits: value.value, electricity_inr_per_kwh: power.value, inr_per_usd: dollar.value,
         rates: Object.fromEntries(KINDS.map((k) => [k.id, rates[k.id].value])) } });
       ctx.draw();
     } catch (e) { notice.className = 'notice error'; notice.textContent = e.message; }
@@ -101,6 +102,9 @@ export async function pricing(ctx) {
     el('h3', {}, 'Electricity'),
     field('Price of electricity (₹ per kWh)', power),
     el('p', { class: 'muted small', style: 'margin-top:8px' }, 'Used for the running cost of each server below. It is never shown to users and does not change what they pay.'),
+    el('h3', {}, 'Claude'),
+    field('Rupees per US dollar (₹)', dollar),
+    el('p', { class: 'muted small', style: 'margin-top:8px' }, "Claude's models are charged by the tokens each answer uses, at Anthropic's prices in dollars turned into rupees at this rate, then into credits. See Agent models below."),
     notice,
     el('button', { class: 'btn primary', style: 'margin-top:12px', onclick: saveRates }, 'Save'));
 
@@ -188,7 +192,7 @@ export async function pricing(ctx) {
   const llmNote = el('p', { class: 'notice' });
   const llmCard = el('div', { class: 'card' },
     el('div', { class: 'card-head' }, el('h2', {}, 'Agent models')),
-    el('p', { class: 'muted small' }, 'Credits taken for each message to the agent, by the model that answers it. 0 is free. Improving a prompt and the agent checking a result stay free.'),
+    el('p', { class: 'muted small' }, "Credits taken for each message to the agent, by the model that answers it. 0 is free, except for Claude's models, which are charged by the tokens each answer uses unless they are given a price here. Captions, notes and the agent checking a result stay free."),
     table(['Model', 'Credits per message', 'Worth', 'Status'], llm.models.map((m) => {
       const box = el('input', { type: 'number', min: 0, step: 1, value: m.credits, style: 'width:110px', 'aria-label': `Credits per message for ${m.model}`,
         onchange: async (e) => {
@@ -196,7 +200,12 @@ export async function pricing(ctx) {
             llmNote.className = 'notice error'; llmNote.textContent = err.message;
           }
         } });
-      return [el('b', {}, m.model), box, m.credits ? worth(m.credits) : el('span', { class: 'muted' }, 'Free'),
+      const perMillion = (usd) => rupees(usd * llm.inr_per_usd);
+      const byTokens = m.tokens && !m.credits
+        ? el('span', { class: 'small', title: `$${m.tokens.input} in · $${m.tokens.output} out · $${m.tokens.cache_read} cache read · $${m.tokens.cache_write} cache write, per million tokens` },
+          `By tokens: ${perMillion(m.tokens.input)} in, ${perMillion(m.tokens.output)} out, ${perMillion(m.tokens.cache_read)} cache read, ${perMillion(m.tokens.cache_write)} cache write per million`)
+        : null;
+      return [el('b', {}, m.model), box, m.credits ? worth(m.credits) : byTokens || el('span', { class: 'muted' }, 'Free'),
         el('span', { class: 'pill ' + (m.available ? 'done' : 'cancelled') }, m.available ? 'Available' : 'Not there now')];
     }), { empty: llm.error ? 'The prices of agent models could not be loaded. Restart the studio app, then open this tab again.' : 'No agent models are reachable now.' }),
     llmNote);

@@ -201,18 +201,23 @@ def keep_skill(db, user_id, run, skill_id):
     write(db, user_id, run, SKILL, skill_id, "studio", trusted=True)
 
 
-def _thread_path(project, model):
-    return "{}/p{}-{}".format(THREADS, int(project or 0), re.sub(r"[^a-z0-9_.-]+", ".", str(model or "").lower()).strip(".")[:48] or "model")
+def _thread_path(project):
+    return "{}/p{}".format(THREADS, int(project or 0))
 
 
-def kept_thread(db, user_id, run, project, model):
-    """The thread (agent.chat) this run's conversation with `model` in `project` goes on in, or None."""
-    found = read(db, user_id, run, _thread_path(project, model))
-    return found["value"] if isinstance(found.get("value"), dict) else None
+def kept_thread(db, user_id, run, project):
+    """The thread (agent.chat) this run's conversation in `project` goes on in, whatever the Claude model, or None.
+    A conversation from before kept one for each model ("p3-claude.sonnet"): the one with a session is taken up."""
+    found = read(db, user_id, run, _thread_path(project))
+    if isinstance(found.get("value"), dict):
+        return found["value"]
+    older = "p{}-".format(int(project or 0))
+    return next((value for name, value in leaves(db, user_id, run, THREADS)
+                 if name.startswith(older) and isinstance(value, dict) and value.get("id")), None)
 
 
-def keep_thread(db, user_id, run, project, model, thread):
-    write(db, user_id, run, _thread_path(project, model), thread, "studio", trusted=True)
+def keep_thread(db, user_id, run, project, thread):
+    write(db, user_id, run, _thread_path(project), thread, "studio", trusted=True)
 
 
 def threads_of(db, user_id, run):

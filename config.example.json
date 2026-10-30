@@ -19,6 +19,8 @@
   "claude_fast_model": "",
   "claude_path": "",
   "claude_timeout": 600,
+  "claude_home": "",
+  "claude_context": 1000000,
   "host": "0.0.0.0",
   "port": 8080,
   "database_url": "",

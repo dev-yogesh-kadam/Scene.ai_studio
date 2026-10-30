@@ -1,9 +1,10 @@
 // The Timeline page: put finished videos in order, trim them, watch the cut and export it as one video.
 
 import { api } from '../api.js';
-import { el, icon, tabTitle, timecode } from '../dom.js';
+import { el, icon, still, tabTitle, timecode } from '../dom.js';
 import { subscribe, refreshJobs } from '../store.js';
-import { go } from '../nav.js';
+import { go, placePath, showAddress } from '../nav.js';
+import { Spring, rubberband, tracker } from '../spring.js';
 
 const fileUrl = (id) => `/api/library/${id}/file`;
 const lengths = {};   // generation id -> promise of the video's length in seconds
@@ -23,8 +24,9 @@ export function render(view) {
   let playing = false;
   let current = 0;       // index of the clip in the player
   let scale = 60;        // pixels per second
-  let dragged = -1;
+  let dropped = false;   // a drag just ended: the click that follows it does not select
 
+  const canvasLink = el('a', { class: 'btn', href: '/canvas', title: 'Back to the canvas of this project' }, '← Canvas');
   const picker = el('b', { class: 'canvas-project', title: 'This project. Open another from All projects.' });   // the project of the canvas; it does not switch
   const name = el('input', { type: 'text', value: 'Timeline', 'aria-label': 'Name of the exported video', style: 'max-width:200px', oninput: save });
   const exportButton = el('button', { class: 'btn primary', onclick: exportCut }, 'Export');
@@ -42,7 +44,7 @@ export function render(view) {
   const body = el('div');
 
   view.replaceChildren(
-    el('div', { class: 'page-head' }, el('a', { class: 'btn', href: '/canvas', title: 'Back to the canvas of this project' }, '← Canvas'), el('h1', {}, 'Timeline'), picker, name, exportButton),
+    el('div', { class: 'page-head' }, canvasLink, el('h1', {}, 'Timeline'), picker, name, exportButton),
     notice, body);
 
   const span = (c) => c.end - c.start;
@@ -115,6 +117,66 @@ export function render(view) {
     changed();
   }
 
+  // Drag a clip along the strip: it follows the pointer from where it was taken, the others slide aside to show where
+  // it will go, and when it is let go every clip glides to its place, the dragged one at the pointer's speed.
+  const slide = (node) => (x) => { node.style.translate = x ? `${x}px 0` : ''; };
+  function dragClip(e, index) {
+    if (e.button !== 0) return;
+    const nodes = [...lane.querySelectorAll('.clip')];
+    const node = nodes[index];
+    const rects = nodes.map((n) => n.getBoundingClientRect());
+    const width = rects[index].width;
+    const low = rects[0].left - rects[index].left;
+    const high = rects[rects.length - 1].right - rects[index].right;
+    const shifts = nodes.map((n) => new Spring(0, slide(n)));
+    const aims = nodes.map(() => 0);
+    const speed = tracker();
+    const from = e.clientX;
+    let to = index;
+    let moved = false;
+    node.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const dx = ev.clientX - from;
+      if (!moved && Math.abs(dx) < 4) return;
+      if (!moved) { moved = true; node.classList.add('lifted'); }
+      speed.add(ev.clientX);
+      const x = dx < low ? low - rubberband(low - dx, 200) : dx > high ? high + rubberband(dx - high, 200) : dx;
+      shifts[index].set(x);
+      const middle = rects[index].left + x + width / 2;
+      to = rects.filter((r, i) => i !== index && r.left + r.width / 2 < middle).length;
+      nodes.forEach((n, i) => {
+        if (i === index) return;
+        const aim = i > index && i <= to ? -width : i < index && i >= to ? width : 0;
+        if (aim !== aims[i]) { aims[i] = aim; shifts[i].to(aim, { response: 0.3 }); }
+      });
+    };
+    const end = () => {
+      node.removeEventListener('pointermove', onMove);
+      node.removeEventListener('pointerup', end);
+      node.removeEventListener('pointercancel', end);
+      if (!moved) return;
+      dropped = true;
+      setTimeout(() => { dropped = false; });
+      shifts.forEach((s) => s.stop());
+      const velocity = speed.velocity().x;
+      if (to === index) {
+        shifts[index].to(0, { response: 0.3, damping: 0.8, velocity, done: () => node.classList.remove('lifted') });
+        nodes.forEach((n, i) => { if (i !== index) shifts[i].to(0, { response: 0.3 }); });
+        return;
+      }
+      const held = clips[index];
+      const was = new Map(clips.map((clip, i) => [clip, nodes[i].getBoundingClientRect().left]));
+      move(index, to);   // draws the strip again, in the new order
+      [...lane.querySelectorAll('.clip')].forEach((n, i) => {
+        const dx = was.get(clips[i]) - n.getBoundingClientRect().left;
+        if (dx) new Spring(dx, slide(n)).to(0, { response: 0.3, damping: clips[i] === held ? 0.8 : 1, velocity: clips[i] === held ? velocity : 0 });
+      });
+    };
+    node.addEventListener('pointermove', onMove);
+    node.addEventListener('pointerup', end);
+    node.addEventListener('pointercancel', end);
+  }
+
   function changed() {
     stop();
     draw();
@@ -130,12 +192,10 @@ export function render(view) {
       el('span', { style: `width:${step * scale}px` }, timecode(i * step).slice(3, 8))));
     lane.replaceChildren(...(clips.length ? clips.map((clip, index) => {
       const item = videos.find((v) => v.id === clip.id) || { name: 'Missing video' };
-      return el('div', { class: 'clip' + (index === chosen ? ' on gate' : ''), style: `width:${span(clip) * scale}px`, draggable: 'true',
+      return el('div', { class: 'clip' + (index === chosen ? ' on gate' : ''), style: `width:${span(clip) * scale}px`,
         title: item.name,
-        onclick: () => { chosen = index; stop(); draw(); show(index, 0, false); drawClock(); },
-        ondragstart: () => { dragged = index; },
-        ondragover: (e) => e.preventDefault(),
-        ondrop: (e) => { e.preventDefault(); move(dragged, index); } },
+        onclick: () => { if (dropped) return; chosen = index; stop(); draw(); show(index, 0, false); drawClock(); },
+        onpointerdown: (e) => dragClip(e, index) },
         `${item.name} · ${span(clip).toFixed(1)} s`);
     }) : [el('span', { class: 'tl-hint muted' }, 'Add clips from your videos below.')]));
     playhead.classList.toggle('hidden', !clips.length);
@@ -158,7 +218,7 @@ export function render(view) {
   function drawBin() {
     bin.replaceChildren(...videos.map((item) => el('div', { class: 'media' },
       el('div', { class: 'thumb', title: 'Add to the timeline', onclick: () => add(item) },
-        el('video', { src: fileUrl(item.id) + '#t=0.1', preload: 'metadata', muted: true })),
+        still(fileUrl(item.id), 'video', item.name)),   // the poster, not the video: a bin of many clips loads at once
       el('div', { class: 'meta' },
         el('div', { class: 'title', title: item.name }, item.name),
         el('div', { class: 'row' }, el('button', { class: 'btn small', onclick: () => add(item) }, 'Add to timeline'))))));
@@ -208,7 +268,9 @@ export function render(view) {
       {
         const here = projects.projects.find((p) => p.id === project);
         picker.textContent = here ? (here.parent_name ? `${here.parent_name} › ${here.name}` : here.name) : 'All work';
-        picker.onclick = here ? () => go('/project?id=' + (here.parent_id || here.id)) : null;
+        picker.onclick = here ? () => go(placePath('/project', here)) : null;
+        showAddress(placePath('/timeline', here));
+        canvasLink.href = placePath('/canvas', here);
         picker.classList.toggle('linked', !!here);
         picker.title = here ? 'Open the project: its asset book and its modules' : 'Everything you have made';
       }

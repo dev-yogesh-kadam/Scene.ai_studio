@@ -30,7 +30,7 @@ export const READOUT = { rooftop: ['35mm · T2.0', 'ISO 800 · 1/48', '3200K'], 
 const TAKES = [['rooftop', 'Take 1', '6.0 s', 'Rejected · face', 'dull'], ['rooftop', 'Take 2', '6.0 s', 'Soft focus', 'soft'],
   ['rooftop', 'Take 3', '6.0 s', 'Kept', 'kept'], ['neon', 'Take 4', '5.0 s', 'New seed', '']];
 
-const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const still = () => document.documentElement.dataset.motion === 'calm';   // the Motion setting (theme.js)
 
 // A picture the studio draws: one of the landing scenes, filling its box. The markup is the page's own, never anyone's input.
 function picture(name, cls = '', sketch = false) {

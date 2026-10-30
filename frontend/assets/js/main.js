@@ -1,8 +1,8 @@
 // Scene.ai front end entry: sign-in gate, app shell and page routing.
 
 import { api } from './api.js';
-import { consoleAddress, go, here, linkClicks, oldAddress } from './nav.js';
-import { applyTheme, creditMark, el, icon, segmented, tabTitle } from './dom.js';
+import { consoleAddress, go, here, linkClicks, oldAddress, pageOf, placeFromAddress, placeIds } from './nav.js';
+import { MOTIONS, applyMotion, applyTheme, creditMark, el, icon, motionChoice, segmented, tabTitle } from './dom.js';
 import { store, subscribe, startLive, stopLive, refreshJobs } from './store.js';
 
 // Each page's script is fetched the first time it is opened, not with the app: the canvas and the agent are most of it.
@@ -132,7 +132,7 @@ function showApp() {
 
   const drawNav = () => {
     const active = store.jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
-    const at = PAGES.find((p) => p.path === here()) || {};
+    const at = PAGES.find((p) => p.path === pageOf()) || {};
     const link = (p) => el('a', { href: p.path, role: 'menuitem', class: p.path === (at.under || at.path) ? 'on' : '', onclick: () => close() },
       icon(p.icon), el('span', { class: 'grow' }, p.label));
     const shown = PAGES.filter((p) => !p.under && !p.menu);
@@ -145,7 +145,7 @@ function showApp() {
     const pages = [nav, el('div', { class: 'menu-sep' }), working,
       // Whether the render server answers is the admin's business; other users are not shown it.
       store.user.role === 'admin' && el('div', { class: 'server' }, dot, server)].filter(Boolean);
-    const railed = SIDEBAR_PAGES.includes(here()) && !narrow.matches;
+    const railed = SIDEBAR_PAGES.includes(pageOf()) && !narrow.matches;
     shell.classList.toggle('railed', railed);
     shell.classList.toggle('compact', !railed);
     if (railed) {
@@ -168,16 +168,17 @@ function showApp() {
       store.user.console && el('a', { href: consoleAddress(store.user), target: '_blank', rel: 'noopener', role: 'menuitem', onclick: () => close() },
         icon('shield'), el('span', { class: 'grow' }, 'Admin console')),
       el('div', { class: 'menu-row' }, 'Theme', segmented(THEMES, localStorage.getItem('scene.theme') || 'system', (theme) => { applyTheme(theme); drawNav(); })),
+      el('div', { class: 'menu-row' }, 'Motion', segmented(MOTIONS, motionChoice(), (choice) => { applyMotion(choice); drawNav(); })),
       el('button', { role: 'menuitem', class: 'menu-item', onclick: signOut }, icon('logout'), 'Sign out'),
     ].filter(Boolean));   // a block left out (the admin console, for a user) is false, which would show as "false"
-    shell.classList.toggle('on-canvas', here() === '/canvas');   // the canvas has its own tool bar: no Guide, balance or name here
+    shell.classList.toggle('on-canvas', pageOf() === '/canvas');   // the canvas has its own tool bar: no Guide, balance or name here
   };
 
   // Where you are, beside the logo: the page, or the page it is reached from and its own name (a page that knows more,
   // such as a project's, says so with a "scene:crumbs" event: [{label, href?}]).
   let trail = null;
   const drawCrumbs = () => {
-    const at = PAGES.find((p) => p.path === here()) || {};
+    const at = PAGES.find((p) => p.path === pageOf()) || {};
     const parent = at.under && PAGES.find((p) => p.path === at.under);
     const steps = trail || (parent ? [{ label: parent.crumb || parent.label, href: parent.path }] : at.label ? [{ label: at.crumb || at.label }] : []);
     crumbs.replaceChildren(...steps.flatMap((s, i) => [
@@ -197,7 +198,7 @@ function showApp() {
   const route = async () => {
     // Where the admin console used to be, in an old link: it is a site of its own now.
     if (here() === '/admin' && store.user.console) { location.replace(consoleAddress(store.user)); return; }
-    const target = PAGES.find((p) => p.path === here());
+    const target = PAGES.find((p) => p.path === pageOf());
     if (!target) { go(LANDING, { replace: true }); return; }
     if (leavePage) leavePage();
     leavePage = null;
@@ -205,12 +206,28 @@ function showApp() {
     trail = null;
     tabTitle(target.label);   // the canvas and the timeline put the name of their project here once it is loaded
     const ticket = ++routing;
+    // An address that names a project or module by its id (/canvas/PRJ.../module/MOD...) is looked up first: the page
+    // then opens on it, as on the one worked in last.
+    if (placeIds().project) {
+      try { await placeFromAddress(); } catch (e) {
+        if (ticket !== routing) return;
+        view.replaceChildren(el('div', { class: 'empty' }, el('p', {}, e.message), el('a', { class: 'btn', href: '/projects' }, 'All projects')));
+        drawNav();
+        drawCrumbs();
+        return;
+      }
+      if (ticket !== routing || !store.user) return;
+    }
     const page = await target.page();
     if (ticket !== routing || !store.user) return;   // another page was asked for, or signed out, while it was fetched
     leavePage = page.render(view) || null;
     drawNav();
     drawCrumbs();
     window.scrollTo(0, 0);
+    // A new page settles in, rising a few pixels as it appears. Only moving to a page does this, never a page drawing itself again.
+    view.classList.remove('entering');
+    void view.offsetWidth;
+    view.classList.add('entering');
   };
 
   drawCredits();

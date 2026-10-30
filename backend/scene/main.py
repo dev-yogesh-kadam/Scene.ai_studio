@@ -19,7 +19,7 @@ from .api import admin, auth, bulk, console as console_api, film, kit as kit_api
 from .catalog import Catalog
 from .comfy import workflows
 from .comfy.client import ComfyError
-from .config import load_settings
+from .config import ROOT, load_settings
 from .credits import Credits
 from .db import as_everyone, open_database
 from .jobs import JobManager
@@ -154,7 +154,7 @@ def create_app(settings=None):
         service("gemini", "Gemini", settings.gemini_url, settings.gemini_key, settings.gemini_models,
                 only=r"^gemini-[\d.]+-(pro|flash)(-lite)?(-preview)?$"),
         *filter(None, [claude.service(settings.claude_models, settings.claude_path, settings.claude_timeout, settings.claude_fast_model,
-                                      storage / "claude")]),
+                                      settings.path("claude_home") if settings.claude_home else ROOT, settings.claude_context)]),
     ])
     endpoints.apply(db, agent, settings)
     def renders_waiting():
@@ -303,7 +303,9 @@ def create_app(settings=None):
     # The studio's pages have addresses of their own (/library, /canvas), all answered by the one page, which routes them.
     # /admin, where the console used to be, sends an admin on to it.
     PAGE_PATHS = ("/", "/index.html", "/signin", "/signup", "/home", "/projects", "/library", "/skills", "/create", "/canvas",
-                  "/timeline", "/settings", "/admin", "/project", "/analytics", "/guide")
+                  "/timeline", "/settings", "/admin", "/project", "/analytics", "/guide",
+                  # a project's pages by its id and its module's: /project/PRJ..., /canvas/PRJ.../module/MOD...
+                  "/project/{place:path}", "/canvas/{place:path}", "/timeline/{place:path}", "/analytics/{place:path}")
     _pages(app, frontend, "index.html", "main.js", PAGE_PATHS)
     app.mount("/", StaticFiles(directory=settings.path("frontend_dir"), html=True), name="frontend")
     app.state.console = create_console(app) if settings.console_port else None
@@ -430,6 +432,11 @@ def create_console(studio):
         """Each section of the console has an address of its own (/users, /jobs), all answered by the one page."""
         if not SECTION.match(section):
             raise HTTPException(404, "No such page.")
+        return await page()
+
+    @console.get("/sessions/{ref}", include_in_schema=False)
+    async def session_page(ref: str):
+        """A Claude session of the Sessions section, by its id (/sessions/SES...): the same page, opened on it."""
         return await page()
     console.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")
     return console

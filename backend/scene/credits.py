@@ -28,6 +28,15 @@ FACTORS = {"resolution": {"480": 0.6, "720": 1.0, "1080": 2.0},
 RESOLUTION_TIER = {480: "480", 720: "720", 768: "720", 1080: "1080"}
 INR_PER_1000_CREDITS = 100
 ELECTRICITY_INR_PER_KWH = 8
+# What Anthropic charges for a Claude model, in US dollars per million tokens: (input, output, cache read, cache write).
+# Claude Code writes its cache for an hour, at twice the input price. The first key in the model's name wins, so the
+# older models come before the names Claude Code gives the current ones ("claude/opus" is Opus 5.5). Prices of 30 October
+# 2026; Haiku 5.5's are for prompts up to 100K tokens, and its cache prices are 0.1× and 2× its input, as for the others.
+CLAUDE_PRICES = (("fable", (10, 50, 0.25, 20)), ("mythos", (10, 50, 0.25, 20)),
+                 ("opus-4", (5, 25, 0.50, 10)), ("opus-5-5", (4, 20, 0.20, 8)), ("opus-5", (5, 25, 0.50, 10)), ("opus", (4, 20, 0.20, 8)),
+                 ("sonnet-4", (3, 15, 0.30, 6)), ("sonnet", (2, 10, 0.20, 4)),
+                 ("haiku-4", (1, 5, 0.10, 2)), ("haiku", (0.10, 0.50, 0.01, 0.20)))
+INR_PER_USD = 88
 
 
 def _number(value):
@@ -86,6 +95,36 @@ class Credits:
 
     def llm_cost(self, model):
         return self.llm_prices().get(str(model or ""), 0)
+
+    @property
+    def inr_per_usd(self):
+        return float(self.db.setting("inr_per_usd", INR_PER_USD))
+
+    @staticmethod
+    def token_prices(model):
+        """Anthropic's prices for a Claude model ("claude/opus", "claude/claude-sonnet-5-5"), as in CLAUDE_PRICES, or None
+        for a model that is not Claude's."""
+        name = str(model or "").lower()
+        if not name.startswith("claude/"):
+            return None
+        return next((prices for key, prices in CLAUDE_PRICES if key in name), None)
+
+    def token_cost(self, model, tokens):
+        """Credits for the tokens one answer of a Claude model used ({"prompt", "cached", "written", "answer"}, as
+        claude.judged counts them): what Anthropic charges for them, in rupees, at what a credit is worth. 0 for a model
+        that is not priced by its tokens. A flat price per message (llm_prices) is set over this, not added to it."""
+        prices = self.token_prices(model)
+        if not prices or not tokens or self.inr_per_1000 <= 0:
+            return 0
+        count = lambda key: max(0, int(tokens.get(key) or 0))
+        read, written = count("cached"), count("written")
+        fresh = max(0, count("prompt") - read - written)
+        usd = (fresh * prices[0] + count("answer") * prices[1] + read * prices[2] + written * prices[3]) / 1e6
+        return math.ceil(round(usd * self.inr_per_usd * 1000 / self.inr_per_1000, 6))
+
+    def message_cost(self, model, tokens):
+        """What one answer of the agent costs: the model's flat price per message when an admin set one, else its tokens."""
+        return self.llm_cost(model) or self.token_cost(model, tokens)
 
     def pricing(self, workflow_id):
         """The workflow's own pricing, or None when it follows the rate of its kind."""
@@ -189,6 +228,13 @@ class Credits:
             return False
         self._log(user_id, -amount, reason, job_id, note, project_id)
         return True
+
+    def charge_up_to(self, user_id, amount, reason, note="", project_id=None):
+        """charge(), for what was already used (an answer's tokens): when the user has less, all they have is taken.
+        Returns what was taken."""
+        while amount > 0 and not self.charge(user_id, amount, reason, note=note, project_id=project_id):
+            amount = min(amount, self.balance(user_id))   # the balance changed between the two: try again with what is there
+        return max(amount, 0)
 
     def add(self, user_id, amount, reason, job_id=None, note=""):
         """Give credits, or take them with a negative amount. A balance never goes below zero.
