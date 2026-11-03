@@ -78,11 +78,11 @@ def test_deleting_a_module_or_project_deletes_everything_in_it(client):
     assert db.one("SELECT 1 FROM generations WHERE id = ?", (in_module,)) is None
     assert db.one("SELECT status FROM jobs WHERE id = ?", (waiting["id"],))["status"] == "cancelled"
     assert client.get("/api/auth/me").json()["credits"] == before                          # its credits came back
-    assert client.get("/api/kit?project={}".format(film)).json()["entries"]               # the project's asset book stays
+    assert client.get("/api/kit?project={}".format(film)).json()["entries"]               # the project's NeuralCore stays
 
     assert client.delete("/api/projects/{}".format(film)).json()["items_deleted"] == 1    # the project
     assert not (folder / "b.mp4").exists() and db.one("SELECT 1 FROM generations WHERE id = ?", (in_project,)) is None
-    assert db.all("SELECT 1 FROM assets WHERE user_id = ?", (me["id"],)) == []             # its asset book went with it
+    assert db.all("SELECT 1 FROM assets WHERE user_id = ?", (me["id"],)) == []             # its NeuralCore went with it
     assert db.all("SELECT 1 FROM boards WHERE user_id = ?", (me["id"],)) == []
     assert (folder / "c.mp4").exists() and db.one("SELECT 1 FROM generations WHERE id = ?", (elsewhere,))   # not another's
 

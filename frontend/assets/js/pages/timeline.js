@@ -272,7 +272,7 @@ export function render(view) {
         showAddress(placePath('/timeline', here));
         canvasLink.href = placePath('/canvas', here);
         picker.classList.toggle('linked', !!here);
-        picker.title = here ? 'Open the project: its asset book and its modules' : 'Everything you have made';
+        picker.title = here ? 'Open the project: its NeuralCore and its modules' : 'Everything you have made';
       }
       tabTitle((projects.projects.find((p) => p.id === project) || { name: 'Timeline' }).name);
       videos = library.items;

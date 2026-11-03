@@ -48,7 +48,7 @@ export function render(view) {
         } }, 'Rename'),
         el('button', { class: 'btn small quiet danger', onclick: async () => {
           if (await ask({ title: `Delete "${open.name}"?`, danger: true, confirm: 'Delete project',
-            message: `Its ${open.items} items, its modules and its asset book are deleted with it, for good. This can't be undone.` })) {
+            message: `Its ${open.items} items, its modules and its NeuralCore are deleted with it, for good. This can't be undone.` })) {
             run(async () => { await api('/api/projects/' + open.id, { method: 'DELETE' }); open = null; filters.project = ''; });
           }
         } }, 'Delete project'));

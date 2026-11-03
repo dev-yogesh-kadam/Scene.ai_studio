@@ -106,8 +106,48 @@ async function del(skill, onDone) {
   catch (e) { alert(e.message); }
 }
 
+// A skill drafted in a chat ("make this a skill"): look it over, change what needs it, then publish it (admins only)
+// or throw it away. Until it is published the agent never reads it.
+function draftReview(draft, canPublish, onDone) {
+  const title = el('input', { type: 'text', value: draft.title });
+  const desc = el('input', { type: 'text', value: draft.desc, placeholder: 'Use when… (one line, shown in the picker)' });
+  const words = el('input', { type: 'text', value: draft.words, spellcheck: 'false', placeholder: '\b(film|story|scene)\b' });
+  const text = el('textarea', { rows: 14, spellcheck: 'false' }, draft.text);
+  const notice = el('p', { class: 'notice' });
+  const fail = (e) => { notice.className = 'notice error'; notice.textContent = e.message; };
+  async function publish() {
+    try {
+      await api(`/api/admin/skills/drafts/${encodeURIComponent(draft.id)}/publish`, { method: 'POST',
+        json: { title: title.value, desc: desc.value, words: words.value, text: text.value } });
+      dialog.close();
+      onDone();
+    } catch (e) { fail(e); }
+  }
+  async function discard() {
+    if (!confirm(`Throw away the draft “${draft.title}”?`)) return;
+    try { await api('/api/admin/skills/drafts/' + encodeURIComponent(draft.id), { method: 'DELETE' }); dialog.close(); onDone(); } catch (e) { fail(e); }
+  }
+  const dialog = el('dialog', { class: 'skill-editor' },
+    el('h2', {}, 'Drafted skill'),
+    el('p', { class: 'muted small', style: 'margin-bottom:14px' }, `Drafted in a chat${draft.by_name ? ' by ' + draft.by_name : ''}. It becomes /${draft.id} once published. Trigger words are optional.`),
+    field('Title', title),
+    field('Description', desc),
+    field('Trigger words (regular expression)', words),
+    field('Steps the agent follows', text),
+    notice,
+    el('div', { class: 'dialog-buttons' },
+      el('button', { type: 'button', class: 'btn danger', onclick: discard }, 'Discard'),
+      el('button', { type: 'button', class: 'btn', onclick: () => dialog.close() }, 'Cancel'),
+      canPublish && el('button', { type: 'button', class: 'btn primary', onclick: publish }, 'Publish')));
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
 export async function skills(ctx) {
   const { skills: list } = await api('/api/admin/skills');
+  let waiting = { drafts: [], can_publish: false };
+  try { waiting = await api('/api/admin/skills/drafts'); } catch { /* drafts are shown when they can be read */ }
   const clip = (s) => (s && s.length > 48 ? s.slice(0, 48) + '…' : (s || ''));
   const rows = list.map((s) => [
     el('div', {}, el('b', {}, s.title), s.desc && el('div', { class: 'muted small' }, s.desc)),
@@ -124,5 +164,13 @@ export async function skills(ctx) {
       el('button', { class: 'btn primary small', onclick: () => editor(null, ctx.draw) }, 'New skill')),
     el('p', { class: 'muted small', style: 'margin:-6px 0 16px' }, 'Recipes the agent follows for a kind of work. Saved as files on the server; a change takes effect on the next message, no restart needed. Users call one by typing /id or from the skills box.'),
     table(['Skill', 'Command', 'Version', 'Trigger words', ''], rows, { empty: 'No skills yet. Add one with “New skill”.' })),
-  ];
+    waiting.drafts.length > 0 && el('div', { class: 'card' },
+      el('div', { class: 'card-head' }, el('h2', { style: 'flex:1' }, `Drafts waiting (${waiting.drafts.length})`)),
+      el('p', { class: 'muted small', style: 'margin:-6px 0 16px' }, 'Skills the agent drafted in a chat when someone asked “make this a skill”. The agent uses one only once an admin publishes it.'),
+      table(['Draft', 'Drafted by', ''], waiting.drafts.map((d) => [
+        el('div', {}, el('b', {}, d.title), d.desc && el('div', { class: 'muted small' }, d.desc)),
+        d.by_name || '—',
+        el('div', { class: 'skill-row-actions' }, el('button', { class: 'btn small', onclick: () => draftReview(d, waiting.can_publish, ctx.draw) },
+          waiting.can_publish ? 'Review' : 'View'))]))),
+  ].filter(Boolean);
 }

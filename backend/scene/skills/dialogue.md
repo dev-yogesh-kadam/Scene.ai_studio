@@ -4,7 +4,7 @@ version: 1
 desc: Use when people speak in the film, to keep one voice per character, and to put the finished cut together.
 words: \b(dialogue|dialog|speak\w*|says?|talk\w*|voice|voices|lip.?sync\w*|monologue|conversation|narrat\w*|final cut|finished (film|cut)|assemble|put (it|them|the shots) together|full film)\b
 ---
-1. Every speaking character has one voice for the whole film. Look in the asset book for a voice entry under the
+1. Every speaking character has one voice for the whole film. Look in NeuralCore for a voice entry under the
    character's name (a "voice" asset). When there is one, put it in "uses" in the voice slot of every shot that person
    speaks in. When there is none, say in "reply" that a short voice sample kept under the character's name keeps the
    voice the same in every shot, and offer to make one; plan the shots anyway.

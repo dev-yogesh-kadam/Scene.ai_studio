@@ -8,7 +8,7 @@ import { store, subscribe, refreshJobs } from '../store.js';
 import { openViewer } from './media.js';
 import { pickLibraryItem } from './assets.js';
 import { KIT } from './kit.js';
-import { chip, clock, fold, glyphsOf, markdown, span, workRows } from './conversation.js';
+import { chip, clock, fold, glyphsOf, markdown, soundPlayer, span, workRows } from './conversation.js';
 import { go } from '../nav.js';
 
 const KEPT = 60;   // how many turns an agent tab keeps
@@ -107,6 +107,16 @@ export function spentBy(runs, jobs = []) {
 
 const SPEND_KINDS = [['video', 'Video'], ['image', 'Image'], ['audio', 'Audio'], ['llm', 'LLM']];
 
+// What one turn cost, under its reply: the credits, and by kind when pointed at. Nothing when it cost nothing.
+function turnCost(run) {
+  const spent = spentBy([run], store.jobs);
+  if (!spent.total) return null;
+  const node = el('span', { class: 'turn-cost', tabindex: '0', 'aria-label': `This turn cost ${spent.total} credits` }, creditMark(''), String(spent.total));
+  node.addEventListener('pointerenter', () => spendCard(node, spent, { above: true }));
+  node.addEventListener('focus', () => spendCard(node, spent, { above: true }));
+  return node;
+}
+
 // What was spent, by kind, in a card beside (or above) what was pointed at. It goes when the pointer leaves.
 export function spendCard(anchor, spent, { above = false } = {}) {
   document.querySelectorAll('.agent-spend-card').forEach((c) => c.remove());
@@ -137,6 +147,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   tabName = () => '' } = {}) {
   let direction = '';  // the durable notes of this conversation (what the film is, the style, the shot list), kept beside the turns
   let folded = 0;      // how many turns from the start are folded into the direction and no longer sent
+  let chatWorkflows = [];   // the video and image workflows this chat is pinned to (ids); none: the agent chooses
   let runs = [];       // the turns: {instruction, parts, reply, thought, activity, chips, steps, total, state, work, ui}
   let busy = false;       // a message is with the model
   let pending = null;     // the message being answered: {instruction, parts, stop, events, status, started}
@@ -169,14 +180,66 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     permButton.replaceChildren(icon(p.icon));
     permButton.title = permButton.ariaLabel = 'Generation permission: ' + p.label;
   };
+  // "Retry a failed shot once by itself": the user's own setting, kept on the server (it also holds with the panel
+  // closed). Off unless they turn it on; then a shot that fails its review is made again once without asking.
+  let retryOnce = false;
+  api('/api/agent/preferences').then((found) => { retryOnce = !!found.retry_once; }).catch(() => {});
+  async function setRetryOnce(on) {
+    try { retryOnce = !!(await api('/api/agent/preferences', { method: 'PUT', json: { retry_once: on } })).retry_once; } catch (e) { say(e.message); }
+  }
   function openPermissions() {
     const box = popover(permButton, [el('div', { class: 'pop-title' }, 'Generation permission'),
       ...PERMISSIONS.map((p) => el('button', { type: 'button', class: 'pop-item', role: 'menuitemradio', 'aria-checked': String(p.id === permission().id),
         onclick: () => { localStorage.setItem('scene.agent.permission', p.id); drawPermission(); box.close(); } },
         icon(p.icon), el('span', {}, el('b', {}, p.label), el('span', { class: 'muted small' }, p.about)),
-        p.id === permission().id ? icon('check') : el('span')))], 'pop-perm');
+        p.id === permission().id ? icon('check') : el('span'))),
+      el('button', { type: 'button', class: 'pop-item', role: 'menuitemcheckbox', 'aria-checked': String(retryOnce),
+        onclick: () => { setRetryOnce(!retryOnce); box.close(); } },
+        icon('retry'), el('span', {}, el('b', {}, 'Retry a failed shot once by itself'),
+          el('span', { class: 'muted small' }, 'A shot that fails its check is made again once, charged like any render. Off: you are asked.')),
+        retryOnce ? icon('check') : el('span'))], 'pop-perm');
   }
   drawPermission();
+
+  // "Explain more": the agent's replies in this tab teach (longer, pointing at parts of the picture). Kept per tab.
+  const explainKey = 'scene.agent.explain.' + (session || 'main');
+  let explain = (() => { try { return localStorage.getItem(explainKey) === '1'; } catch { return false; } })();
+  const explainButton = el('button', { type: 'button', class: 'icon-btn agent-explain', onclick: () => {
+    explain = !explain;
+    try { localStorage.setItem(explainKey, explain ? '1' : '0'); } catch { /* storage off */ }
+    drawExplain();
+  } }, icon('bulb'));
+  const drawExplain = () => {
+    explainButton.classList.toggle('on', explain);
+    explainButton.style.color = explain ? 'var(--accent, #f5c542)' : '';   // lit while on
+    explainButton.setAttribute('aria-pressed', String(explain));
+    explainButton.title = explainButton.ariaLabel = explain ? 'Explain more: on (replies teach the craft)' : 'Explain more: off (brief replies)';
+  };
+  drawExplain();
+
+  // The workflows this chat uses: ticked video and image workflows are the only ones of their kind the agent plans
+  // with here, until the user names another. Kept with the tab, sent with every message.
+  const pinButton = el('button', { type: 'button', class: 'icon-btn agent-pins', 'aria-haspopup': 'menu', onclick: () => openPins() }, icon('sliders'));
+  function drawPins() {
+    pinButton.style.color = chatWorkflows.length ? 'var(--accent, #f5c542)' : '';
+    pinButton.title = pinButton.ariaLabel = chatWorkflows.length ? `Workflows for this chat: ${chatWorkflows.length} chosen` : 'Workflows for this chat: the agent chooses';
+  }
+  async function openPins() {
+    let listed = [];
+    try { listed = (await api('/api/workflows')).workflows.filter((w) => (w.kind === 'video' || w.kind === 'image') && !w.error); } catch (e) { say(e.message); return; }
+    const row = (w) => el('button', { type: 'button', class: 'pop-item', role: 'menuitemcheckbox', 'aria-checked': String(chatWorkflows.includes(w.id)),
+      onclick: () => {
+        chatWorkflows = chatWorkflows.includes(w.id) ? chatWorkflows.filter((x) => x !== w.id) : [...chatWorkflows, w.id];
+        saveRuns(); drawPins(); box.close(); openPins();
+      } }, icon(w.kind), el('span', {}, el('b', {}, w.title), el('span', { class: 'muted small' }, w.kind === 'video' ? 'Video' : 'Image')),
+      chatWorkflows.includes(w.id) ? icon('check') : el('span'));
+    const box = popover(pinButton, [el('div', { class: 'pop-title' }, 'Workflows for this chat'),
+      el('p', { class: 'muted small', style: 'margin:0 10px 6px' }, 'Tick the ones this chat uses. None ticked: the agent chooses.'),
+      ...listed.map(row),
+      chatWorkflows.length > 0 && el('button', { type: 'button', class: 'pop-item', onclick: () => { chatWorkflows = []; saveRuns(); drawPins(); box.close(); } },
+        icon('skip'), el('span', {}, el('b', {}, 'Let the agent choose')), el('span'))].filter(Boolean), 'pop-perm');
+  }
+  drawPins();
 
   // Skills: the square box opens a picker with a search field; typing /name anywhere in the message (at its start, after
   // a space, or after an attached file) filters the same list inline. Choosing one from the box puts /<id> at the start
@@ -403,7 +466,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     drawSuggest();
   } });
   // "+": attach a file from the computer (it joins the project's library and canvas), from the canvas, or from the library.
-  const upload = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.docx,.txt,.md,.srt,.json', multiple: true, hidden: true,
+  const upload = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.docx,.pdf,.txt,.md,.srt,.json', multiple: true, hidden: true,
     onchange: async (e) => {
       const files = [...e.target.files];
       e.target.value = '';
@@ -423,7 +486,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       { icon: 'book', label: 'From library', run: async () => { const item = await pickLibraryItem(); if (item) { attach(item); drawSuggest(); input.focus(); } } },
     ]) }, icon('plus'));
   const composer = el('div', { class: 'agent-composer', onclick: (e) => { if (e.target === e.currentTarget) input.focus(); } }, input, upload,
-    el('div', { class: 'agent-composer-bar' }, addButton, suggest, el('span', { style: 'flex:1' }), status, compactButton, skillsButton, modelPicker, permButton, sendButton));
+    el('div', { class: 'agent-composer-bar' }, addButton, suggest, el('span', { style: 'flex:1' }), status, compactButton, explainButton, pinButton, skillsButton, modelPicker, permButton, sendButton));
   // The approval bar of the newest plan waiting for approval sits here, on top of the message box, and does not
   // scroll with the conversation.
   const dock = el('div', { class: 'agent-dock hidden' });
@@ -444,7 +507,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   const saveRuns = () => {
     onSaved({ spent: spentBy(runs, store.jobs), updated: Date.now() });
     const drop = Math.max(0, runs.length - KEPT);
-    return keep(talk, { runs: runs.slice(-KEPT), direction, folded: Math.max(0, folded - drop) }).catch(() => {});
+    return keep(talk, { runs: runs.slice(-KEPT), direction, folded: Math.max(0, folded - drop), workflows: chatWorkflows }).catch(() => {});
   };
   // The turns sent along with a message: the newest ones, less those already folded into the direction.
   const recalled = () => runs.slice(Math.max(folded, runs.length - RECALLED)).filter((r) => !r.error).map((r) => ({
@@ -687,7 +750,9 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     return (step.settings
       ? [step.workflow_title, cameraOf(step), current.orientation && SHAPE_NAMES[current.orientation], current.resolution && current.resolution + 'p',
         current.duration && secs(current.duration), step.settings.clips > 1 && '× ' + step.settings.clips + ' clips',
-        step.settings.options && step.settings.options.quality && step.settings.options.quality + ' quality']
+        step.settings.options && step.settings.options.quality && step.settings.options.quality + ' quality',
+        step.shot_number && 'Shot ' + step.shot_number, step.variation && `Variation ${step.variation.n} of ${step.variation.of}`,
+        step.board && 'on ' + step.board]
       : [step.workflow_title, step.facts]).filter(Boolean);
   };
   const linksOf = (step) => [step.start && 'starts on ' + step.start.name, step.after && `continues step ${step.after.step + 1}`].filter(Boolean);
@@ -719,7 +784,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   function previewUse(anchor, u) {
     hidePreview();
     const media = u.kind === 'image' ? el('img', { src: u.url, alt: u.name })
-      : u.kind === 'audio' ? el('audio', { src: u.url, controls: true, preload: 'none' })
+      : u.kind === 'audio' ? soundPlayer(u.url, u.name || '')
         : el('img', { src: u.saved ? u.url : u.url.replace(/\/file$/, '/poster'), alt: u.name });
     const node = el('div', { class: 'use-preview', role: 'tooltip' }, media, el('div', { class: 'use-preview-words' }, el('b', {}, u.name), el('span', {}, u.role)));
     document.body.append(node);
@@ -775,6 +840,9 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       links.length > 0 && el('div', { class: 'step-links' }, links.join(' · ')),
       keepOf(step),
       stepPrompt(run, step),
+      // Hindi or Hinglish words the video model would say wrong, as it is given them to say
+      step.phonetic && step.phonetic.length > 0 && el('div', { class: 'step-why' },
+        'Said as: ' + step.phonetic.map((p) => `${p.word} → ${p.say}`).join(', ')),
       // What the agent decided that the user did not say, and why: the length, the shape, the quality.
       step.why && el('div', { class: 'step-why' }, step.why),
       step.error && el('p', { class: 'small error' }, step.error));
@@ -809,7 +877,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   const aspect = (take, step) => { const [w, h] = shapeOf(take, step); return `aspect-ratio:${w} / ${h}`; };
   // A result on its own is at most RESULT_HEIGHT tall and as wide as its shape makes it: a portrait clip is not
   // stretched across the panel with black on both sides.
-  const RESULT_HEIGHT = 300;
+  const RESULT_HEIGHT = 200;
   const sized = (take, step) => {
     const [w, h] = shapeOf(take, step);
     return `aspect-ratio:${w} / ${h};width:min(100%, ${Math.round((RESULT_HEIGHT * w) / h)}px)`;
@@ -831,7 +899,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
           el('span', {}, p.text)));
     }
     const id = take.made;
-    if (step.kind === 'audio') return el('div', { class: 'result-audio' }, el('audio', { src: `/api/library/${id}/file`, controls: true, preload: 'none' }));
+    if (step.kind === 'audio') return el('div', { class: 'result-audio' }, soundPlayer(`/api/library/${id}/file`, step.name));
     const video = step.kind !== 'image';
     const seconds = video && ((take.madeInfo && take.madeInfo.duration) || (step.current && step.current.duration));
     return el('button', { type: 'button', class: 'result-media', title: 'Show it on the canvas', style: sized(take, step), onclick: () => onFocus(id) },
@@ -971,6 +1039,53 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         el('div', { class: 'grid-review' }, el('b', {}, s.name), drawReview(run, s))));
   }
 
+  // Clips made by the steps of one plan, side by side like pictures: each tile shows the take in use with its length,
+  // its first and last frame under it, ⓘ for how it was made and ⤢ to open it large. What a clip still needs (a failed
+  // check, a second take being priced or chosen) is listed under the grid, as for pictures.
+  function videoGrid(run, steps) {
+    const takes = steps.map((s) => usedTake(s));
+    const done = takes.filter((t) => t.made).length;
+    const states = steps.map((s, i) => progressOf(takes[i], s).state);
+    const state = done === steps.length ? 'done' : states.includes('running') ? 'running' : states.includes('failed') ? 'failed' : 'queued';
+    const models = [...new Set(steps.map((s) => s.workflow_title).filter(Boolean))].join(', ');
+    const seconds = (take, step) => (take.madeInfo && take.madeInfo.duration) || ((step.current && step.current.duration) || 5) * ((step.settings && step.settings.clips) || 1);
+    const ends = (take, step) => {
+      const s = seconds(take, step);
+      return [...new Set([0, Math.max(0, s - 0.2)].map((t) => Math.round(t * 10) / 10))];
+    };
+    return el('section', { class: 'result' },
+      el('div', { class: 'result-head' }, el('i', { class: 'dot-state ' + state }), el('b', {}, 'Video'),
+        el('span', { class: 'muted' }, `· ${done}/${steps.length}`), models && el('span', { class: 'result-model' }, models)),
+      el('div', { class: 'clip-grid' }, steps.map((step, i) => {
+        const take = takes[i];
+        const p = progressOf(take, step);
+        if (p.state !== 'done') {
+          return el('div', { class: 'clip-cell' }, el('div', { class: 'res-tile wait ' + p.state, style: aspect(take, step) },
+            p.state === 'running' && filmReel(p.share), el('span', {}, p.text)));
+        }
+        return el('div', { class: 'clip-cell' },
+          el('div', { class: 'res-tile', style: aspect(take, step) },
+            el('button', { type: 'button', class: 'tile-media', title: `${step.name}: show it on the canvas`, onclick: () => onFocus(take.made) },
+              el('img', { src: `/api/library/${take.made}/poster`, alt: step.name, loading: 'lazy' })),
+            el('span', { class: 'clip-badge' }, icon('play'), `${Math.round(seconds(take, step))}s`),
+            el('button', { type: 'button', class: 'tile-btn info', title: 'How it was made', 'aria-label': 'How it was made',
+              onclick: (e) => popover(e.currentTarget, [el('b', {}, step.name), el('p', { class: 'small muted' }, step.prompt),
+                el('div', { class: 'step-tags' }, tagsOf(step).map((t) => el('span', {}, t))), step.why && el('div', { class: 'step-why' }, step.why),
+                rollBar(run, step)], 'pop-info') }, icon('info')),
+            el('button', { type: 'button', class: 'tile-btn open', title: 'Open it large', 'aria-label': 'Open it large', onclick: () => openLarge(take.made) }, icon('expand')),
+            el('span', { class: 'tile-rate' }, rating(run, take)),
+            step.review && el('span', { class: 'tile-check ' + (step.review.passed ? 'passed' : 'failed'),
+              title: step.review.passed ? 'Checked: it is what was asked for' : step.review.problem }, step.review.passed ? '✓' : '!')),
+          el('div', { class: 'clip-ends' }, ends(take, step).map((t) => el('button', { type: 'button', class: 'keyframe', title: `At ${clock(t)}: show the clip on the canvas`,
+            onclick: () => onFocus(take.made) },
+            el('img', { src: `/api/library/${take.made}/frame?at=${t}`, alt: '', loading: 'lazy', onerror: (e) => e.currentTarget.parentNode.remove() }),
+            el('span', {}, clock(t))))));
+      })),
+      // What a clip of the grid still needs: its check, a retake being priced, the choice between two takes.
+      ...steps.filter((s) => s.reviewing || s.reviewError || (s.review && !s.review.passed) || s.rolling || s.rollBusy || s.rollError || s.take2).map((s) =>
+        el('div', { class: 'grid-review' }, el('b', {}, s.name), drawReview(run, s), (s.rolling || s.rollBusy || s.rollError) && rollBar(run, s), takePick(run, s))));
+  }
+
   async function openLarge(id) {
     try {
       const item = (await api('/api/library' + (projectId() ? '?project=' + projectId() : ''))).items.find((i) => i.id === id);
@@ -982,17 +1097,18 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   function results(run) {
     const blocks = [];
     let grid = null;
+    // Generated pictures that follow one another share a grid, and so do generated clips; anything else stands alone.
+    const kindOf = (step) => (step.settings && (step.kind === 'image' || step.kind === 'video') ? step.kind : null);
     for (const step of run.steps) {
       if (step.skipped) continue;
-      if (step.kind === 'image' && step.settings) {
-        if (!grid) { grid = []; blocks.push(grid); }
-        grid.push(step);
-      } else {
-        grid = null;
-        blocks.push(step);
-      }
+      const kind = kindOf(step);
+      if (kind && grid && grid.kind === kind) grid.steps.push(step);
+      else if (kind) { grid = { kind, steps: [step] }; blocks.push(grid); }
+      else { grid = null; blocks.push(step); }
     }
-    return el('div', { class: 'results' }, blocks.map((b) => (Array.isArray(b) ? imageGrid(run, b) : resultBlock(run, b))));
+    // A single clip keeps its full block (larger, with its frames, Roll again and the check in line).
+    return el('div', { class: 'results' }, blocks.map((b) => (!b.steps ? resultBlock(run, b)
+      : b.kind === 'image' ? imageGrid(run, b.steps) : b.steps.length > 1 ? videoGrid(run, b.steps) : resultBlock(run, b.steps[0]))));
   }
 
   // ------------------------------------------------------------ review: the agent looks at what it made
@@ -1053,7 +1169,8 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       } else if (take.made) {
         const info = take.madeInfo || {};
         const size = info.width ? `, ${info.width}×${info.height}` : '';
-        lines.push(`- “${step.name}”: item ${take.made} (${step.kind}${size}${info.duration ? `, ${info.duration} s` : ''})`);
+        const checked = take.review && !take.review.passed ? ` — its check: ${take.review.problem}` : '';
+        lines.push(`- “${step.name}”: item ${take.made} (${step.kind}${size}${info.duration ? `, ${info.duration} s` : ''})${checked}`);
       } else if (take.error || (job && (job.status === 'failed' || job.status === 'cancelled'))) {
         lines.push(`- “${step.name}”: not made — ${take.error || job.error || job.status}`);
       } else return;   // still on its way
@@ -1108,12 +1225,21 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       if (allowRetake) step.retake = found.retake;
       const which = take === step ? `“${step.name}”` : `the retake of “${step.name}”`;
       work(run, 'check', found.verdict.passed ? `Checked ${which}: it is what was asked for` : `Checked ${which}: ${found.verdict.problem}`);
+      if (found.retaken && take === step && !step.take2) {   // made again once by itself while the panel was closed
+        step.take2 = { prompt: (found.verdict.fix || {}).prompt || step.prompt, queuedAt: Date.now(), job: found.retaken.job };
+        work(run, 'retry', `Retook “${step.name}” on its own · ${found.retaken.credits} cr`);
+        onJobs([found.retaken.job]);
+        refreshJobs().catch(() => {});
+      }
+      if (take !== step && !found.verdict.passed) {   // the same shot failed twice: no more rewording
+        work(run, 'info', `“${step.name}” failed twice. The model may not manage this shot: ask me for another way (another workflow, a closer framing, your own picture).`);
+      }
       // The retake runs under the same permission the plan ran under: "Allow all" fixes a failed shot on its
       // own; "Ask before videos" fixes stills and audio on its own but asks before a video; "Always ask" shows
       // the Retake button and waits. Still one retake per shot, and never beyond the credits in hand.
       if (allowRetake && !found.verdict.passed && found.retake && !step.kept && !step.take2) {
         const mode = permission().id;
-        const auto = mode === 'all' || (mode === 'videos' && step.kind !== 'video');
+        const auto = retryOnce || mode === 'all' || (mode === 'videos' && step.kind !== 'video');
         // Reviews of a plan's shots run at once, so count credits already promised to other auto-retakes in this
         // burst (reservedCredits) as spent. retake() releases the reservation once it has lowered the real balance.
         const available = Number(store.user.credits ?? 0) - reservedCredits;
@@ -1181,6 +1307,12 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         if (every.length > 1) take.madeAll = every.map((i) => ({ id: i.id, kind: i.kind, name: i.name }));
         if (item.rating) take.rating = item.rating;
         work(run, 'ready', take === step ? `“${step.name}” is ready` : `The retake of “${step.name}” is ready`);
+        if (item.kind === 'audio' && item.review) {
+          try {
+            take.review = JSON.parse(item.review);
+            work(run, 'check', take.review.passed ? `Checked the sound of “${step.name}”` : `Checked the sound of “${step.name}”: ${take.review.problem}`);
+          } catch { /* not readable: no check shown */ }
+        }
         found = true;
       }
       if (found) { saveRuns(); drawLog(); }
@@ -1258,7 +1390,10 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   };
 
   // The words of a reply without the [[item:12]] marks, for copying.
-  const plain = (run) => String(run.reply || '').replace(/\[\[(item|asset):(\d+)\]\]/g, (m, t, n) => ((run.chips || {})[`${t}:${n}`] || {}).name || '');
+  const plain = (run) => String(run.reply || '').replace(/\[\[(?:show:)?(item|asset):(\d+)\]\]/g, (m, t, n) => {
+    const known = (run.chips || {})[`${t}:${n}`] || {};
+    return known.link ? `${known.name} (${new URL(known.link, location.origin).href})` : known.name || '';
+  });
 
   function reply(run) {
     // The newest reply is shown in full; once a newer message is sent, a long one folds under Show more.
@@ -1267,7 +1402,10 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     return el('div', { class: 'turn-reply' + (run.error ? ' error' : '') },
       el('div', { class: 'md' + (long && !run.ui.more ? ' clamped' : '') }, markdown(run.reply, run.chips || {}, pick)),
       long && el('button', { type: 'button', class: 'more-btn', onclick: () => { run.ui.more = !run.ui.more; drawLog(); } },
-        run.ui.more ? 'Show less' : 'Show more', el('span', { class: run.ui.more ? 'flip' : '' }, icon('down'))));
+        run.ui.more ? 'Show less' : 'Show more', el('span', { class: run.ui.more ? 'flip' : '' }, icon('down'))),
+      // what the agent remembers of the user and used for this answer, as chips
+      (run.memoryUsed || []).length > 0 && el('div', { class: 'memory-used', title: 'What the agent remembers of you, used for this answer' },
+        icon('memory'), ...run.memoryUsed.map((key) => el('span', { class: 'kit-flag soft' }, key))));
   }
 
   // A question the agent stopped for (a review, a choice a skill asks): its options as buttons. A click sends the
@@ -1285,6 +1423,26 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
             saveRuns();
             send({ text: option, shown: option, ids: [], parts: [{ text: option }] });
           } }, option))));
+  }
+
+  // Several questions the agent asked together: each with its options (its default chosen to start with), and one
+  // button that sends every answer in one message. Once sent, or once anything newer is said, they stand as a record.
+  function askedAll(run) {
+    const open = !run.questionsSent && runs[runs.length - 1] === run;
+    run.picks = run.picks || run.questions.map((q) => q.default || q.options[0]);
+    return el('div', { class: 'turn-question' },
+      ...run.questions.map((q, i) => el('div', {},
+        el('p', { class: 'turn-question-text' }, `${i + 1}. ${q.text}`),
+        el('div', { class: 'turn-question-options' }, q.options.map((option) =>
+          el('button', { type: 'button', class: 'btn small' + (run.picks[i] === option ? ' primary' : ''), disabled: !open,
+            'aria-pressed': String(run.picks[i] === option), onclick: () => { run.picks[i] = option; drawLog(); } }, option))))),
+      open && el('div', { class: 'turn-question-options' }, el('button', { type: 'button', class: 'btn small primary', onclick: () => {
+        if (busy || generating()) return;
+        run.questionsSent = true;
+        saveRuns();
+        const text = 'My answers:\n' + run.questions.map((q, i) => `${i + 1}. ${q.text} — ${run.picks[i]}`).join('\n');
+        send({ text, shown: run.picks.join(' · '), ids: [], parts: [{ text }] });
+      } }, 'Send answers')));
   }
 
   // The newest plan that waits for approval: its bar goes in the dock.
@@ -1472,13 +1630,15 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       run.reply && reply(run),
       run === runs[runs.length - 1] && contextNote(run),
       run.question && asked(run),
+      (run.questions || []).length > 0 && askedAll(run),
       run.steps.length > 0 && plan(run),
       after.length > 0 && fold({ glyph: 'wrench', title: `Worked ${span((after[after.length - 1].at - (run.approvedAt || after[0].at)) / 1000)}`,
         sub: after[after.length - 1].text, state: (ui.after = ui.after || {}), onToggle: redraw, className: 'work',
         body: workRows(after.map((w) => ({ type: 'activity', icon: w.icon, text: w.text })), {}, redraw) }),
       run.reply && !run.error && el('div', { class: 'turn-foot' },
         el('button', { type: 'button', class: 'icon-btn small', title: 'Copy the reply', 'aria-label': 'Copy the reply',
-          onclick: (e) => { navigator.clipboard.writeText(plain(run)).then(() => { e.currentTarget.classList.add('done'); }).catch(() => {}); } }, icon('copy'))));
+          onclick: (e) => { navigator.clipboard.writeText(plain(run)).then(() => { e.currentTarget.classList.add('done'); }).catch(() => {}); } }, icon('copy')),
+        turnCost(run)));
   }
 
   // The word under the dots: a phase the server named, or, for a plain "Thinking" wait, a feel-good word that shuffles.
@@ -1578,7 +1738,15 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     }
     live = pending ? liveTurn() : null;
     drawDock();
+    // The files the replies hand over (conversation.mediaCard) are kept as they are, in their order: a video playing
+    // goes on playing through a redraw (a job or the balance changing), and nothing loads again or changes height.
+    const shown = new Map();
+    for (const card of log.querySelectorAll('.md-media[data-key]')) shown.set(card.dataset.key, [...(shown.get(card.dataset.key) || []), card]);
     log.replaceChildren(...runs.map(turn), ...(live ? [live] : []));
+    for (const card of log.querySelectorAll('.md-media[data-key]')) {
+      const before = (shown.get(card.dataset.key) || []).shift();
+      if (before) card.replaceWith(before);
+    }
     log.scrollTop = follow ? log.scrollHeight : kept;
     toEnd.classList.toggle('hidden', log.scrollHeight - log.scrollTop - log.clientHeight < 160);
   }
@@ -1634,7 +1802,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     try {
       let answer = null;
       await apiLines('/api/agent/plan', { signal: controller.signal, json: { instruction: text, project_id: projectId() || null, selection: ids,
-        model: localStorage.getItem('scene.agent.model') || null, direction, run: session || 'main', tab: tabName(),
+        model: localStorage.getItem('scene.agent.model') || null, direction, run: session || 'main', tab: tabName(), explain, workflows: chatWorkflows,
         history: recalled().map((r) => ({ instruction: r.instruction, reply: r.reply,
           steps: r.steps.map((s) => ({ name: s.name, uses: (s.uses || []).map((u) => u.name) })) })) } }, (event) => {
         if (event.type === 'error') throw new Error(event.message);
@@ -1645,8 +1813,8 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       });
       if (!answer) throw new Error('The agent stopped before it finished. Try again.');
       made = { instruction, parts, auto, reply: answer.reply, thought: answer.thought, activity: answer.activity || [], seconds: answer.seconds,
-        chips: answer.chips || {}, steps: answer.steps, total: answer.total, state: answer.steps.length ? 'proposed' : 'answered', at: Date.now(), ui: {},
-        llm: answer.llm || null, question: answer.question || null, continues: !!answer.continues, context: answer.context || null };
+        chips: answer.chips || {}, memoryUsed: answer.memory_used || [], steps: answer.steps, total: answer.total, state: answer.steps.length ? 'proposed' : 'answered', at: Date.now(), ui: {},
+        llm: answer.llm || null, question: answer.question || null, questions: answer.questions || [], continues: !!answer.continues, context: answer.context || null };
       if (answer.direction) direction = answer.direction;   // the agent kept its notes up to date
       if (store.user && answer.balance != null) { store.user.credits = answer.balance; }   // the message itself may have cost credits
       runs.push(made);
@@ -1803,6 +1971,8 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       runs = saved.data.runs || [];
       direction = saved.data.direction || '';
       folded = Math.min(saved.data.folded || 0, runs.length);
+      chatWorkflows = Array.isArray(saved.data.workflows) ? saved.data.workflows.filter((w) => typeof w === 'string') : [];
+      drawPins();
       onSaved({ spent: spentBy(runs, store.jobs), updated: null });   // what it spent, without counting as use
       for (const run of runs) {
         run.ui = run.ui || {};

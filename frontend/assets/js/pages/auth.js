@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { el, field } from '../dom.js';
 import * as scenes from './landing-scenes.js';
-import { READOUT, frameTimecode } from './landing.js';
+import { READOUT, frameTimecode, sections, smooth, keepPrompt } from './landing.js';
 
 const POINTS = [
   'Turn a prompt and a few reference images into video',
@@ -85,24 +85,39 @@ export async function renderAuth(root, onSignedIn, start = 'login') {
     code.focus();
   };
 
+  // The landing's buttons further down the page lead back up to the form, on the side they name.
+  const openForm = (to) => {
+    second = null;
+    mode = to;
+    draw();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const toForm = (to, label) => (cls = '') => el('button', { type: 'button', class: 'la-btn ' + cls, onclick: () => openForm(to) }, label);
+  const signIn = toForm('login', 'Sign in');
+  const join = info.signup_open ? toForm('register', 'Create an account') : signIn;
+  // A prompt picked further down waits for after signing in (it fills Home's prompt box); the form comes up to get there.
+  const pick = (text) => { keepPrompt(text); openForm(info.signup_open ? 'register' : 'login'); };
+
   let set = null;
   const page = (tag, ...card) => {
     if (!set || !set.node.isConnected) {
       set = signInSet({ scene: 'desert', home: '/', heading: ['Direct', el('br'), 'your ', el('b', {}, 'scene.')],
         sub: 'Write the shot. The studio makes the takes, keeps the same faces from shot to shot, and cuts them together.',
-        points: POINTS });
+        points: POINTS, below: sections(join, signIn, info.signup_open, pick) });
       root.replaceChildren(set.node);
+      smooth(set.node);
     }
     set.tag.textContent = tag;
-    set.card.replaceChildren(...card);
+    set.card.replaceChildren(...card.filter(Boolean));   // a part left out (no sign-up link) is false, not text
   };
   draw();
 }
 
 // The sign-in pages are the landing page's monitor held on one scene: its frame lines, the camera's readouts and a
 // running timecode, the headline at the lower left and, where the landing has the slate, the form. The admin
-// console's sign-in is drawn with it too. Returns the page, the slate's body to put the form in, and its tag.
-export function signInSet({ scene, home, heading, sub, points }) {
+// console's sign-in is drawn with it too; the studio's has the landing's sections below. Returns the page, the slate's
+// body to put the form in, and its tag.
+export function signInSet({ scene, home, heading, sub, points, below = [] }) {
   const frame = el('div', { class: 'la-frame', 'aria-hidden': 'true' });
   frame.innerHTML = scenes.svg(scene);   // the page's own drawing, never anyone's input
   const tc = el('span', { class: 'la-rec' }, '01:00:00:00');
@@ -123,7 +138,7 @@ export function signInSet({ scene, home, heading, sub, points }) {
         el('p', { class: 'la-sub' }, sub),
         el('ul', { class: 'auth-points la-mono' }, points.map((p) => el('li', {}, p)))),
       el('div', { class: 'la-slate auth-slate' }, el('header', { class: 'la-mono' }, tag, el('span', {}, 'Scene.ai')), card)),
-    el('div', { class: 'la-meters', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'))));
+    el('div', { class: 'la-meters', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'))), ...below);
 
   // The timecode runs at 24 frames a second, and stops once the page is left.
   const started = performance.now();

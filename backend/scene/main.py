@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import backup, claude, endpoints, gpu, health, media, motion, roles, sequence, staff, traces, vault, versions
-from .agent import Agent, AgentError, service
+from . import aftercare, backup, claude, endpoints, health, langfuse_trace, media, motion, roles, sequence, staff, traces, vault, versions
+from .agent import Agent, AgentError
 from .api import admin, auth, bulk, console as console_api, film, kit as kit_api, library, runs, studio, workspace
 from .catalog import Catalog
 from .comfy import workflows
@@ -146,30 +146,9 @@ def create_app(settings=None):
     staff.configure(db)   # the console's roles as an admin last saved them
     catalog = Catalog(settings.path("workflows_dir"), comfy, storage / "cache" / "node_definitions.json")
     credits = Credits(db, settings)
-    agent = Agent(settings.ollama_url, settings.agent_model, local=settings.ollama_models, options={
-        "context": settings.ollama_context, "timeout": settings.ollama_timeout, "keep_alive": settings.ollama_keep_alive,
-        "vision": settings.ollama_vision_model, "fast": settings.ollama_fast_model, "think": settings.ollama_think,
-        "tools": settings.local_tools}, services=[
-        service(settings.api_name.strip().lower().replace(" ", "-") or "api", settings.api_name, settings.api_url, settings.api_key, settings.api_models),
-        service("gemini", "Gemini", settings.gemini_url, settings.gemini_key, settings.gemini_models,
-                only=r"^gemini-[\d.]+-(pro|flash)(-lite)?(-preview)?$"),
-        *filter(None, [claude.service(settings.claude_models, settings.claude_path, settings.claude_timeout, settings.claude_fast_model,
-                                      settings.path("claude_home") if settings.claude_home else ROOT, settings.claude_context)]),
-    ])
-    endpoints.apply(db, agent, settings)
-    def renders_waiting():
-        """Whether renders wait to start, anyone's (the queue not paused): a polite call (a review) waits for them."""
-        if db.setting("queue_paused", "0") == "1":
-            return False
-        with as_everyone():
-            return bool(db.one("SELECT 1 FROM jobs WHERE status = 'queued' AND workflow NOT LIKE 'edit/%' LIMIT 1"))
-
-    # The agent's model and the renders take turns on the GPU when they are on one machine (gpu_shared "auto").
-    mode = str(settings.gpu_shared or "auto").strip().lower()
-    turns = gpu.Gate(lambda: mode == "on" or (mode == "auto" and gpu.same_machine(agent.url, comfy.url)), free={
-        "llm": lambda: gpu.free_comfy(comfy.http, comfy.url), "render": lambda: gpu.unload_ollama(agent.http, agent.url)},
-        pending={"render": renders_waiting})
-    agent.gpu = turns
+    agent = Agent(settings.agent_model, services=list(filter(None, [
+        claude.service(settings.claude_models, settings.claude_path, settings.claude_timeout, settings.claude_fast_model,
+                       settings.path("claude_home") if settings.claude_home else ROOT, settings.claude_context)])))
     hub = Hub()
 
     def queue_counts():
@@ -216,12 +195,14 @@ def create_app(settings=None):
     async def lifespan(app):
         app.state.jobs = JobManager(db, comfy, catalog, credits, app.state.outputs, notify, storage / "tmp", settings.node_path,
                                     storage / "assets")
-        app.state.jobs.gpu = turns
         app.state.jobs.pool = comfy_pool
         app.state.jobs.hold_offline = settings.hold_queue_offline
         app.state.jobs.agent = agent   # writes the captions some image models need, just before they render
+        app.state.jobs.langfuse = app.state.traces.langfuse   # each finished job, as a span of its turn in Langfuse
+        aftercare.install(app.state)   # a shot the agent planned is checked once it is made, with its panel open or not
         workers = [asyncio.create_task(app.state.jobs.run_forever()), asyncio.create_task(app.state.jobs.run_forever(local=True)),
-                   asyncio.create_task(health.Watcher(app.state).run_forever())]   # alerts, sent while nobody watches
+                   asyncio.create_task(health.Watcher(app.state).run_forever()),   # alerts, sent while nobody watches
+                   asyncio.create_task(app.state.traces.langfuse.run_forever())]   # the agent's calls, to Langfuse when one is set
         if settings.backup_keep > 0:
             copies = (db, app.state.backup_dir, settings.config_file, settings.backup_keep)
             backup.attempt(*copies)   # one at every start, before anything is changed
@@ -231,7 +212,6 @@ def create_app(settings=None):
             worker.cancel()
         await comfy_pool.close()
         await claude.close_all()   # the conversations' live Claude Code programs
-        await agent.http.aclose()
         db.close()
 
     # No /docs, /redoc or /openapi.json: a map of every route is of no use to the studio's users, only to an attacker.
@@ -240,7 +220,6 @@ def create_app(settings=None):
     app.state.db = db
     app.state.comfy = comfy
     app.state.comfy_pool = comfy_pool
-    app.state.gpu = turns
     app.state.catalog = catalog
     app.state.hub = hub
     app.state.credits = credits
@@ -257,6 +236,7 @@ def create_app(settings=None):
     app.state.outputs = Outputs(app.state.output_dir, db)
     app.state.versions = versions.Shelf(db, catalog, storage / "workflow_versions")
     agent.recorder = app.state.traces = traces.Recorder(db, storage / "agent_calls")   # every call to its models
+    app.state.traces.langfuse = langfuse_trace.Sender(db, credits)
     roles.apply(db, agent)   # the models an admin chose in the console for the agent's roles, over config.json
     with as_everyone():
         versions.look(app.state)   # what arrived while the app was stopped
@@ -265,7 +245,7 @@ def create_app(settings=None):
     app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir}
     # Whether the render server answered the last time anyone asked, and since when that has been so.
     app.state.server_seen = {"online": None, "since": time.time()}
-    app.state.model_seen = {"online": None, "since": time.time()}   # the same for the agent's model server (health.py)
+    app.state.model_seen = {"online": None, "since": time.time()}   # the same for the agent's model, Claude (health.py)
 
     def saw_server(online):
         seen = app.state.server_seen

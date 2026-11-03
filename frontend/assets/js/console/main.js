@@ -36,7 +36,7 @@ const SECTIONS = [
   { id: 'workflows', label: 'Workflows', icon: 'frame', draw: workflows, group: 'Studio' },
   { id: 'agent', label: 'Agent', icon: 'chat', draw: agent, group: 'Studio' },
   { id: 'skills', label: 'Skills', icon: 'skill', draw: skills, group: 'Studio' },
-  { id: 'endpoints', label: 'Servers & APIs', icon: 'server', draw: servers, group: 'Studio' },
+  { id: 'endpoints', label: 'Servers', icon: 'server', draw: servers, group: 'Studio' },
   { id: 'roles', label: 'Roles', icon: 'people', draw: roles, group: 'Records' },
   { id: 'audit', label: 'Audit log', icon: 'book', draw: audit, group: 'Records' },
   { id: 'settings', label: 'Settings', icon: 'wrench', draw: settings, group: 'Records' },

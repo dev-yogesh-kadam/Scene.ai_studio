@@ -8,7 +8,7 @@ POST   /api/kit/order             {"project_id", "ids"}: the entries in this ord
 DELETE /api/kit/{id}
 GET    /api/kit/{id}/file         the entry's file
 
-What the user reads calls it the asset book. Each project has its own; its modules share it; there is none outside a project.
+What the user reads calls it NeuralCore. Each project has its own; its modules share it; there is none outside a project.
 In a shared project the kit is the owner's: everyone in it sees it, and a creator or more changes it (sharing.py).
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from .. import gpu, kit, memory, sharing
+from .. import kit, memory, sharing
 from ..db import as_everyone
 from ..references import media_kind, read_text_upload, read_upload, text_kind
 from .deps import current_user, limited, uploading
@@ -52,22 +52,21 @@ def _keeper_of_entry(request, user, asset_id, need="creator"):
     with as_everyone():
         row = db.one("SELECT project_id FROM assets WHERE id = ?", (asset_id,))
     if row is None or not row["project_id"]:
-        raise HTTPException(404, "No such asset book entry.")
+        raise HTTPException(404, "No such NeuralCore entry.")
     _, keeper, reading = _keeper(request, user, row["project_id"], need)
     return keeper, reading
 
 
 def describe_soon(request, user, project):
     """Have the agent's model look at the kit's pictures it has not described yet, in the background: the panel and
-    the agent read the cards when they are done. It waits for renders queued on a shared GPU (politely)."""
+    the agent read the cards when they are done."""
     state = request.app.state
     entries = [memory._asset_entry(row) for row in kit.entries(state.db, user["id"], project) if not row["about"]]
     if not any(e["kind"] in ("image", "video") for e in entries):
         return
 
     async def look():
-        with gpu.politely():
-            await memory.describe_missing(state, user["id"], entries, limit=8, seconds=600)
+        await memory.describe_missing(state, user["id"], entries, limit=8, seconds=600)
     asyncio.ensure_future(look()).add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
 
@@ -77,8 +76,10 @@ async def get_kit(request: Request, project: int = 0, user: dict = Depends(curre
     project, keeper, reading = _keeper(request, user, project, "viewer")
     with reading():
         describe_soon(request, keeper, project)
-        entries = [memory.kit_row(e) for e in kit.entries(state.db, keeper["id"], project)]
-    return {"entries": entries, "project": bool(project), "types": [{"id": tag, "label": said} for tag, said in kit.TYPES.items()]}
+        entries = [memory.kit_row(e) for e in kit.entries(state.db, keeper["id"], project, hidden=True)]
+    module = bool(project) and kit.root(state.db, project) != project   # a module: it may change entries for itself
+    return {"entries": entries, "project": bool(project), "module": module,
+            "types": [{"id": tag, "label": said} for tag, said in kit.TYPES.items()]}
 
 
 @router.post("", dependencies=[limited("kit", 60, 600), uploading])
@@ -88,7 +89,7 @@ async def add_entry(request: Request, user: dict = Depends(current_user)):
         body = await request.json()
         project, keeper, reading = _keeper(request, user, body.get("project_id"), "creator")
         if not project:
-            raise HTTPException(400, "The asset book belongs to a project. Open a project first.")
+            raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
         folder = _folder(request, keeper)
         name, tag, always = kit.clean_name(body.get("name")), kit.tag_of(body.get("type")), bool(body.get("always"))
         if body.get("item"):
@@ -117,15 +118,16 @@ async def add_entry(request: Request, user: dict = Depends(current_user)):
             raise HTTPException(400, "Choose a file.")
         project, keeper, reading = _keeper(request, user, form.get("project_id"), "creator")
         if not project:
-            raise HTTPException(400, "The asset book belongs to a project. Open a project first.")
+            raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
         if text_kind(upload.filename):
             data, filename = await read_text_upload(upload)
             kind = "text"
         else:
-            kind, filename = media_kind(upload.filename), upload.filename
+            kind = media_kind(upload.filename)
             if kind is None:
-                raise HTTPException(400, "Use a picture, a video, a sound, or a script (.txt, .md, .docx).")
+                raise HTTPException(400, "Use a picture, a video, a sound, or a script (.txt, .md, .docx, .pdf).")
             data = await read_upload(upload)
+            filename = upload.filename   # a HEIC or AVIF photo is a JPEG or PNG now
         tag = form.get("type") or ("script" if kind == "text" else "voice" if kind == "audio" else "other")
         with reading():
             asset = kit.add(state.db, _folder(request, keeper), keeper["id"], project, data, filename, kind,
@@ -151,9 +153,27 @@ async def entry_file(asset_id: int, request: Request, user: dict = Depends(curre
 async def change_entry(asset_id: int, body: dict, request: Request, user: dict = Depends(current_user)):
     keeper, reading = _keeper_of_entry(request, user, asset_id)
     with reading():
-        found = kit.update(request.app.state.db, keeper["id"], asset_id, body)
+        try:
+            found = kit.update(request.app.state.db, keeper["id"], asset_id, body)
+        except ValueError as error:   # a look, a palette or a relative that does not fit (kit._links)
+            raise HTTPException(400, str(error))
     if found is None:
-        raise HTTPException(404, "No such asset book entry.")
+        raise HTTPException(404, "No such NeuralCore entry.")
+    return memory.kit_row(found)
+
+
+@router.put("/{asset_id}/here")
+async def change_entry_here(asset_id: int, body: dict, request: Request, user: dict = Depends(current_user)):
+    """Change an entry of the project's NeuralCore for one module only. Body: {"project_id": the module, "removed"?,
+    "always"?, "use_note"?, "preferred_item"?}; a null goes back to the project's."""
+    project, keeper, reading = _keeper(request, user, body.get("project_id"), "creator")
+    if not project or kit.root(request.app.state.db, project) == project:
+        raise HTTPException(400, "Only a module changes an entry for itself; in the project, change the entry.")
+    changes = {k: body[k] for k in ("removed", "always", "use_note", "preferred_item") if k in body}
+    with reading():
+        found = kit.override(request.app.state.db, keeper["id"], project, asset_id, changes)
+    if found is None:
+        raise HTTPException(404, "No such NeuralCore entry.")
     return memory.kit_row(found)
 
 
@@ -172,5 +192,5 @@ async def delete_entry(asset_id: int, request: Request, user: dict = Depends(cur
     with reading():
         removed = kit.remove(request.app.state.db, _folder(request, keeper), keeper["id"], asset_id)
     if not removed:
-        raise HTTPException(404, "No such asset book entry.")
+        raise HTTPException(404, "No such NeuralCore entry.")
     return {"ok": True}

@@ -1,0 +1,26 @@
+{
+ "title": "Change shape: Wan VACE (extend)",
+ "description": "A video in a new shape with the new space filled in (outpainting): the video on its new canvas and a mask of where to fill. The studio makes both (film op outpaint_prep) and lays the original back over the result (outpaint_join).",
+ "output_name": "69.filename_prefix",
+ "labels": {
+  "900:value": "What the new space shows, around the video",
+  "299:file": "The video on its new canvas (grey where the new space goes)",
+  "303:file": "The mask (white where the new space goes)"
+ },
+ "required_refs": [
+  "299:file",
+  "303:file"
+ ],
+ "hide": [
+  "107",
+  "108"
+ ],
+ "pricing": {
+  "source": "video"
+ },
+ "hints": [
+  "Made in parts of at most 5 seconds at 16 frames a second; the studio cuts the video into them and joins them again.",
+  "Say what is around the subject: the room, the street, the sky. With a static or slow camera it fills in best.",
+  "A small change of shape (16:9 to 4:5 or 1:1) looks better than a large one (16:9 to 9:16)."
+ ]
+}

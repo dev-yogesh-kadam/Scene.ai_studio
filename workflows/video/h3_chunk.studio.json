@@ -120,10 +120,15 @@
     "seconds": "102:value"
   },
   "hints": [
-    "Output length is exactly round(24 x DURATION) frames at 24 fps (6.3 s -> 151 frames). H3 renders the next 17k+5 frame count (6.3 s -> 158) and the workflow trims it.",
-    "The anchor is <Picture 1>; filled character slots follow in slot order as <Picture 2>, <Picture 3> ... The workflow writes this list in front of the prompt, so call people 'character 1', 'character 2' and describe them by look.",
-    "Multi-shot in one clip: write the shots in the prompt and, for frame-exact cuts, give one keyframe per shot plus SHOT CUT FRAMES. Without keyframes H3 makes clean hard cuts but places them up to ~1.5 s off the asked times.",
-    "With a voice track and LIPS FOLLOW AUDIO on, write who speaks and when, e.g. \"Maya speaks 'line' at 3.2-5.0 s; nobody else's lips move\". The clip's sound is then the voice track itself.",
-    "The size comes from the studio's resolution and shape: 480p or 768p, landscape, portrait or square."
+    "<Picture 1> is the anchor (the place); filled character slots follow as <Picture 2>, <Picture 3>... Call people 'character 1', 'character 2', described by look in the same words every clip.",
+    "Prompt blocks, short: GOAL · SCENE (layout, light, time, ambience) · OPENING · SHOTS timed '[0-2s] size, lens, angle → one action → dialogue → move' · STYLE · END STATE · LOCKS. No shape or length words.",
+    "One job per picture: '<Picture 2> is character 1: face, hair and clothing only'; a place: 'layout and light only, ignore any people'; a prop: 'shape, material, colour only'. Never a clip's frame as identity.",
+    "Identity in words: age, build, the features that tell them apart, what the action needs; logos, small text and key colours said in words. One clear action per beat, camera in plain film words.",
+    "Dialogue in quotes, tied to its speaker: character 1 says: \"Sign here.\" Sound is always on: a silent clip says 'No dialogue. No music.' No negative prompt: put short 'No ...' lines in LOCKS.",
+    "With a voice track and LIPS FOLLOW AUDIO on, write who speaks when: \"character 1 speaks 'line' at 3.2-5.0 s; nobody else's lips move\". The voice sample is character 1's only.",
+    "Several shots in one clip: give one keyframe per shot plus SHOT CUT FRAMES for frame-exact cuts; without them cuts land up to ~1.5 s off the asked times.",
+    "H3 cannot carry on from a clip: the next clip's OPENING restates the last one's end state as present fact, never 'previous'. A board in Extra Reference: its highest panel is where this clip opens.",
+    "Too many references: keep what the user named, on-screen speakers' sheets, the place, other people, then props; say in the reply what was left out.",
+    "Output is exactly round(24 x DURATION) frames at 24 fps; 480p or 768p, landscape, portrait or square, 4-15 s."
   ]
 }

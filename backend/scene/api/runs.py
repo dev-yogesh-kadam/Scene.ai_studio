@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import runs
+from .. import core, recall, runs, sharing
 from .deps import current_user
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -45,3 +45,54 @@ async def delete_state(run: str, request: Request, path: str, user: dict = Depen
 async def check_coverage(run: str, request: Request, path: str, against: str, user: dict = Depends(current_user)):
     """Whether every name under `against` has one under `path`: {"ok", "missing", "extra", "count"}."""
     return _guarded(lambda: runs.coverage(request.app.state.db, user["id"], run, path, against))
+
+
+# ---------------------------------------------------------------- NeuralCore's shared memory (core.py), for its Memory view
+
+def _core(request, user, project, run):
+    if project:
+        sharing.require(request.app.state.db, user, project, "viewer")
+    run = run if run and runs.RUN.match(run) else ""
+    try:
+        return core.Core(request.app.state.db, user["id"], run, project)
+    except runs.RunError as error:
+        raise HTTPException(404, str(error))
+
+
+@router.get("/core/memory")
+async def core_memory(request: Request, project: int = 0, run: str = "", user: dict = Depends(current_user)):
+    """The module's memory as NeuralCore shows it: {"total", "writable", "leaves"} of its own notes, "cast" (the project's
+    entries as the module uses them) and "assets" ({"total", "records"}: the catalogue, newest first)."""
+    shared = _core(request, user, project, run)
+    found = _guarded(shared.tree)
+    return dict(found, cast=_guarded(shared.cast), assets=_guarded(shared.catalogue))
+
+
+@router.put("/core/state")
+async def core_write(body: dict, request: Request, user: dict = Depends(current_user)):
+    """Body: {"project_id", "run"?, "path", "value"}: a leaf changed by hand in the Memory view."""
+    shared = _core(request, user, body.get("project_id") or 0, str(body.get("run") or ""))
+    if "value" not in body:
+        raise HTTPException(400, "Give the value to keep.")
+    return _guarded(lambda: shared.write(body.get("path"), body["value"], "user"))
+
+
+@router.delete("/core/state")
+async def core_delete(request: Request, path: str, project: int = 0, run: str = "", user: dict = Depends(current_user)):
+    shared = _core(request, user, project, run)
+    return {"deleted": _guarded(lambda: shared.delete(path))}
+
+
+# ---------------------------------------------------------------- what the agent remembers of the user (recall.py)
+
+@router.get("/remembered")
+async def my_memory(request: Request, user: dict = Depends(current_user)):
+    return {"entries": recall.entries(request.app.state.db, user["id"])}
+
+
+@router.delete("/remembered")
+async def forget_memory(request: Request, key: str, user: dict = Depends(current_user)):
+    try:
+        return {"forgotten": recall.forget(request.app.state.db, user["id"], key)}
+    except recall.RecallError as error:
+        raise HTTPException(400, str(error))

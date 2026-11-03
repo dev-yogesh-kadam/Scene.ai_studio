@@ -94,7 +94,7 @@ export function render(view) {
         } }, icon('frame'), 'Duplicate project'),
         may(p.role, 'owner') && el('button', { class: 'btn block quiet danger', onclick: async () => {
           if (await ask({ title: `Delete "${p.name}"?`, danger: true, confirm: 'Delete project',
-            message: `Its ${modules} ${modules === 1 ? 'module' : 'modules'}, its ${p.items} items and its asset book are deleted with it, for good. This can't be undone.` })) {
+            message: `Its ${modules} ${modules === 1 ? 'module' : 'modules'}, its ${p.items} items and its NeuralCore are deleted with it, for good. This can't be undone.` })) {
             api('/api/projects/' + p.id, { method: 'DELETE' }).then(() => go('/projects')).catch((e) => alert(e.message));
           }
         } }, icon('trash'), 'Delete project')));

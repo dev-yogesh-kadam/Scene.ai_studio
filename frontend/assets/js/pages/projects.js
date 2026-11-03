@@ -32,7 +32,7 @@ export function render(view) {
   const rename = async (p) => { if (await projectDialog({ project: p })) load(); };
   const remove = async (p) => {
     if (await ask({ title: `Delete "${p.name}"?`, danger: true, confirm: 'Delete project',
-      message: `Its ${p.items} items, its modules and its asset book are deleted with it, for good. This can't be undone.` })) run(() => api('/api/projects/' + p.id, { method: 'DELETE' }));
+      message: `Its ${p.items} items, its modules and its NeuralCore are deleted with it, for good. This can't be undone.` })) run(() => api('/api/projects/' + p.id, { method: 'DELETE' }));
   };
   const act = (fn) => (e) => { e.stopPropagation(); fn(); };   // a button on a card must not also open the card
 

@@ -66,19 +66,24 @@ async def reference(image, target, side=REF_SIDE):
     return {"seconds": 0, "width": found["width"], "height": found["height"]}
 
 
-async def audio_slice(source, f_in, f_out, target):
+async def audio_slice(source, f_in, f_out, target, pad=0.0):
     """The master's sound from frame f_in to frame f_out, exactly, as a WAV file (an MP3 would add a few milliseconds
-    of silence at its start and move every word)."""
+    of silence at its start and move every word). pad: a slice shorter than this many seconds has silence added at its
+    end up to it (a short line given to a model that needs a few seconds of sound)."""
     if not 0 <= f_in < f_out:
         raise MediaError("A slice runs from a frame to a later one.")
     start, end = f_in / FPS, f_out / FPS
+    padded = max(float(pad or 0), end - start)
+    if padded > end - start and (await probe(source))["seconds"] < end - 1 / FPS:   # padding must not hide a short master
+        raise MediaError("The audio ends before the slice's end at {:.2f} s.".format(end))
     await _ffmpeg("-loglevel", "error", "-i", source, "-map", "0:a:0",
-                  "-af", "atrim=start={}:end={},asetpts=PTS-STARTPTS".format(_secs(start), _secs(end)),
+                  "-af", "atrim=start={}:end={},asetpts=PTS-STARTPTS{}".format(
+                      _secs(start), _secs(end), ",apad=whole_dur={}".format(_secs(padded)) if padded > end - start else ""),
                   "-c:a", "pcm_s16le", target)
     found = await probe(target)
-    if found["seconds"] < end - start - 1 / FPS:
+    if found["seconds"] < padded - 1 / FPS:
         raise MediaError("The audio ends at {:.2f} s, before the slice's end at {:.2f} s.".format(start + found["seconds"], end))
-    return {"seconds": end - start, "width": 0, "height": 0}
+    return {"seconds": padded, "width": 0, "height": 0, **({"padded": round(padded - (end - start), 3)} if padded > end - start else {})}
 
 
 # ---------------------------------------------------------------- the timing track
@@ -251,18 +256,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 ROW_CHARS, ROWS = 28, 2
 
 
-def _rows(words):
-    """The words as one row, or two broken at the word nearest the middle, each at most ROW_CHARS; None if they don't fit."""
-    text = " ".join(words)
-    if len(text) <= ROW_CHARS:
-        return text
+def _split_rows(words, chars=ROW_CHARS):
+    """The words as one row, or two broken at the word nearest the middle, each at most `chars`: a list of rows (each
+    a list of words), or None if they don't fit."""
+    if len(" ".join(words)) <= chars:
+        return [list(words)]
     best = None
     for k in range(1, len(words)):
         top, bottom = " ".join(words[:k]), " ".join(words[k:])
-        if len(top) <= ROW_CHARS and len(bottom) <= ROW_CHARS:
+        if len(top) <= chars and len(bottom) <= chars:
             score = abs(len(top) - len(bottom))
-            best = (score, top + r"\N" + bottom) if best is None or score < best[0] else best
-    return best[1] if best else None
+            best = (score, k) if best is None or score < best[0] else best
+    return [list(words[:best[1]]), list(words[best[1]:])] if best else None
+
+
+def _rows(words, chars=ROW_CHARS):
+    """The words as one row, or two broken at the word nearest the middle, each at most `chars`; None if they don't fit."""
+    rows = _split_rows(words, chars)
+    return r"\N".join(" ".join(row) for row in rows) if rows else None
 
 
 def _clock(seconds):
@@ -270,29 +281,50 @@ def _clock(seconds):
     return "{}:{:02d}:{:02d}.{:02d}".format(cs // 360000, cs // 6000 % 60, cs // 100 % 60, cs % 100)
 
 
-def subtitle_cues(lines, narrator="narrator"):
+def _clean_words(text):
+    return str(text or "").replace("{", "(").replace("}", ")").replace("\\", "/").split()
+
+
+def _pieces(words, chars):
+    """The words in cues of at most two rows each, in order."""
+    pieces, current = [], []
+    for word in words:
+        if current and _split_rows(current + [word], chars) is None:
+            pieces.append(current)
+            current = []
+        current.append(word)
+    pieces.append(current)
+    return pieces
+
+
+def subtitle_cues(lines, narrator="narrator", chars=ROW_CHARS):
     """The cues of the house subtitle style, from the transcript's lines ({"start", "end", "text", "speaker",
-    "lead"}): a line splits into cues of at most two rows; the cues share the line's speech time by their length.
+    "lead", "words"?}): a line splits into cues of at most two rows; the cues share the line's speech time by their length.
     A line's speech needs words / 2.5 s (narration) or / 3 s (dialogue); when its span is more than 2 s longer, the
     rest is music or silence — at its front on a "lead" line (the film's first, or the first after a scene cut), at
-    its back otherwise — and the cues keep to the speech. Returns [(start, end, text)]."""
+    its back otherwise — and the cues keep to the speech. A line with the times of its words ("words": [{"word",
+    "start", "end"}]) has its cues timed by them instead, and each cue keeps its words' times for karaoke.
+    Returns [(start, end, text)], or (start, end, text, [(word, start, end)]) for a cue timed by its words."""
     cues = []
     for line in lines:
-        words = str(line.get("text") or "").replace("{", "(").replace("}", ")").replace("\\", "/").split()
+        timed = [w for w in (line.get("words") or []) if _clean_words(w.get("word"))]
+        if timed:
+            flat = [(" ".join(_clean_words(w["word"])), float(w["start"]), float(w["end"])) for w in timed]
+            at = 0
+            for piece in _pieces([w for w, _, _ in flat], chars):
+                these = flat[at:at + len(piece)]
+                at += len(piece)
+                cues.append((round(these[0][1], 3), round(these[-1][2], 3), _rows(piece, chars) or " ".join(piece),
+                             [(w, round(s, 3), round(e, 3)) for w, s, e in these]))
+            continue
+        words = _clean_words(line.get("text"))
         start, end = float(line["start"]), float(line["end"])
         if not words or end <= start:
             continue
         need = len(words) / (2.5 if str(line.get("speaker") or narrator) == narrator else 3.0)
         if end - start - need > 2:
             start, end = (end - need, end) if line.get("lead") else (start, start + need)
-        pieces, current = [], []
-        for word in words:
-            if current and _rows(current + [word]) is None:
-                pieces.append(current)
-                current = []
-            current.append(word)
-        pieces.append(current)
-        texts = [_rows(p) or " ".join(p) for p in pieces]
+        texts = [_rows(p, chars) or " ".join(p) for p in _pieces(words, chars)]
         total, at = sum(len(t) for t in texts), start
         for text in texts:
             span = (end - start) * len(text) / total
@@ -301,20 +333,189 @@ def subtitle_cues(lines, narrator="narrator"):
     return cues
 
 
-async def burn_subtitles(video, cues, target):
-    """The film with its cues burned in, in the house style (Poppins, yellow, bottom centre), its sound copied."""
+def words_for(lines, transcript):
+    """The lines with the times of their words, from a transcription's JSON text that has them (segments with
+    "words": [{"word" or "text", "start", "end"}], as WhisperX writes). A word goes to the line its middle falls in."""
+    data = json.loads(transcript)
+    segments = data.get("segments") if isinstance(data, dict) else data
+    words = []
+    for seg in segments if isinstance(segments, list) else []:
+        for w in (seg.get("words") or []) if isinstance(seg, dict) else []:
+            if isinstance(w, dict) and isinstance(w.get("start"), (int, float)) and isinstance(w.get("end"), (int, float)):
+                words.append({"word": str(w.get("word") or w.get("text") or "").strip(), "start": float(w["start"]), "end": float(w["end"])})
+    if not words:
+        raise MediaError("The transcript has no times for its words, so there is nothing to light word by word.")
+    out = []
+    for line in lines:
+        mine = [w for w in words if line["start"] - 0.05 <= (w["start"] + w["end"]) / 2 <= line["end"] + 0.05 and w["word"]]
+        out.append(dict(line, words=mine) if mine else line)
+    return out
+
+
+# ---------------------------------------------------------------- the look of subtitles
+
+SUB_FONT_DIRS = [FONTS, Path(r"C:\Windows\Fonts"), Path("/usr/share/fonts"), Path("/Library/Fonts"), Path("/System/Library/Fonts")]
+SUB_FONTS = {   # the name a subtitle asks for -> the files that hold it (the first found is used), in the folders above
+    "Poppins": ["Poppins-Bold.ttf"],
+    "Arial": ["arialbd.ttf", "Arial Bold.ttf", "arial.ttf"],
+    "Arial Black": ["ariblk.ttf", "Arial Black.ttf"],
+    "Impact": ["impact.ttf", "Impact.ttf"],
+    "Georgia": ["georgiab.ttf", "Georgia Bold.ttf", "georgia.ttf"],
+    "Verdana": ["verdanab.ttf", "Verdana Bold.ttf", "verdana.ttf"],
+    "Segoe UI": ["segoeuib.ttf", "segoeui.ttf"],
+    "Calibri": ["calibrib.ttf", "calibri.ttf"],
+    "Bahnschrift": ["bahnschrift.ttf"],
+    "Trebuchet MS": ["trebucbd.ttf", "trebuc.ttf"],
+    "Times New Roman": ["timesbd.ttf", "times.ttf"],
+    "Comic Sans MS": ["comicbd.ttf", "comic.ttf"],
+    "Courier New": ["courbd.ttf", "cour.ttf"],
+    "DejaVu Sans": ["DejaVuSans-Bold.ttf", "DejaVuSans.ttf"],
+}
+PLACES = {"bottom": 2, "middle": 5, "top": 8}   # ASS alignments, centred
+HOUSE = {"font": "Poppins", "size": 66, "colour": "#FCBC04", "outline_colour": "#101010", "outline": 1.8,
+         "shadow": 2.8, "shadow_colour": "#00000066", "bold": True, "place": "bottom", "margin": 45,
+         "box": None, "highlight": "#FFFFFF", "karaoke": None}
+KARAOKE = ("word", "fill")   # word: only the word being said is lit; fill: each word lights as it is said and stays
+
+
+def _font_file(name):
+    """The file of a font for subtitles: one of SUB_FONTS, or a .ttf / .otf put in the fonts folder (named like
+    OpenSans-Bold.ttf). None when it is not on this machine."""
+    for file in SUB_FONTS.get(name, []):
+        for folder in SUB_FONT_DIRS:
+            for found in ([folder / file] if folder.is_dir() else []):
+                if found.is_file():
+                    return found
+    for found in sorted(FONTS.glob("*.[ot]tf")):
+        if _family(found) == name:
+            return found
+    return None
+
+
+def _family(path):
+    """OpenSans-Bold.ttf -> "Open Sans": the name a font dropped in the fonts folder goes by."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", Path(path).stem.split("-")[0])
+
+
+def subtitle_fonts():
+    """The font names subtitles may ask for on this machine."""
+    names = [name for name in SUB_FONTS if _font_file(name)]
+    return names + [n for n in sorted({_family(f) for f in FONTS.glob("*.[ot]tf")}) if n not in names]
+
+
+def ass_colour(value, what="A colour"):
+    """"#RRGGBB" or "#RRGGBBAA" (AA how solid: ff solid, 00 clear) as ASS writes it, &HAABBGGRR with AA how clear."""
+    found = re.fullmatch(r"#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?", str(value or ""))
+    if not found:
+        raise MediaError("{} is written #RRGGBB or #RRGGBBAA.".format(what))
+    rgb, solid = found.group(1), int(found.group(2) or "ff", 16)
+    return "&H{:02X}{}".format(255 - solid, (rgb[4:6] + rgb[2:4] + rgb[0:2]).upper())
+
+
+def subtitle_style(asked):
+    """A subtitle look, checked: the house look with what is asked laid over it. Raises MediaError."""
+    style = dict(HOUSE)
+    for key, value in (asked or {}).items():
+        if key not in HOUSE:
+            raise MediaError("A subtitle look has no '{}'; it has: {}.".format(key, ", ".join(HOUSE)))
+        style[key] = value
+    if not _font_file(style["font"]):
+        raise MediaError("The font '{}' is not on this machine; there are: {}.".format(style["font"], ", ".join(subtitle_fonts())))
+    if style["place"] not in PLACES:
+        raise MediaError("place is bottom, middle or top.")
+    if style["karaoke"] not in (None, *KARAOKE):
+        raise MediaError("karaoke is word or fill.")
+    for key, low, high in (("size", 16, 200), ("outline", 0, 12), ("shadow", 0, 12), ("margin", 0, 600)):
+        if isinstance(style[key], bool) or not isinstance(style[key], (int, float)) or not low <= style[key] <= high:
+            raise MediaError("{} is a number from {} to {}.".format(key, low, high))
+    for key in ("colour", "outline_colour", "shadow_colour", "highlight") + (("box",) if style["box"] else ()):
+        ass_colour(style[key], key)
+    style["bold"] = style["bold"] is not False
+    return style
+
+
+def ass_head(style, width, height):
+    """The head of a subtitle file in this look, laid out for a frame of width x height (sizes are given for a frame
+    1080 high and scaled to it)."""
+    k = height / 1080
+    karaoke_fill = style["karaoke"] == "fill"
+    primary = ass_colour(style["highlight"] if karaoke_fill else style["colour"])
+    secondary = ass_colour(style["colour"])
+    if style["box"]:   # a box behind the words: ASS draws it in the outline colour, the outline width its padding
+        border, outline_colour, outline, shadow = 3, ass_colour(style["box"]), max(style["outline"], 8) * k, 0
+    else:
+        border, outline_colour, outline, shadow = 1, ass_colour(style["outline_colour"]), style["outline"] * k, style["shadow"] * k
+    line = ("Style: Pocket,{font},{size:.0f},{p},{s},{o},{b},{bold},0,0,0,100,100,0,0,{border},{outline:.1f},{shadow:.1f},{align},"
+            "{ml:.0f},{ml:.0f},{mv:.0f},1").format(
+        font=style["font"], size=style["size"] * k, p=primary, s=secondary, o=outline_colour, b=ass_colour(style["shadow_colour"]),
+        bold=-1 if style["bold"] else 0, border=border, outline=outline, shadow=shadow, align=PLACES[style["place"]],
+        ml=60 * k, mv=style["margin"] * k)
+    top, rest = ASS_HEAD.split("Style: Pocket")
+    top = top.replace("PlayResX: 1080", "PlayResX: {}".format(width)).replace("PlayResY: 1080", "PlayResY: {}".format(height))
+    return top + line + rest[rest.index("\n"):]
+
+
+def row_chars(style, width):
+    """How many letters fit in a row in this look: 28 at the house size on a square, more on a wider frame."""
+    wider = max(width / 1080, 1) if width else 1
+    return max(12, int(ROW_CHARS * 66 / style["size"] * wider))
+
+
+def _events(cues, style):
+    """The Dialogue lines for the cues; a cue with its words' times is lit word by word when karaoke is asked."""
+    out = []
+    for cue in cues:
+        start, end, text = cue[:3]
+        words = cue[3] if len(cue) > 3 else None
+        if not words or not style or not style.get("karaoke"):
+            out.append("Dialogue: 0,{},{},Pocket,,0,0,0,,{}\n".format(_clock(start), _clock(end), text))
+            continue
+        rows = text.split(r"\N")
+        breaks = {len(rows[0].split())} if len(rows) == 2 else set()
+        if style["karaoke"] == "fill":
+            parts, at = [], start
+            for i, (word, ws, we) in enumerate(words):
+                lead = max(0, round((ws - at) * 100))
+                nxt = words[i + 1][1] if i + 1 < len(words) else end
+                parts.append("{}{}{{\\kf{}}}{}".format(r"\N" if i in breaks else (" " if i else ""), "{{\\k{}}}".format(lead) if lead else "",
+                                                      max(1, round((nxt - ws) * 100)), word))
+                at = nxt
+            out.append("Dialogue: 0,{},{},Pocket,,0,0,0,,{}\n".format(_clock(start), _clock(end), "".join(parts)))
+            continue
+        lit = ass_colour(style["highlight"])
+        for i, (word, ws, we) in enumerate(words):
+            a = start if i == 0 else ws
+            b = words[i + 1][1] if i + 1 < len(words) else end
+            if b <= a:
+                continue
+            shown = "".join("{}{}".format(r"\N" if j in breaks else (" " if j else ""),
+                                          "{{\\1c{}}}{}{{\\r}}".format(lit, w) if j == i else w) for j, (w, _, _) in enumerate(words))
+            out.append("Dialogue: 0,{},{},Pocket,,0,0,0,,{}\n".format(_clock(a), _clock(b), shown))
+    return "".join(out)
+
+
+async def burn_subtitles(video, cues, target, style=None):
+    """The film with its cues burned in, its sound copied: in the house style (Poppins, yellow, bottom centre) when no
+    look is given, or in `style` (see subtitle_style: font, size, colours, outline, shadow, place, margin, a box behind
+    the words, karaoke word by word on cues that keep their words' times)."""
     if not cues:
         raise MediaError("There are no subtitles to burn in.")
-    events = "".join("Dialogue: 0,{},{},Pocket,,0,0,0,,{}\n".format(_clock(s), _clock(e), t) for s, e, t in cues)
+    if style:
+        found = await probe(video)
+        head = ass_head(style, found["width"] // 2 * 2 or 1080, found["height"] // 2 * 2 or 1080)
+        font = _font_file(style["font"])
+    else:
+        head, font = ASS_HEAD, FONTS / FONT
     with tempfile.TemporaryDirectory() as work:
         (Path(work) / "fonts").mkdir()
-        shutil.copy(FONTS / FONT, Path(work) / "fonts" / FONT)
-        (Path(work) / "subs.ass").write_text(ASS_HEAD + events, encoding="utf-8")
+        shutil.copy(font, Path(work) / "fonts" / font.name)
+        (Path(work) / "subs.ass").write_text(head + _events(cues, style), encoding="utf-8")
         await _ffmpeg("-loglevel", "error", "-i", Path(video).resolve(), "-map", "0:v:0", "-map", "0:a?",
                       "-vf", "ass=subs.ass:fontsdir=fonts:shaping=complex", "-r", FPS, *ENCODE, "-c:a", "copy",
                       "-movflags", "+faststart", Path(target).resolve(), cwd=work)
     found = await probe(target)
-    return {"seconds": found["seconds"], "width": found["width"], "height": found["height"], "cues": len(cues)}
+    return {"seconds": found["seconds"], "width": found["width"], "height": found["height"], "cues": len(cues),
+            **({"font": style["font"], "karaoke": style["karaoke"]} if style else {})}
 
 
 async def join_on_master(clips, master, target):

@@ -32,13 +32,28 @@ const PANEL_MAX = 960;
 const TABS = [{ id: 'quick', label: 'Quick actions', icon: 'bolt' }, { id: 'agent', label: 'Agent', icon: 'chat' },
   { id: 'kit', label: KIT, icon: 'memory' }, { id: 'bulk', label: 'Bulk generation', icon: 'grid', admin: true }];
 
+// The boards left of the shots, left to right: the finished cut, then the project's NeuralCore by type. A picture that is a
+// NeuralCore entry, or a finished cut, sits on its board and not in a shot row.
+const BOARDS = [['outputs', 'Outputs'], ['character', 'Characters'], ['background', 'Locations'], ['prop', 'Props'], ['outfit', 'Outfits'],
+  ['style', 'Styles'], ['voice', 'Voices'], ['script', 'Scripts'], ['other', 'Other']];
+const BOARD_LABEL = Object.fromEntries(BOARDS);
+const FINAL_CUT = 'edit/assemble';
+const BOARD_PAD = 20;     // inside a board, around its frames
+const BOARD_HEAD = 64;    // the board's title, with room for it to grow as the canvas zooms out
+const ENTRY_NAME = 22;    // the name of an entry, above its frame
+
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
 const heightOf = (item) => {
   const c = (item && item.context) || {};
   return Math.round(FRAME * (c.width && c.height ? c.height / c.width : 9 / 16));
 };
-// A frame's place in its shot, counted as takes from the left.
-const take = (spot) => `Take ${Math.round(spot.x / (FRAME + GAP)) + 1}`;
+// A frame's place in its shot, counted as takes from the left; a take on a stack says which of how many it is.
+const take = (spot) => spot.label || `Take ${Math.round(spot.x / (FRAME + GAP)) + 1}`;
+// The number of the story shot a job was made for (its settings' shot_number, see backend/scene/placement.py), or null.
+// Results with one sit in the row of that shot, rows in order of their numbers, and a retake stacks on the shot.
+const shotNumber = (settings) => { const n = settings && settings.shot_number; return Number.isInteger(n) && n > 0 ? n : null; };
+const STACK_STEP = 6;     // how far each earlier take peeks out from behind the one on top, up and to the right
+const STACK_SHOWN = 3;    // earlier takes drawn behind it; more are there, one switch away
 const elapsed = (job) => {
   const s = Math.max(0, Math.round(Date.now() / 1000 - (job.started || Date.now() / 1000)));
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
@@ -49,8 +64,11 @@ export function render(view) {
   let items = [];
   let projects = [];
   let project = Number(localStorage.getItem('scene.project')) || 0;   // 0 = everything
-  // rows: [{id, name, keys}], one per shot, top to bottom. A key is a generation id, or 'job:<id>' while it is being made.
-  let layout = { rows: [], count: 0 };
+  // rows: [{id, name, keys, shot?}], one per shot, top to bottom. A key is a generation id, or 'job:<id>' while it is being
+  // made. shot: the shot number of a row the agent's numbered shots made. picks: which take of a stack the user put on top,
+  // {stack key: {key, count}}; a new take (count changes) goes on top again.
+  let layout = { rows: [], count: 0, picks: {} };
+  let placed = { boards: [] };    // named boards and their stacks, as finished jobs placed them (GET /api/library/placement)
   let ready = false;              // false until the saved layout is loaded: nothing may be placed before that
   const cam = { x: 96, y: 96, k: 1 };
   const selected = new Set();     // generation ids
@@ -64,7 +82,11 @@ export function render(view) {
   const itemLayer = el('div');
   const jobLayer = el('div');
   const labelLayer = el('div');
-  const world = el('div', { class: 'canvas-world' }, labelLayer, itemLayer, jobLayer);
+  const fileLayer = el('div');    // NeuralCore entries that are files, not library items: shown on their board
+  const world = el('div', { class: 'canvas-world' }, labelLayer, fileLayer, itemLayer, jobLayer);
+  let kitEntries = [];            // the project's NeuralCore
+  const onBoard = new Map();      // library item id -> {board, name}: it sits on a board, not in a shot row
+  let boardCards = [];            // the boards as drawn: {label, x, y, w, h, names: [{text, x, y}]}
   const stage = el('div', { class: 'canvas-stage' }, world);
   // The canvas shows one project, the one opened from All projects; its name is shown, and it does not switch.
   const picker = el('b', { class: 'canvas-project', title: 'This project. Open another from All projects.' });
@@ -172,7 +194,7 @@ export function render(view) {
     toolNote.classList.toggle('hidden', !text);
     if (!stay) noteTimer = setTimeout(() => toolNote.classList.add('hidden'), error ? 6000 : 2500);
   };
-  const filePicker = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.docx,.txt,.md,.srt,.json', multiple: true, hidden: true,
+  const filePicker = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.docx,.pdf,.txt,.md,.srt,.json', multiple: true, hidden: true,
     onchange: (e) => { uploadFiles([...e.target.files]); e.target.value = ''; } });
   // Each file joins the library and this project, and lands on the canvas as a shot of its own.
   async function uploadFiles(files) {
@@ -283,6 +305,35 @@ export function render(view) {
   const newRow = () => layout.rows[layout.rows.push({ id: ++layout.count, name: '', keys: [] }) - 1];
   // The frame something was made from: sent with the job, or the first clip of an edit.
   const parentOf = (settings) => (settings && (settings.parent || (Array.isArray(settings.clips) && settings.clips[0] && settings.clips[0].id))) || null;
+  // The row of a numbered shot, made when its first take comes.
+  const shotRow = (n) => layout.rows.find((row) => row.shot === n) || Object.assign(newRow(), { shot: n });
+  // What a row is called: the name given to it, its shot number, or, for a row with no number, the next numbers after
+  // the highest one, so two rows are never both called "Shot 3".
+  function rowName(row, plain = false) {
+    if (row.name && !plain) return row.name;
+    if (row.shot) return `Shot ${row.shot}`;
+    const top = Math.max(0, ...layout.rows.filter((r) => r.shot).map((r) => r.shot));
+    return `Shot ${top + layout.rows.filter((r) => !r.shot).indexOf(row) + 1}`;
+  }
+  // The board a name given by a job goes on: one of the usual boards by its label ("Characters"), or a board of its own.
+  const boardOf = (name) => { const known = BOARDS.find(([, label]) => label.toLowerCase() === String(name).toLowerCase()); return known ? known[0] : 'named:' + name; };
+  const boardList = () => [...BOARDS, ...placed.boards.filter((b) => boardOf(b.name).startsWith('named:')).map((b) => ['named:' + b.name, b.name])];
+  // A stack's members, newest first, put in the order they are drawn: the one on top first. The newest is on top unless
+  // the user switched to another take since the last one came.
+  function stacked(key, members) {
+    const pick = layout.picks[key];
+    const top = pick && pick.count === members.length && members.includes(pick.key) ? pick.key : members[0];
+    return [top, ...members.filter((k) => k !== top)];
+  }
+  // Spots for a stack whose top is at (x, y): earlier takes behind it, each a little up and to the right.
+  function stackSpots(stack, order, x, y, sizes, extra = {}) {
+    order.forEach((key, depth) => {
+      const takeNo = stack.members.length - stack.members.indexOf(key);   // the oldest is take 1
+      const shown = Math.min(depth, STACK_SHOWN);
+      spots.set(key, { x: x + shown * STACK_STEP, y: y - shown * STACK_STEP, h: sizes(key), depth, stack, takeNo,
+        label: stack.shot ? `Take ${takeNo} of ${stack.members.length}` : '', ...extra });
+    });
+  }
 
   function arrange() {
     const before = JSON.stringify(layout);
@@ -294,7 +345,30 @@ export function render(view) {
     const landing = store.jobs.filter((j) => j.status === 'done' && (!project || j.project_id === project) && j.finished
       && Date.now() / 1000 - j.finished < 120 && !items.some((i) => i.job_id === j.id));
     const live = new Set([...jobs, ...landing].map((j) => 'job:' + j.id));
+    onBoard.clear();
+    for (const e of kitEntries) if (e.item && known.has(e.item)) onBoard.set(e.item, { board: e.tag in BOARD_LABEL ? e.tag : 'other', name: e.name });
+    for (const item of items) if (item.workflow === FINAL_CUT && !onBoard.has(item.id)) onBoard.set(item.id, { board: 'outputs', name: item.name });
+    // A result its job put on a named board ("Characters", "Outputs") sits there, on the stack of what it is a version of.
+    const named = new Map(items.map((i) => [i.id, i]));
+    for (const board of placed.boards) {
+      for (const s of board.stacks || []) {
+        const members = (s.items || []).filter((id) => known.has(id));
+        if (!members.length) continue;
+        const stack = { key: `board:${board.name}:${s.group}`, members };
+        for (const id of members) onBoard.set(id, { board: boardOf(board.name), name: named.get(id).name, stack });
+      }
+    }
     for (const item of [...items].reverse()) {   // oldest first, so shots are numbered in the order they were made
+      if (onBoard.has(item.id)) continue;
+      const n = shotNumber(item.settings);
+      if (n) {   // a numbered shot is always in its own row, wherever it was dragged
+        const row = shotRow(n);
+        if (!row.keys.includes(item.id)) {
+          for (const other of layout.rows) other.keys = other.keys.filter((key) => key !== item.id);
+          row.keys.push(item.id);
+        }
+        continue;
+      }
       if (rowOf(item.id)) continue;
       const held = item.job_id && rowOf('job:' + item.job_id);   // finished work takes the place its job was holding
       if (held) held.keys.splice(held.keys.indexOf('job:' + item.job_id), 0, item.id);
@@ -302,23 +376,88 @@ export function render(view) {
     }
     for (const job of [...jobs].reverse()) {
       if (rowOf('job:' + job.id) || items.some((i) => i.job_id === job.id)) continue;
-      (rowOf(parentOf(job.settings)) || newRow()).keys.push('job:' + job.id);
+      const n = shotNumber(job.settings);
+      (n ? shotRow(n) : rowOf(parentOf(job.settings)) || newRow()).keys.push('job:' + job.id);
     }
-    for (const row of layout.rows) row.keys = row.keys.filter((key) => (typeof key === 'number' ? known.has(key) : live.has(key)));
+    for (const row of layout.rows) row.keys = row.keys.filter((key) => (typeof key === 'number' ? known.has(key) && !onBoard.has(key) : live.has(key)));
     layout.rows = layout.rows.filter((row) => row.keys.length);
+    // Numbered shots first, in the order of their numbers; the other rows after them, as they were.
+    layout.rows = [...layout.rows.filter((row) => row.shot).sort((a, b) => a.shot - b.shot), ...layout.rows.filter((row) => !row.shot)];
+    for (const key of Object.keys(layout.picks)) if (!layout.rows.some((row) => `shot:${row.shot}` === key) && !key.startsWith('board:')) delete layout.picks[key];
 
     const heights = new Map(items.map((i) => [i.id, heightOf(i)]));
+    const jobOf = new Map(store.jobs.map((j) => ['job:' + j.id, j]));
+    const settingsOf = (key) => (typeof key === 'number' ? (named.get(key) || {}).settings : (jobOf.get(key) || {}).settings);
+    const madeAt = (key) => (typeof key === 'number' ? (named.get(key) || {}).created : (jobOf.get(key) || {}).created) || 0;
+    const sizeOf = (key) => heights.get(key) || heightOf();
     spots.clear();
     bands = [];
     let y = 0;
     for (const row of layout.rows) {
-      const sizes = row.keys.map((key) => heights.get(key) || heightOf());
-      row.keys.forEach((key, i) => spots.set(key, { x: i * (FRAME + GAP), y, h: sizes[i] }));
+      const sizes = row.keys.map(sizeOf);
+      // A numbered row's takes of its shot are one stack at the left, the newest on top; the rest of the row (work made
+      // from them: a trim, an upscale) follows it.
+      const members = row.shot ? row.keys.filter((key) => shotNumber(settingsOf(key)) === row.shot).sort((a, b) => madeAt(b) - madeAt(a)) : [];
+      const rest = row.keys.filter((key) => !members.includes(key));
+      if (members.length) stackSpots({ key: `shot:${row.shot}`, members, shot: row.shot }, stacked(`shot:${row.shot}`, members), 0, y, sizeOf);
+      rest.forEach((key, i) => spots.set(key, { x: (i + (members.length ? 1 : 0)) * (FRAME + GAP), y, h: sizeOf(key) }));
       bands.push({ row, y, h: Math.max(...sizes) });
       y += Math.max(...sizes) + SLATE + GAP;
     }
+    placeBoards(heights);
     if (ready && JSON.stringify(layout) !== before) save();
     return jobs;
+  }
+
+  // The boards, side by side left of the names of the shots, their tops level with the first shot. Each holds its
+  // entries two to a row: the name of the entry above its frame.
+  function placeBoards(heights) {
+    const boards = boardList();
+    const groups = new Map(boards.map(([id]) => [id, []]));
+    for (const item of items) {
+      const where = onBoard.get(item.id);
+      if (!where) continue;
+      // A stack is one card: its top take, with the others behind it.
+      const order = where.stack && where.stack.members.length > 1 ? stacked(where.stack.key, where.stack.members) : null;
+      if (order && order[0] !== item.id) continue;
+      // The takes behind peek out above it: the card is that much taller, so they stay clear of the entry's name.
+      const lift = order ? Math.min(order.length - 1, STACK_SHOWN) * STACK_STEP : 0;
+      (groups.get(where.board) || groups.get('other')).push({ key: item.id, name: where.name, h: (heights.get(item.id) || heightOf()) + lift, lift, stack: order && where.stack, order });
+    }
+    for (const e of kitEntries) {
+      if (e.item && onBoard.has(e.item)) continue;   // shown by its library item
+      const board = e.tag in BOARD_LABEL ? e.tag : 'other';
+      groups.get(board).push({ key: 'kit:' + e.id, name: e.name, h: e.kind === 'image' ? Math.round(FRAME * 0.75) : 96, entry: e });
+    }
+    const used = boards.filter(([id]) => groups.get(id).length);
+    const sizes = used.map(([id, label]) => {
+      const entries = groups.get(id);
+      const cols = entries.length > 1 ? 2 : 1;
+      const rows = [];
+      for (let i = 0; i < entries.length; i += cols) rows.push(entries.slice(i, i + cols));
+      const w = BOARD_PAD * 2 + cols * FRAME + (cols - 1) * GAP / 2;
+      const h = BOARD_HEAD + BOARD_PAD + rows.reduce((sum, row) => sum + ENTRY_NAME + Math.max(...row.map((e) => e.h)) + SLATE + GAP / 2, 0);
+      return { id, label, entries, rows, w, h };
+    });
+    const total = sizes.reduce((sum, s) => sum + s.w + GAP, 0);
+    let x = -LABEL - GAP - total;
+    const top = bands.length ? bands[0].y - GAP / 3 : 0;
+    boardCards = [];
+    for (const s of sizes) {
+      const card = { label: s.label, count: s.entries.length, x, y: top, w: s.w, h: s.h, names: [] };
+      let y = top + BOARD_HEAD;
+      for (const row of s.rows) {
+        row.forEach((e, i) => {
+          const ex = x + BOARD_PAD + i * (FRAME + GAP / 2);
+          card.names.push({ text: e.name, x: ex, y });
+          if (e.order) stackSpots(e.stack, e.order, ex, y + ENTRY_NAME + e.lift, (key) => heights.get(key) || heightOf(), { board: true });
+          else spots.set(e.key, { x: ex, y: y + ENTRY_NAME, h: e.h, board: true, entry: e.entry });
+        });
+        y += ENTRY_NAME + Math.max(...row.map((e) => e.h)) + SLATE + GAP / 2;
+      }
+      boardCards.push(card);
+      x += s.w + GAP;
+    }
   }
 
   function drawItems() {
@@ -330,20 +469,64 @@ export function render(view) {
       shot.item = item;
       lazy.observe(shot);
       const c = item.context || {};
-      const label = el('b', {}, take(spot));
+      const label = el('b', {}, spot.board ? (onBoard.get(item.id) || {}).name || item.name : take(spot));
       // "+" on a frame adds it to the agent's message, opening the agent when it is not showing.
       const toChat = el('button', { type: 'button', class: 'frame-attach', title: 'Add to chat', 'aria-label': `Add ${item.name} to the chat`,
         onpointerdown: (e) => e.stopPropagation(), ondblclick: (e) => e.stopPropagation(),
         onclick: (e) => { e.stopPropagation(); addToChat([item]); } }, icon('plus'));
-      const node = el('div', { class: 'frame' + (selected.has(item.id) ? ' selected' : ''), style: `left:${spot.x}px;top:${spot.y}px`, title: item.name,
+      const n = shotNumber(item.settings);
+      const depth = spot.depth || 0;
+      const node = el('div', { class: 'frame' + (selected.has(item.id) ? ' selected' : ''), style: `left:${spot.x}px;top:${spot.y}px` + (spot.stack ? `;z-index:${STACK_SHOWN + 1 - Math.min(depth, STACK_SHOWN)}` : ''),
+        title: depth ? `${item.name}: an earlier take. Click to put it on top.` : item.name,
         onpointerdown: (e) => grab(e, item.id), ondblclick: () => open(item) },
         shot, toChat,
+        n && el('span', { class: 'shot-badge', title: `Shot ${n} of the story` }, `Shot ${n}`),
+        !depth && spot.stack && spot.stack.members.length > 1 && takeSwitch(spot.stack, item.id),
         el('div', { class: 'slate' }, label, el('span', {}, c.width ? `${item.kind} · ${c.width}×${c.height}` : item.name)));
-      node.take = label;
+      if (depth) node.classList.add('stack-behind');
+      if (depth > STACK_SHOWN) node.classList.add('stack-buried');
+      if (spot.board) node.classList.add('on-board');
+      else node.take = label;
       boxes.set(item.id, { key: item.id, ...spot, node });
       return node;
     }));
+    drawFiles();
     count.textContent = items.length === 1 ? '1 item' : `${items.length} items`;
+  }
+
+  // Put one take of a stack on top. It stays there until the user switches again or a new take comes.
+  function pickTake(stack, key) {
+    layout.picks[stack.key] = { key, count: stack.members.length };
+    draw();
+    save();
+  }
+  // "‹ 2 / 3 ›" on the take on top of a stack: the earlier take, which one this is, the later take. Takes count from
+  // the oldest, so the newest has the highest number.
+  function takeSwitch(stack, key) {
+    const index = stack.members.indexOf(key);   // members are newest first
+    const total = stack.members.length;
+    const step = (by) => (e) => { e.stopPropagation(); pickTake(stack, stack.members[(index + by + total) % total]); };
+    const button = (text, by, hint) => el('button', { type: 'button', class: 'stack-step', title: hint, 'aria-label': hint,
+      onpointerdown: (e) => e.stopPropagation(), ondblclick: (e) => e.stopPropagation(), onclick: step(by) }, text);
+    return el('div', { class: 'stack-switch', role: 'group', 'aria-label': 'Takes of this shot' },
+      button('‹', 1, 'The earlier take'), el('span', {}, `${total - index} / ${total}`), button('›', -1, 'The later take'));
+  }
+
+  // NeuralCore entries that are files of their own (uploaded, or kept from a reference): a frame on their board. A
+  // double click opens the file.
+  function drawFiles() {
+    for (const key of [...boxes.keys()]) if (String(key).startsWith('kit:')) boxes.delete(key);
+    fileLayer.replaceChildren(...[...spots.entries()].filter(([key]) => String(key).startsWith('kit:')).map(([key, spot]) => {
+      const e = spot.entry;
+      const node = el('div', { class: 'frame on-board file-frame', style: `left:${spot.x}px;top:${spot.y}px`, title: `${e.name} (NeuralCore)`,
+        ondblclick: () => window.open(e.url, '_blank', 'noopener') },
+        // A picture shows itself; a clip, a sound or a script shows what it is (a NeuralCore file has no poster).
+        el('div', { class: 'shot', style: `height:${spot.h}px` }, e.kind === 'image' ? still(e.url, 'image', e.name)
+          : el('div', { class: 'sound' }, icon(e.kind === 'video' ? 'video' : e.kind === 'audio' ? 'audio' : 'book'), el('span', {}, e.name))),
+        el('div', { class: 'slate' }, el('b', {}, e.name), el('span', {}, e.type || '')));
+      boxes.set(key, { key, ...spot, node });
+      return node;
+    }));
   }
 
   // A job that failed: what it was, why in plain words, and that its credits came back. It stays a day, then goes.
@@ -444,6 +627,8 @@ export function render(view) {
       Object.assign(box, spot);
       box.node.style.left = spot.x + 'px';
       box.node.style.top = spot.y + 'px';
+      // On a stack the take on top is drawn over the ones behind it (a running retake too).
+      box.node.style.zIndex = spot.stack ? String(STACK_SHOWN + 1 - Math.min(spot.depth || 0, STACK_SHOWN)) : '';
       if (box.node.take) box.node.take.textContent = take(spot);
     }
     // All the shots sit in one board, the names of the shots down its left side and a line between one shot and the
@@ -460,18 +645,22 @@ export function render(view) {
       const y = (above.y + above.h + SLATE + band.y) / 2;
       return el('div', { class: 'lane-divider', style: `left:${left + GAP / 4}px;top:${y}px;width:${width - GAP / 2}px` });
     });
-    labelLayer.replaceChildren(...board, ...lines,
+    const cards = boardCards.flatMap((c) => [
+      el('div', { class: 'board-card', style: `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px` },
+        el('span', { class: 'board-chip' }, icon('grid'), c.label, el('i', {}, String(c.count)))),
+      ...c.names.map((n) => el('div', { class: 'board-name', style: `left:${n.x}px;top:${n.y}px;width:${FRAME}px`, title: n.text }, n.text))]);
+    labelLayer.replaceChildren(...cards, ...board, ...lines,
     ...bands.map((band, i) => el('button', { class: 'shot-label', title: 'Rename this shot',
       style: `left:${-LABEL}px;top:${band.y}px;width:${LABEL - GAP / 2}px;height:${band.h}px`,
-      onpointerdown: (e) => e.stopPropagation(), onclick: (e) => rename(band.row, e.currentTarget, i) }, band.row.name || `Shot ${i + 1}`)));
+      onpointerdown: (e) => e.stopPropagation(), onclick: (e) => rename(band.row, e.currentTarget, i) }, rowName(band.row))));
     drawOverlay();
   }
 
   function rename(row, label, index) {
-    const input = el('input', { type: 'text', class: 'shot-name', maxlength: 40, value: row.name || `Shot ${index + 1}`, 'aria-label': 'Name of the shot' });
+    const input = el('input', { type: 'text', class: 'shot-name', maxlength: 40, value: rowName(row), 'aria-label': 'Name of the shot' });
     const done = (keep) => {
       if (!input.isConnected) return;
-      if (keep) { row.name = input.value.trim() === `Shot ${index + 1}` ? '' : input.value.trim(); save(); }
+      if (keep) { row.name = input.value.trim() === rowName(row, true) ? '' : input.value.trim(); save(); }
       settle();
     };
     input.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -502,7 +691,7 @@ export function render(view) {
     const index = layout.rows.findIndex((row) => row.keys.includes(id));
     if (index < 0) return null;
     const row = layout.rows[index];
-    return { shot: row.name || `Shot ${index + 1}`, take: row.keys.indexOf(id) + 1 };
+    return { shot: rowName(row), take: (spots.get(id) || {}).takeNo || row.keys.indexOf(id) + 1 };
   }
 
   // Glide to one item and select it: it comes to the middle of the part of the canvas the panel leaves free, at a size
@@ -692,7 +881,8 @@ export function render(view) {
     selectionChanged();
     stopCamera();
     const from = { x: e.clientX, y: e.clientY };
-    const moving = [...selected].map((key) => boxes.get(key)).filter(Boolean).map((box) => ({ box, x: box.x, y: box.y }));
+    // What is on a board stays there: it can be selected, opened and added to the chat, not moved into a shot.
+    const moving = [...selected].map((key) => boxes.get(key)).filter((box) => box && !box.board).map((box) => ({ box, x: box.x, y: box.y }));
     let moved = false;
     // Where the pointer is on the canvas, to tell a drop on a shot from a drop in the gap between two shots.
     const held = boxes.get(id);
@@ -703,7 +893,7 @@ export function render(view) {
       const dx = (ev.clientX - from.x) / cam.k;
       const dy = (ev.clientY - from.y) / cam.k;
       moved = moved || Math.abs(dx) + Math.abs(dy) > 3 / cam.k;
-      if (!moved) return;
+      if (!moved || !moving.length) return;
       if (!moving[0].box.node.classList.contains('lifted')) moving.forEach((m) => m.box.node.classList.add('lifted'));
       context.classList.add('hidden');
       gap = gapAt(startY + dy);
@@ -722,7 +912,8 @@ export function render(view) {
       // one suggestion to use, and each frame has its own "+" to add it. While a panel asked for a frame ("From
       // canvas" with nothing selected), the click gives it this frame.
       if (!moved && picking) { const done = picking; stopPicking(); done(items.find((i) => i.id === id)); return; }
-      if (!moved) return;
+      if (!moved && held && held.depth) return pickTake(held.stack, id);   // an earlier take, clicked: it goes on top
+      if (!moved || !moving.length) return;
       moving.forEach((m) => m.box.node.classList.remove('lifted'));
       const was = new Map([...boxes.values()].map((box) => [box, { x: box.x, y: box.y }]));
       // Dropped frames join the shot they were dropped on, at that place in the row; below the last row they start a new shot.
@@ -864,7 +1055,12 @@ export function render(view) {
   }
 
   async function loadItems() {
-    items = (await api('/api/library?all=1' + (project ? '&project=' + project : ''))).items;
+    const [library, core, boards] = await Promise.all([api('/api/library?all=1' + (project ? '&project=' + project : '')),
+      project ? api('/api/kit?project=' + project).catch(() => ({ entries: [] })) : { entries: [] },
+      api('/api/library/placement?project=' + project).catch(() => ({ boards: [] }))]);
+    items = library.items;
+    placed = { boards: Array.isArray(boards.boards) ? boards.boards : [] };
+    kitEntries = (core.entries || []).filter((e) => !e.hidden);
     for (const id of [...selected]) if (!items.some((i) => i.id === id)) selected.delete(id);
   }
 
@@ -882,13 +1078,14 @@ export function render(view) {
         picker.classList.toggle('linked', !!here);
         showAddress(placePath('/canvas', here));   // the address names this project and module, to keep or send
         timelineLink.href = placePath('/timeline', here);
-        shareButton.classList.toggle('hidden', !project);   // an asset book belongs to a project: none for all work
-        picker.title = here ? 'Open the project: its asset book and its modules' : 'Everything you have made';
+        shareButton.classList.toggle('hidden', !project);   // a NeuralCore belongs to a project: none for all work
+        picker.title = here ? 'Open the project: its NeuralCore and its modules' : 'Everything you have made';
       }
       tabTitle((projects.find((p) => p.id === project) || { name: 'Canvas' }).name);
       const [board] = await Promise.all([api('/api/boards/canvas?project=' + project), loadItems()]);
       const saved = board.data || {};
-      layout = { rows: Array.isArray(saved.rows) ? saved.rows.filter((row) => row && Array.isArray(row.keys)) : [], count: Number(saved.count) || 0 };
+      layout = { rows: Array.isArray(saved.rows) ? saved.rows.filter((row) => row && Array.isArray(row.keys)) : [], count: Number(saved.count) || 0,
+        picks: saved.picks && typeof saved.picks === 'object' && !Array.isArray(saved.picks) ? saved.picks : {} };
       ready = true;
       draw();
       fit();

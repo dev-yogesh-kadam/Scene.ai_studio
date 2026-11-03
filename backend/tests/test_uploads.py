@@ -111,16 +111,6 @@ def test_the_check_is_told_what_each_attachment_is(client, monkeypatch, tmp_path
     assert [e["text"] for e in plan["activity"] if e["text"].startswith("Read the skill")] == ["Read the skill “Pocket Motion”"]   # no Reel skill beside it
 
 
-def test_a_long_skill_without_tools_says_how_to_turn_them_on(client, monkeypatch, tmp_path):
-    from test_agent_conversation import model
-    register(client)
-    long_skill(tmp_path, monkeypatch)
-    asked = model(monkeypatch, client, {"thought": "", "reply": "planned", "steps": []})   # the test app runs local models without tools
-    plan = client.post("/api/agent/plan", json={"instruction": "/pocket-motion-seedance-v2 here are my files"}).json()
-    assert "Turn local_tools on" in plan["reply"] and "your files stay attached" in plan["reply"]
-    assert asked == [] and plan["steps"] == []
-
-
 def test_what_the_check_calls_missing_but_is_attached_is_set_aside(client, monkeypatch, tmp_path):
     register(client)
     long_skill(tmp_path, monkeypatch)
@@ -201,3 +191,31 @@ def test_a_run_keeps_its_files_for_the_messages_after(client, monkeypatch, tmp_p
     assert any("scenetest1" in e["text"] and "sceneaites-doc" in e["text"] for e in plan["activity"] if e["text"].startswith("Read what you attached"))
     from scene import runs
     assert runs.kept_attached(client.app.state.db, 1, "pm-1") == [sound["id"], script["id"]]
+
+
+def test_a_run_keeps_a_skill_picked_by_its_words_and_its_files(client, monkeypatch, tmp_path):
+    # The skill was not named: the message's words picked it. "continue" with nothing attached still has the sound, so
+    # the workflows that work on one (transcribe) stay offered.
+    register(client)
+    from scene import runs, skills
+    (tmp_path / "pocket-motion-seedance-v2.md").write_text(
+        "---\nname: pocket-motion-seedance-v2\nlabel: Pocket Motion\nwords: " + r"\b(episode)\b" + "\n---\n\n" + "A rule of the run. " * 2500,
+        encoding="utf-8")
+    shipped = skills.load
+    monkeypatch.setattr(skills, "load", lambda folder=None: shipped(tmp_path))
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=3", tmp_path / "episode.mp3"))
+    sound = upload(client, "scenetest1.mp3", (tmp_path / "episode.mp3").read_bytes(), "audio/mpeg").json()
+
+    async def answer(messages, answer_format, **kwargs):
+        if "ready" in (answer_format.get("properties") or {}):
+            return {"ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}
+        return {"tool": "finish", "thought": "", "reply": "ok", "steps": [], "direction": "", "question": None}
+    agent_ = client.app.state.agent
+    monkeypatch.setattr(agent_, "chat", answer)
+    monkeypatch.setattr(agent_, "_service_of", lambda name: ({"name": "Test"}, name))
+    client.post("/api/agent/plan", json={"instruction": "@1 make the first minute of this episode", "selection": [sound["id"]], "run": "pm-9"})
+    assert runs.kept_skill(client.app.state.db, 1, "pm-9") == "pocket-motion-seedance-v2"
+    assert runs.kept_attached(client.app.state.db, 1, "pm-9") == [sound["id"]]
+    plan = client.post("/api/agent/plan", json={"instruction": "continue", "selection": [], "run": "pm-9"}).json()
+    assert any(e["text"].startswith("Carried on") for e in plan["activity"])
+    assert any("scenetest1" in e["text"] for e in plan["activity"] if e["text"].startswith("Read what you attached"))

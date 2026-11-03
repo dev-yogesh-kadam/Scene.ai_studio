@@ -35,7 +35,7 @@ export function creditsDialog(people, after) {
     const next = mode === 'give' ? now + value : Math.max(0, now - value);
     balance.replaceChildren(
       el('span', { class: 'muted' }, person ? `${person.name} has ${number(now)} now` : 'Choose a user to see their balance'),
-      person && el('span', {}, el('span', { class: 'muted' }, 'New balance '), el('b', {}, number(next))));
+      person ? el('span', {}, el('span', { class: 'muted' }, 'New balance '), el('b', {}, number(next))) : '');
     confirm.textContent = mode === 'give' ? `Give ${number(value)} credits` : `Take ${number(Math.min(value, now))} credits`;
     confirm.disabled = !person || value < 1 || (mode === 'take' && now === 0) || !note.value.trim();
     error.textContent = mode === 'take' && person && value > now && now > 0 ? `They only have ${number(now)}, so the balance goes to 0.` : '';
@@ -416,7 +416,7 @@ function backupsCard(b, ctx) {
     el('p', { class: 'muted small' },
       'A backup is a dated copy of the studio\'s database: the accounts, projects, canvases, jobs, credits, prices and settings. ',
       'With it goes a copy of config.json, which holds the server addresses and keys. ',
-      'The finished pictures, videos and sounds and the asset book\'s uploads are copied too, into the files folder beside them: ',
+      'The finished pictures, videos and sounds and NeuralCore\'s uploads are copied too, into the files folder beside them: ',
       'only what is new or changed each time, and a file deleted in the studio keeps its copy there.'),
     el('p', { class: 'muted small' }, b.on
       ? `A copy is made each time the app starts and once a day while it runs. The last ${b.keep} days are kept in ${b.folder}. A copy made today replaces today's earlier one.`
@@ -596,5 +596,28 @@ export async function settings(ctx) {
     el('p', { class: 'muted small', style: 'margin-top:8px' }, 'What each kind of work costs is set in the Pricing section.'),
     notice,
     el('button', { class: 'btn primary', style: 'margin-top:12px', onclick: save }, 'Save')),
-  announcementCard(news), phoneCard(alerts.phone, ctx)];
+  announcementCard(news), phoneCard(alerts.phone, ctx), langfuseCard(current)];
+}
+
+// What goes to Langfuse with the agent's calls, when one is set in Servers & APIs (docs/langfuse.md).
+function langfuseCard(current) {
+  const words = el('input', { type: 'checkbox', checked: current.langfuse_words });
+  const share = el('input', { type: 'number', min: 0, max: 100, step: 1, value: current.langfuse_grade_share });
+  const notice = el('p', { class: 'notice' });
+  const save = async () => {
+    try {
+      await api('/api/admin/settings', { method: 'PUT', json: { langfuse_words: words.checked, langfuse_grade_share: share.value || 0 } });
+      notice.className = 'notice ok';
+      notice.textContent = 'Saved.';
+    } catch (err) { notice.className = 'notice error'; notice.textContent = err.message; }
+  };
+  return el('div', { class: 'card narrow' },
+    el('div', { class: 'card-head' }, el('h2', {}, 'Langfuse')),
+    el('p', { class: 'muted small' }, 'Langfuse itself is set in Servers & APIs. Each call of the agent\'s models, and each render, goes to it in the background.'),
+    el('label', { class: 'check', style: 'margin-top:0' }, words, 'Send the words: what was asked, the answers, the reasons of a grade'),
+    el('p', { class: 'muted small', style: 'margin:6px 0 0 25px' }, 'Off: only names, models, tokens, costs and times are sent. Saving a call to a dataset needs it on.'),
+    field('Turns graded by the fast model (%)', share),
+    el('p', { class: 'muted small', style: 'margin-top:6px' }, 'This share of the agent\'s turns is graded by the fast model (did it follow its skill, is the reply clear, are the steps sensible) and sent as the score “claude-grade”. 0 is off. Not charged to anyone.'),
+    notice,
+    el('button', { class: 'btn primary', style: 'margin-top:12px', onclick: save }, 'Save'));
 }

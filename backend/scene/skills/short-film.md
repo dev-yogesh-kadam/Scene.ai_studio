@@ -6,11 +6,11 @@ words: \b(film|movie|story|stories|scene|script|episode|drama|trailer|dialogue|s
 ---
 1. Read the story as beats: one beat is one action in one place, and each beat is one shot. "She finds the dog, takes it
    home, her mother says no, then smiles" is four shots.
-2. Find the people, places and props in the asset book first. A person the book has is used in every shot they are in,
-   in the workflow's character slot; a place the book has goes in the background or location slot of every shot set there.
-   A person the book does not have is described once in a few concrete words (age, hair, clothes) and that same
+2. Find the people, places and props in NeuralCore first. A person NeuralCore has is used in every shot they are in,
+   in the workflow's character slot; a place NeuralCore has goes in the background or location slot of every shot set there.
+   A person NeuralCore does not have is described once in a few concrete words (age, hair, clothes) and that same
    description is repeated word for word in every shot, so the shots match.
-3. When the story has a main person who is in three shots or more and the book has no picture of them, say in "reply"
+3. When the story has a main person who is in three shots or more and NeuralCore has no picture of them, say in "reply"
    that a character picture kept in shared memory keeps the face the same in every shot, and offer to make one.
    Plan the shots anyway.
 4. Cover the scene the way a film does: open on a wide shot that shows the place, then go closer for the action and the

@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 
 import httpx
 
-from .. import sharing, health, kit, media, memory, runs
+from .. import sharing, health, kit, media, memory, placement, runs
 from ..db import as_everyone
 from ..catalog import KINDS
 from ..comfy import workflows
@@ -95,6 +95,32 @@ def switched_on(state, workflow_id, user):
         raise HTTPException(400, "This workflow is switched off for now.")
 
 
+def fit_resolution(state, schema, settings):
+    """Make a job at a resolution an admin has not switched off (credits.fit_resolution): the one asked for, or the next
+    one allowed, written back into the settings. Returns the note that says so ("" when nothing changed), which is also
+    kept as settings["resolution_note"]."""
+    roles = {c["role"]: c for c in schema["controls"] if c["role"]}
+    settings.pop("resolution_note", None)
+    if schema.get("size"):
+        asked = settings.get("resolution") or schema["size"]["resolution"]
+    elif "resolution" in roles:
+        values = settings["values"] = settings.get("values") if isinstance(settings.get("values"), dict) else {}
+        asked = values.get(roles["resolution"]["id"], roles["resolution"]["default"])
+    else:
+        return ""
+    try:
+        used, note = state.credits.fit_resolution(schema["id"], asked, schema["resolutions"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if note:
+        if schema.get("size"):
+            settings["resolution"] = used
+        else:
+            settings["values"][roles["resolution"]["id"]] = used
+        settings["resolution_note"] = note
+    return note
+
+
 @router.get("/status")
 async def status(request: Request, user: dict = Depends(current_user)):
     """Whether the render server answers, and the version of the page files (a tab opened before a change offers to
@@ -132,7 +158,12 @@ async def list_workflows(request: Request, user: dict = Depends(current_user)):
 
 @router.get("/workflows/{kind}/{name}")
 async def get_workflow(kind: str, name: str, request: Request, user: dict = Depends(current_user)):
-    return workflows.describe(await request.app.state.catalog.load("{}/{}".format(kind, name)))
+    schema = workflows.describe(await request.app.state.catalog.load("{}/{}".format(kind, name)))
+    # Only the resolutions an admin left on are offered; "resolutions_off" names the others, for a page to say so.
+    allowed = request.app.state.credits.allowed_resolutions(schema["id"], schema["resolutions"])
+    schema["resolutions_off"] = [r for r in schema["resolutions"] if r not in allowed]
+    schema["resolutions"] = allowed
+    return schema
 
 
 @router.post("/estimate", dependencies=[limited("estimate", 120, 60)])
@@ -140,7 +171,8 @@ async def estimate(settings: dict, request: Request, user: dict = Depends(curren
     state = request.app.state
     wf = await state.catalog.load(str(settings.get("workflow", "")))
     switched_on(state, wf["id"], user)
-    return dict(await price(state, wf, settings, user["id"]), balance=state.credits.balance(user["id"]))
+    note = fit_resolution(state, workflows.describe(wf), settings)   # priced at the resolution it would be made at
+    return dict(await price(state, wf, settings, user["id"]), balance=state.credits.balance(user["id"]), resolution_note=note)
 
 
 @router.get("/jobs")
@@ -220,6 +252,10 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     # A result the agent planned as something to reuse is kept in shared memory when it is done: only a type and a name.
     settings["keep"] = memory.clean_keep(settings.get("keep"), wf["id"].split("/", 1)[0])
     settings["shot"] = memory.clean_shot(settings.get("shot"))
+    # Where it goes on the canvas: the number of its shot, and a board of references or deliverables (placement.py).
+    settings["shot_number"] = placement.clean_shot_number(settings.get("shot_number"))
+    settings["board"] = placement.clean_board(settings.get("board"))
+    settings["placement_group"] = placement.clean_group(settings.get("placement_group"))
 
     # The length of a video the user brought to an upscaler or a lip sync, measured here: it is what the job is charged by.
     videos = {r["id"] for r in schema["refs"] if r["kind"] == "video"} if by_source(wf) else set()
@@ -278,6 +314,7 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
             pass   # the job does not depend on the copy
     settings["refs"] = refs
 
+    resolution_note = fit_resolution(state, schema, settings)   # a resolution switched off is made at the next one allowed
     _, ctx = workflows.build_prompt(wf, dict(settings, clips=1))  # fails here, not in the queue, if a setting is wrong
     ctx = dict(workflows.context(schema, settings), seed=ctx.get("seed"))
     # What the library's details panel shows later: the prompt and each named setting as it was used.
@@ -300,7 +337,7 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
             quote["credits"], state.credits.balance(user["id"])))
     job_id = state.jobs.add(user["id"], name, wf["id"], settings, workflows.summary(schema, ctx),
                             quote["minutes"] * 60 if quote["minutes"] else None, quote["credits"], project_id, quote["seconds"])
-    return {"id": job_id, "credits": quote["credits"]}
+    return {"id": job_id, "credits": quote["credits"], "resolution_note": resolution_note}
 
 
 @router.delete("/jobs/{job_id}")

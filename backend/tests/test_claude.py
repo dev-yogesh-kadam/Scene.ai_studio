@@ -47,7 +47,7 @@ def brain_with_claude(models="sonnet, haiku", fast="haiku"):
     s = {"id": "claude", "name": "Claude", "url": "claude-code", "key": "", "models": [m.strip() for m in models.split(",")],
          "only": "", "cli": "claude.exe", "timeout": 60, "fast": fast,
          "home": str(Path(tempfile.gettempdir()) / "scene-claude-tests")}
-    return Agent("http://127.0.0.1:9", "", [s])
+    return Agent("", [s])
 
 
 def test_claude_is_offered_only_when_named_and_installed(monkeypatch):
@@ -57,10 +57,11 @@ def test_claude_is_offered_only_when_named_and_installed(monkeypatch):
     monkeypatch.setattr(claude, "find", lambda path="": "C:/bin/claude.exe")
     s = claude.service("sonnet, opus ,haiku", fast="haiku")
     assert s["models"] == ["sonnet", "opus", "haiku"] and s["cli"] == "C:/bin/claude.exe" and s["key"] == ""
-    brain = Agent("http://127.0.0.1:9", "", [s])                                     # no key, and still offered
-    assert brain.hosted() == [{"id": "claude", "name": "Claude"}]
-    assert asyncio.run(brain.models()) == ["claude/sonnet", "claude/opus", "claude/haiku"]   # Ollama is down
-    assert brain.helper("claude/opus") == "claude/haiku" and brain.helper("qwen3.6:35b") == "qwen3.6:35b"
+    brain = Agent("", [s])                                                          # no key, and still offered
+    assert asyncio.run(brain.models()) == ["claude/sonnet", "claude/opus", "claude/haiku"]
+    assert brain.helper("claude/opus") == "claude/haiku" and brain.helper(None) == "claude/haiku"
+    with pytest.raises(AgentError, match="Claude Code"):
+        asyncio.run(Agent("", []).models())                                         # no Claude: no model at all
 
 
 def test_claude_answers_in_the_agents_shape_with_its_own_tools_off(monkeypatch):
@@ -95,22 +96,13 @@ def test_claude_looks_at_pictures(monkeypatch):
     assert picture == {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "AAAA"}}
 
 
-def test_at_its_usage_limit_a_local_model_answers_instead(monkeypatch):
+def test_at_its_usage_limit_the_user_is_told(monkeypatch):
+    from scene.agent import AgentBusy
     brain = brain_with_claude()
     fake_claude(monkeypatch, printed({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 1793183400}},
                                      {"type": "result", "subtype": "success", "is_error": True, "result": "Claude usage limit reached"}))
-
-    async def local(messages_model, *args, **kwargs):
-        return '{"reply": "From here.", "steps": []}', {}
-
-    async def local_models():
-        brain.sizes = {"big:27b": 17, "small:9b": 6}
-        return ["big:27b", "small:9b"]
-
-    monkeypatch.setattr(brain, "_ask_local", local)
-    monkeypatch.setattr(brain, "_local_models", local_models)
-    answer = asyncio.run(brain.ask("You plan.", "hi", [], model="claude/sonnet"))
-    assert answer["reply"] == "From here. (Claude was busy, so small:9b answered.)" and answer["model"] == "small:9b"
+    with pytest.raises(AgentBusy):
+        asyncio.run(brain.ask("You plan.", "hi", [], model="claude/sonnet"))
 
 
 @pytest.mark.parametrize("out, said", [
@@ -144,7 +136,6 @@ def test_with_claude_picked_claude_looks_at_the_pictures_too():
     from scene.api.workspace import _looks
     state = SimpleNamespace(agent=brain_with_claude())
     assert _looks(state, {"model": "claude/sonnet"}) == {"describe": "claude/haiku", "review": "claude/sonnet"}
-    assert _looks(state, {"model": "qwen3.6:35b"}) == {"describe": None, "review": None}   # local: the usual ones, as before
     assert _looks(state, {}) == {"describe": None, "review": None}
 
 
@@ -293,22 +284,6 @@ def test_a_lost_session_and_a_busy_claude(monkeypatch):
     with pytest.raises(ContextLost):
         asyncio.run(brain.ask("You plan.", "new only", [], model="claude/sonnet", thread={"id": "s-9"}))
 
-    # at the limit a local model stands in, and it is given the whole first message, not the follow-up
-    fake_claude(monkeypatch, Run("", "Claude usage limit reached"))
-    given = []
-
-    async def local(model, messages, *args, **kwargs):
-        given.append(messages[1]["content"])
-        return '{"reply": "From here.", "steps": []}', {}
-
-    async def local_models():
-        brain.sizes = {"small:9b": 6}
-        return ["small:9b"]
-
-    monkeypatch.setattr(brain, "_ask_local", local)
-    monkeypatch.setattr(brain, "_local_models", local_models)
-    asyncio.run(brain.ask("You plan.", "new only", [], model="claude/sonnet", thread={"id": "s-1", "full": "THE WHOLE MESSAGE"}))
-    assert given == ["THE WHOLE MESSAGE"]
 
 
 # ---------------------------------------------------------------- live sessions (the Agent SDK, faked)
@@ -438,31 +413,16 @@ def test_stopping_a_reply_closes_the_program_and_keeps_the_session(monkeypatch):
     assert opened[0].closed and not claude.live
 
 
-def test_a_busy_claude_in_a_live_session_hands_the_whole_message_to_a_local_model(monkeypatch):
+def test_a_busy_claude_in_a_live_session_is_said_and_its_program_closed(monkeypatch):
+    from scene.agent import AgentBusy
     brain = brain_with_claude()
     busy = result(None)
     busy.is_error, busy.result, busy.api_error_status = True, "usage limit", 429
     opened = fake_live(monkeypatch, [busy])
-    given = []
-
-    async def local(model, messages, *args, **kwargs):
-        given.append(messages[1]["content"])
-        return json.dumps({"tool": "finish", "args": {}, **PLAN, "reply": "From here."}), {}
-
-    async def local_models():
-        brain.sizes = {"small:9b": 6}
-        return ["small:9b"]
-
-    async def pick(wanted=None):
-        return wanted
-
-    monkeypatch.setattr(brain, "_ask_local", local)
-    monkeypatch.setattr(brain, "_local_models", local_models)
-    monkeypatch.setattr(brain, "pick_model", pick)
-    answer = asyncio.run(brain.ask_with_tools("You plan.", "new only", ["w"], {}, model="claude/sonnet",
-                                              thread={"key": "k", "id": "s-1", "full": "THE WHOLE MESSAGE"}))
-    assert opened[0].closed and given and given[0] == "THE WHOLE MESSAGE"
-    assert answer["model"] == "small:9b" and "was busy" in answer["reply"]
+    with pytest.raises(AgentBusy):
+        asyncio.run(brain.ask_with_tools("You plan.", "new only", ["w"], {}, model="claude/sonnet",
+                                         thread={"key": "k", "id": "s-1", "full": "THE WHOLE MESSAGE"}))
+    assert opened[0].closed
 
 
 def test_idle_sessions_are_closed_and_the_tools_run_in_their_messages_request(monkeypatch):

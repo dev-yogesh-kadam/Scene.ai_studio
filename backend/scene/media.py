@@ -309,3 +309,109 @@ async def sequence(parts, target, fades=()):
     args += ["-c:v", "libx264", "-crf", "16", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart", target]
     await _ffmpeg(*args)
     return total
+
+
+# ---------------------------------------------------------------- measuring what was made
+
+async def frame_rate(path):
+    """The frame rate of a video's first picture stream, as ffmpeg reads it (24 when it says none)."""
+    text = await _ffmpeg("-i", path, check=False)
+    found = re.search(r"Stream #\S+.*Video:.*?(\d+(?:\.\d+)?) fps", text)
+    return float(found.group(1)) if found else float(FPS)
+
+
+async def measure(path):
+    """A file's lengths as they are in it, not as they were meant to be: {"seconds" (the container's), "frames" (the
+    picture's frames, counted; 0 without a picture), "video_seconds", "audio_seconds" (the sound read to its end; 0
+    without sound)}. For the times of a joined or mixed file, which may differ from the sums of what went in."""
+    found = await probe(path)
+    out = {"seconds": round(found["seconds"], 3), "frames": 0, "video_seconds": 0.0, "audio_seconds": 0.0}
+    if found["width"]:
+        text = await _ffmpeg("-i", path, "-map", "0:v:0", "-c", "copy", "-f", "null", "-", check=False)
+        frames = re.findall(r"frame=\s*(\d+)", text)
+        out["frames"] = int(frames[-1]) if frames else 0
+        out["video_seconds"] = round(out["frames"] / await frame_rate(path), 3)
+    if found["audio"]:
+        text = await _ffmpeg("-i", path, "-map", "0:a:0", "-f", "null", "-", check=False)
+        times = re.findall(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", text)
+        if times:
+            h, m, s = times[-1]
+            out["audio_seconds"] = round(int(h) * 3600 + int(m) * 60 + float(s), 3)
+    return out
+
+
+CUT_SEEN = 0.3   # a scene score at least this high where a part should start is the cut, seen in the file
+
+
+async def part_times(path, lengths, overlaps=()):
+    """Where each part of a joined file starts and ends in it: [{"n", "start", "end", "seen"}]. lengths: each part's
+    length in seconds as it went in; overlaps: {position: seconds} a part shares with the one before (a crossfade).
+    Each start is looked for in the file itself, the sharpest change of picture within a quarter second of where it
+    should be; "seen" is False where no cut shows there (a crossfade, or chained shots that meet on one frame), and the
+    start is then the reckoned one. The last part ends where the file's picture does."""
+    lengths = [float(n) for n in lengths]
+    if not lengths:
+        return []
+    total = (await measure(path))["video_seconds"] or sum(lengths)
+    scores = await changes(path)
+    starts, at = [], 0.0
+    for i, length in enumerate(lengths):
+        at -= dict(overlaps).get(i, 0.0) if i else 0.0
+        starts.append(at)
+        at += length
+    out = []
+    for i, reckoned in enumerate(starts):
+        start, seen = reckoned, i == 0
+        if i and not dict(overlaps).get(i):
+            near = [(score, t) for t, score in scores if abs(t - reckoned) <= 0.25]
+            best = max(near, default=(0, None))
+            if best[0] >= CUT_SEEN:
+                start, seen = best[1], True
+        out.append({"n": i + 1, "start": round(start, 3), "seen": seen})
+    for here, after in zip(out, out[1:] + [None]):
+        here["end"] = after["start"] if after else round(total, 3)
+    return out
+
+
+SILENCE_DB = -50     # quieter than this is silence
+SILENCE_LONG = 1.0   # seconds of it that count as a gap worth saying
+
+
+async def audio_check(path, silence_db=SILENCE_DB, silence_seconds=SILENCE_LONG):
+    """What a sound (or a video's sound) measures, for a check after music or a voice is made: {"seconds",
+    "loudness" (integrated, LUFS), "range" (loudness range, LU), "true_peak" (dBFS), "mean_db", "peak_db",
+    "silences": [[start, end], ...] of at least `silence_seconds` below `silence_db`, "silent_share" (0 to 1),
+    "clipping" (the peak at 0 dB or over), "problems": plain words}. One pass of ffmpeg."""
+    found = await probe(path)
+    if not found["audio"]:
+        raise MediaError("{} has no sound to check.".format(Path(path).name))
+    text = await _ffmpeg("-i", path, "-map", "0:a:0", "-af",
+                         "silencedetect=n={}dB:d={},volumedetect,ebur128=peak=true".format(silence_db, silence_seconds),
+                         "-f", "null", "-", check=False)
+    number = lambda pattern: (lambda m: float(m.group(1)) if m else None)(re.search(pattern, text))
+    summary = text[text.rfind("Summary:"):] if "Summary:" in text else ""
+    in_summary = lambda pattern: (lambda m: float(m.group(1)) if m else None)(re.search(pattern, summary))
+    seconds = (await measure(path))["audio_seconds"] or found["seconds"]
+    starts = [float(s) for s in re.findall(r"silence_start: (-?[\d.]+)", text)]
+    ends = [float(s) for s in re.findall(r"silence_end: ([\d.]+)", text)]
+    silences = [[round(max(s, 0.0), 2), round(ends[i] if i < len(ends) else seconds, 2)] for i, s in enumerate(starts)]
+    out = {"seconds": round(seconds, 2), "loudness": in_summary(r"I:\s*(-?[\d.]+) LUFS"),
+           "range": in_summary(r"LRA:\s*(-?[\d.]+) LU"), "true_peak": in_summary(r"Peak:\s*(-?[\d.]+|-inf) dBFS"),
+           "mean_db": number(r"mean_volume: (-?[\d.]+) dB"), "peak_db": number(r"max_volume: (-?[\d.]+) dB"),
+           "silences": silences, "silent_share": round(sum(e - s for s, e in silences) / seconds, 3) if seconds else 1.0}
+    out["clipping"] = out["peak_db"] is not None and out["peak_db"] >= 0
+    problems = []
+    if out["silent_share"] > 0.9:
+        problems.append("it is silent, or nearly")
+    else:
+        if out["loudness"] is not None and out["loudness"] < -30:
+            problems.append("it is very quiet ({:.0f} LUFS)".format(out["loudness"]))
+        if out["clipping"]:
+            problems.append("it reaches 0 dB and may be clipped")
+        long_gaps = [g for g in silences if g[1] - g[0] >= 3 and 0.5 < g[0] and g[1] < seconds - 0.5]
+        if long_gaps:
+            problems.append("{} silence{} of 3 s or more inside it".format(len(long_gaps), "" if len(long_gaps) == 1 else "s"))
+        if silences and silences[0][0] <= 0.05 and silences[0][1] >= 2:
+            problems.append("it starts with {:.1f} s of silence".format(silences[0][1]))
+    out["problems"] = problems
+    return out

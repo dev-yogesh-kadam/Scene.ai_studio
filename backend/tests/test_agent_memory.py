@@ -1,4 +1,4 @@
-"""Shared memory: the asset book the agent plans with, the descriptions its model writes, the uploads and notes it
+"""Shared memory: NeuralCore the agent plans with, the descriptions its model writes, the uploads and notes it
 keeps, and the skills it is given."""
 
 import json
@@ -10,14 +10,14 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
 
 def film(client):
-    """The test's project: an asset book belongs to a project, and there is none outside one."""
+    """The test's project: a NeuralCore belongs to a project, and there is none outside one."""
     if not getattr(client, "film", None):
         client.film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     return client.film
 
 
 def save_asset(client, name, tag, use_note="", project=0):
-    """An entry of the asset book of the test's project (or of the project given)."""
+    """An entry of NeuralCore of the test's project (or of the project given)."""
     return client.post("/api/kit", files={"file": (name.lower() + ".png", PNG + name.encode(), "image/png")},
                        data={"name": name, "type": tag, "use_note": use_note, "project_id": str(project or film(client))}).json()["id"]
 
@@ -49,7 +49,7 @@ def test_the_book_lists_saved_assets_and_the_projects_pictures_and_describes_eac
     harbour = library_item(client, me["id"], "Harbour", project=film(client))
     library_item(client, me["id"], "Song", kind="audio", project=film(client))   # a sound is not a picture to reuse
 
-    shown = client.get("/api/memory?project=%d" % film(client)).json()   # the asset book; the model looks at what it has not seen yet
+    shown = client.get("/api/memory?project=%d" % film(client)).json()   # NeuralCore; the model looks at what it has not seen yet
     assert [a["name"] for a in shown["assets"]] == ["Meera", "Cafe"] and "made" not in shown
     book = memory.book_for_model(memory.book(client.app.state.db, me["id"], film(client)))
     assert [(e.get("asset"), e.get("item"), e["name"], e["type"]) for e in book] == [
@@ -112,7 +112,7 @@ def test_the_agent_puts_a_saved_asset_it_knows_by_name_into_a_slot(client, monke
     assert '"name": "Meera"' in asked["message"] and "Use her for every shot of the girl." in asked["message"]
     assert '"asset": %d' % cafe in asked["message"] and "A harbour at dawn." in asked["message"]
     assert "skill short-film" in asked["message"]
-    assert "The asset book (the project's memory)" in asked["system"]
+    assert "NeuralCore (the project's memory)" in asked["system"]
 
     # On Approve the browser sends the saved asset by its id, which the job takes as it is.
     assert client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_all_in_one", "refs": {"201:image": {"asset_id": 999}}}'}).status_code == 400
@@ -171,7 +171,7 @@ def test_a_file_dropped_into_a_job_is_kept_once_as_an_upload_of_its_project(clie
     # The agent knows it by name in that project.
     book = memory.book_for_model(memory.book(client.app.state.db, me["id"], project))
     assert book[0]["asset"] == upload_id and book[0]["type"] == "character"
-    # A deleted project takes its asset book with it: nothing is left outside a project.
+    # A deleted project takes its NeuralCore with it: nothing is left outside a project.
     second = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("cafe.png", PNG + b"cafe", "image/png")})
     assert second.status_code == 200
     client.delete("/api/projects/%d" % project)

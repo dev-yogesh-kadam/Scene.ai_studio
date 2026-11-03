@@ -20,10 +20,39 @@ export function chip(table, id, known, onPick) {
     el('span', { class: 'md-chip-thumb' }, still(ITEM_URL[table](id), known.kind, known.name)), el('span', { class: 'md-chip-name' }, known.name));
 }
 
-// One line of a reply: **bold**, *italic*, `code` and [[item:12]] / [[asset:3]].
+// A file the reply hands over ([[show:item:12]] on a line of its own): the video, picture or sound itself to play there,
+// its name, and Download, Copy link (the studio's own link, /api/m/<id>: it opens only for someone signed in who may
+// see it) and Open (where it is in the studio).
+export function mediaCard(table, id, known, onPick) {
+  const url = ITEM_URL[table](id);
+  const view = known.kind === 'video'
+    ? el('video', { src: url, controls: true, preload: 'metadata', playsinline: true, poster: table === 'item' ? `/api/library/${id}/poster` : null })
+    : known.kind === 'image' ? el('img', { src: url, alt: known.name, loading: 'lazy' })
+      : known.kind === 'audio' ? soundPlayer(url, known.name) : null;
+  const copy = el('button', { type: 'button', class: 'md-media-act', title: 'Copy link' }, icon('copy'), 'Copy link');
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(new URL(known.link || url, location.origin).href);
+      copy.lastChild.textContent = 'Copied';
+    } catch { copy.lastChild.textContent = 'Could not copy'; }
+    setTimeout(() => { copy.lastChild.textContent = 'Copy link'; }, 1600);
+  });
+  const save = table === 'item' ? `/api/library/${id}/file?download=1` : url;
+  return el('figure', { class: `md-media md-media-${known.kind}`, 'data-key': `${table}:${id}` },
+    view && el('div', { class: 'md-media-view' }, view),
+    el('figcaption', {},
+      el('span', { class: 'md-media-name', title: known.name }, known.name),
+      el('a', { class: 'md-media-act', href: save, download: table === 'item' ? null : known.name, title: 'Download' }, icon('download'), 'Download'),
+      copy,
+      el('button', { type: 'button', class: 'md-media-act', title: 'Open in the studio', onclick: () => onPick(table, id) }, icon('expand'), 'Open')));
+}
+
+const SHOW_LINE = /^\s*\[\[show:(item|asset):(\d+)\]\]\s*$/;
+
+// One line of a reply: **bold**, *italic*, `code` and [[item:12]] / [[asset:3]] ([[show:…]] inside a line is a chip too).
 function inline(text, chips, onPick) {
   const parts = [];
-  const pattern = /\[\[(item|asset):(\d+)\]\]|\*\*([^*]+)\*\*|`([^`]+)`|(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])/g;
+  const pattern = /\[\[(?:show:)?(item|asset):(\d+)\]\]|\*\*([^*]+)\*\*|`([^`]+)`|(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])/g;
   let last = 0;
   let found;
   while ((found = pattern.exec(text))) {
@@ -73,11 +102,84 @@ function tableCell(text) {
   return el('td', { class: 'md-cell-media' }, el('a', { href: text, target: '_blank', rel: 'noopener', title: text }, img));
 }
 
+// A table in a box of its own that scrolls inside the reply, its header staying in view, with Copy (the CSV, for a
+// spreadsheet) and Download (a .csv file) at its top right.
 function table(csv) {
   const [head, ...rows] = csv.split('\n').filter((line) => line.trim()).map(csvRow);
-  return el('div', { class: 'md-table' }, el('table', {},
+  const done = (button, text) => { const was = button.title; button.title = text; button.classList.add('done'); setTimeout(() => { button.title = was; button.classList.remove('done'); }, 1500); };
+  const tools = el('div', { class: 'md-table-tools' },
+    el('button', { type: 'button', class: 'icon-btn small', title: 'Copy the table', 'aria-label': 'Copy the table',
+      onclick: (e) => { const b = e.currentTarget; navigator.clipboard.writeText(csv.trim()).then(() => done(b, 'Copied')).catch(() => {}); } }, icon('copy')),
+    el('button', { type: 'button', class: 'icon-btn small', title: 'Download as CSV', 'aria-label': 'Download the table as CSV',
+      onclick: () => {
+        const url = URL.createObjectURL(new Blob([csv.trim() + '\n'], { type: 'text/csv' }));
+        el('a', { href: url, download: 'table.csv' }).click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, icon('download')));
+  return el('div', { class: 'md-table-box' }, tools, el('div', { class: 'md-table' }, el('table', {},
     el('thead', {}, el('tr', {}, (head || []).map((h) => el('th', {}, h)))),
-    el('tbody', {}, rows.map((cells) => el('tr', {}, cells.map(tableCell))))));
+    el('tbody', {}, rows.map((cells) => el('tr', {}, cells.map(tableCell)))))));
+}
+
+// A sound as a player: a round play button, its waveform (drawn from the file the first time it is shown) that also
+// shows how far it has played and can be clicked to jump, and its length. One sound plays at a time.
+const WAVE_BARS = 64;
+const waves = new Map();   // url -> the bar heights, once worked out
+export function soundPlayer(url, name = '') {
+  const audio = el('audio', { src: url, preload: 'metadata' });
+  const play = el('button', { type: 'button', class: 'wave-play', 'aria-label': 'Play ' + name, title: 'Play' }, icon('play'));
+  const bars = el('div', { class: 'wave-bars', role: 'slider', 'aria-label': 'Position', 'aria-valuemin': '0', 'aria-valuemax': '100', tabindex: '0' });
+  const time = el('span', { class: 'wave-time' }, '0:00');
+  const node = el('div', { class: 'wave' }, play, bars, time, audio);
+  const draw = (heights) => bars.replaceChildren(...heights.map((h) => el('i', { style: `height:${Math.max(8, Math.round(h * 100))}%` })));
+  draw(waves.get(url) || Array.from({ length: WAVE_BARS }, (_, i) => 0.25 + 0.15 * Math.abs(Math.sin(i * 0.7))));
+  const progress = () => {
+    const share = audio.duration ? audio.currentTime / audio.duration : 0;
+    const lit = Math.round(share * WAVE_BARS);
+    [...bars.children].forEach((bar, i) => bar.classList.toggle('on', i < lit));
+    bars.setAttribute('aria-valuenow', String(Math.round(share * 100)));
+    time.textContent = clock(audio.paused && !audio.currentTime ? audio.duration || 0 : audio.currentTime);
+  };
+  audio.addEventListener('loadedmetadata', progress);
+  audio.addEventListener('timeupdate', progress);
+  audio.addEventListener('play', () => { document.querySelectorAll('.wave audio').forEach((a) => { if (a !== audio) a.pause(); }); play.replaceChildren(icon('pause')); play.title = 'Pause'; });
+  audio.addEventListener('pause', () => { play.replaceChildren(icon('play')); play.title = 'Play'; });
+  audio.addEventListener('ended', () => { audio.currentTime = 0; progress(); });
+  play.addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
+  const seek = (share) => { if (audio.duration) { audio.currentTime = Math.max(0, Math.min(1, share)) * audio.duration; progress(); } };
+  bars.addEventListener('click', (e) => { const r = bars.getBoundingClientRect(); seek((e.clientX - r.left) / r.width); });
+  bars.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); audio.currentTime = Math.max(0, audio.currentTime + (e.key === 'ArrowRight' ? 5 : -5)); progress(); }
+  });
+  // The real waveform: the file read once when the player is first seen, its loudness in WAVE_BARS slices.
+  if (!waves.has(url) && 'IntersectionObserver' in window) {
+    const seen = new IntersectionObserver(async (entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      seen.disconnect();
+      try {
+        const data = await (await fetch(url)).arrayBuffer();
+        if (data.byteLength > 40e6) return;   // a very long sound keeps the drawn shape
+        const Context = window.AudioContext || window.webkitAudioContext;
+        const context = new Context();
+        const decoded = await context.decodeAudioData(data);
+        context.close();
+        const samples = decoded.getChannelData(0);
+        const step = Math.floor(samples.length / WAVE_BARS) || 1;
+        const peaks = Array.from({ length: WAVE_BARS }, (_, i) => {
+          let sum = 0;
+          for (let j = i * step; j < (i + 1) * step && j < samples.length; j += 32) sum += samples[j] * samples[j];
+          return Math.sqrt(sum / (step / 32));
+        });
+        const top = Math.max(...peaks) || 1;
+        const heights = peaks.map((p) => p / top);
+        waves.set(url, heights);
+        draw(heights);
+        progress();
+      } catch { /* the drawn shape stays */ }
+    });
+    seen.observe(node);
+  }
+  return node;
 }
 
 // A reply as paragraphs, lists and ```csv tables. chips: {"item:12": {name, kind}} for the items it may name.
@@ -98,7 +200,11 @@ function prose(text, chips, onPick) {
     let list = null;
     let paragraph = null;
     for (const line of block.split('\n')) {
-      if (LIST.test(line)) {
+      const shown = SHOW_LINE.exec(line);
+      if (shown) {
+        const known = chips[`${shown[1]}:${shown[2]}`];
+        if (known) { list = null; paragraph = null; out.push(mediaCard(shown[1], Number(shown[2]), known, onPick)); }
+      } else if (LIST.test(line)) {
         paragraph = null;
         const ordered = /^\s*\d/.test(line);
         if (!list || list.ordered !== ordered) {
@@ -130,7 +236,7 @@ export function fold({ glyph, glyphs = null, title, sub = '', state = {}, body =
   return el('div', { class: 'fold ' + className + (state.open ? ' open' : '') }, head, has && state.open && el('div', { class: 'fold-body' }, body));
 }
 
-const WORK_ICONS = { attach: 'attachment', book: 'book', look: 'eye', skill: 'skill', retry: 'retry', skip: 'skip', plan: 'check',
+const WORK_ICONS = { attach: 'attachment', bulb: 'bulb', book: 'book', look: 'eye', skill: 'skill', retry: 'retry', skip: 'skip', plan: 'check',
   queue: 'queue', wait: 'clock', ready: 'film', check: 'check', warn: 'skip', status: 'wrench' };
 
 // The marks of some work, one of each kind it did and at most three: what a closed fold shows in front of its title.

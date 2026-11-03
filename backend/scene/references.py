@@ -1,6 +1,7 @@
 """Reference files (images, videos, audio) that jobs use as inputs."""
 
 import hashlib
+import io
 import mimetypes
 import re
 import time
@@ -15,17 +16,23 @@ UPLOAD_PREFIX = "scene_"
 UPLOAD_NAME = re.compile(r"^scene_[0-9a-f]{10}_[\w.-]{1,200}$")
 MAX_BYTES = 200 * 1024 * 1024
 KINDS = {
-    "image": {".png", ".jpg", ".jpeg", ".webp"},
+    "image": {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".avif"},
     "video": {".mp4", ".webm", ".mov", ".mkv"},
     "audio": {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"},
 }
 
 
-# What the user brings that is words, filed as "text": a script (.docx, .txt, .md) or a transcript (.srt, .json).
-# A Word document is kept as the plain text of it.
-TEXT_SUFFIXES = {".srt", ".json", ".txt", ".md", ".docx"}
+# Pictures the render server can't read (an iPhone's HEIC, AVIF): made a JPEG (a PNG when they have transparency) as
+# they come in, so every workflow can take them.
+CONVERTED = {".heic", ".heif", ".avif"}
+
+# What the user brings that is words, filed as "text": a script (.docx, .pdf, .txt, .md) or a transcript (.srt, .json).
+# A Word document or a PDF is kept as the plain text of it.
+TEXT_SUFFIXES = {".srt", ".json", ".txt", ".md", ".docx", ".pdf"}
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 MAX_DOCX_BYTES = 25 * 1024 * 1024          # a Word file with pictures in it is larger than its words
+MAX_PDF_BYTES = 50 * 1024 * 1024
+MAX_PDF_PAGES = 500
 MAX_DOCX_XML = 30 * 1024 * 1024            # the document part, unpacked: a file that unpacks larger is refused
 WORD = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
@@ -62,22 +69,60 @@ def docx_text(data):
     return "\n".join(lines).strip() + "\n"
 
 
+def pdf_text(data):
+    """The words of a PDF, page by page. Raises ValueError when it is not one, is locked, or has no words that can be
+    read (a scan: its pages are pictures)."""
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise ValueError("it is locked with a password")
+        pages = [(page.extract_text() or "").strip() for page in reader.pages[:MAX_PDF_PAGES]]
+    except (PdfReadError, KeyError, TypeError, OSError):
+        raise ValueError("it is not a PDF that can be read")
+    text = "\n\n".join(p for p in pages if p)
+    if not text.strip():
+        raise ValueError("it has no words that can be read: its pages are pictures (a scan)")
+    return text.strip() + "\n"
+
+
+def common_picture(data, filename):
+    """A HEIC or AVIF picture as (JPEG or PNG bytes, its new file name), turned as its camera says."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    try:
+        with Image.open(io.BytesIO(data)) as opened:
+            picture = ImageOps.exif_transpose(opened)
+            clear = picture.mode in ("RGBA", "LA", "PA") or "transparency" in picture.info
+            out = io.BytesIO()
+            if clear:
+                picture.convert("RGBA").save(out, "PNG")
+            else:
+                picture.convert("RGB").save(out, "JPEG", quality=95)
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise HTTPException(400, "{} could not be read as a picture.".format(filename or "The file"))
+    return out.getvalue(), Path(filename or "picture").stem + (".png" if clear else ".jpg")
+
+
 async def read_text_upload(upload):
     """The words of an uploaded script or transcript, as (UTF-8 bytes, the file name to keep them under). A Word file
-    becomes its plain text (.txt); anything else must be text — UTF-8, with no NUL bytes — whatever its name says.
-    At most 5 MB of text."""
+    or a PDF becomes its plain text (.txt); anything else must be text — UTF-8, with no NUL bytes — whatever its name
+    says. At most 5 MB of text."""
     label = upload.filename or "The file"
-    docx = Path(upload.filename or "").suffix.lower() == ".docx"
-    most = MAX_DOCX_BYTES if docx else MAX_TEXT_BYTES
+    suffix = Path(upload.filename or "").suffix.lower()
+    docx, pdf = suffix == ".docx", suffix == ".pdf"
+    most = MAX_DOCX_BYTES if docx else MAX_PDF_BYTES if pdf else MAX_TEXT_BYTES
     if (upload.size or 0) > most:
         raise HTTPException(413, "{} is larger than {} MB.".format(label, most // (1024 * 1024)))
     data = await upload.read()
     if len(data) > most:
         raise HTTPException(413, "{} is larger than {} MB.".format(label, most // (1024 * 1024)))
     name = upload.filename or "text.txt"
-    if docx:
+    if docx or pdf:
         try:
-            data = docx_text(data).encode("utf-8")
+            data = (docx_text(data) if docx else pdf_text(data)).encode("utf-8")
         except ValueError as error:
             raise HTTPException(400, "{} could not be read: {}.".format(label, error))
         name = Path(name).stem + ".txt"
@@ -103,7 +148,8 @@ def safe_name(filename):
 
 async def read_upload(upload):
     """The bytes of an uploaded image, video or sound. A file that is too large is refused before it is read into
-    memory, and one whose content is not what its name says (a page or a program named .png) is refused too."""
+    memory, and one whose content is not what its name says (a page or a program named .png) is refused too. A HEIC or
+    AVIF picture comes back as a JPEG (or PNG), and `upload.filename` is changed to match, so the callers file it so."""
     label = upload.filename or "The file"
     kind = media_kind(upload.filename)
     if kind is None:
@@ -115,6 +161,8 @@ async def read_upload(upload):
         raise HTTPException(413, "{} is larger than 200 MB.".format(label))
     if not content_matches(kind, data):
         raise HTTPException(400, "{} is not the {} file its name says it is.".format(label, kind))
+    if Path(upload.filename or "").suffix.lower() in CONVERTED:
+        data, upload.filename = common_picture(data, upload.filename)
     return data
 
 

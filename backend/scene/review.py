@@ -13,6 +13,9 @@ director would make them:
 Each check is "fine", "minor" or "major"; a result passes unless one is major. A failed result comes with a fix: a
 corrected prompt, and whether the retake should start on the last frame of the shot before. The verdict is kept with
 the item (generations.review), shown under the step, in Shared memory, and to the agent when it plans again.
+
+A sound the agent made (music, a voice track) has no picture: it is measured instead (review_sound), its length against
+what was asked, its loudness and its silences, and kept the same way.
 """
 
 import base64
@@ -133,11 +136,15 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
         raise ReviewError("Only pictures and videos can be reviewed.")
     if not path.is_file():
         raise ReviewError("The file of {} is missing from storage.".format(item["name"]))
+    try:
+        made_with = json.loads(item["settings"] or "{}")
+    except ValueError:
+        made_with = {}
     if not prompt:
-        try:
-            prompt = str(json.loads(item["settings"] or "{}").get("prompt") or "")
-        except ValueError:
-            prompt = ""
+        prompt = str(made_with.get("prompt") or "")
+    focus = " ".join(str(made_with.get("check") or "").split())[:400] if isinstance(made_with, dict) else ""
+    if focus:   # what the plan asked to check closely in this shot, besides the usual checks
+        prompt = "{}\n\nCheck closely, besides the usual checks: {}".format(prompt, focus)
     pictures = []
     for label, ref in list(references)[:MAX_REFERENCES]:
         if Path(ref).is_file():
@@ -158,5 +165,47 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
         raise ReviewError(str(error))
     answer = await state.agent.review([p for _, p in pictures], [label for label, _ in pictures], prompt, item["kind"], **({"model": model} if model else {}))
     verdict = verdict_from(answer)
+    state.db.run("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
+    return verdict
+
+
+# ---------------------------------------------------------------- sound: music and audio results
+
+LENGTH_SLACK = 0.15   # a sound this much shorter or longer than asked (and at least 2 s off) is noted
+
+
+def sound_verdict(measured, asked=None):
+    """A verdict for a sound, kept as review_item keeps one: {"passed", "problem", "checks", "fix", "at", "sound"}.
+    measured: what media.audio_check found (its "problems" in plain words). asked: the seconds the step asked for, or
+    None. A silent sound, or one less than half as long as asked, fails; the rest of its problems are minor."""
+    seconds, checks = measured.get("seconds") or 0, []
+    if asked and seconds:
+        off = abs(seconds - asked) > max(2.0, LENGTH_SLACK * asked)
+        checks.append({"check": "length", "level": ("major" if seconds < asked / 2 else "minor") if off else "fine",
+                       "note": "{:.0f} s long, {:.0f} s was asked".format(seconds, asked) if off else "{:.0f} s, as asked".format(seconds)})
+    for problem in measured.get("problems") or []:
+        checks.append({"check": "sound", "level": "major" if "silent" in problem else "minor", "note": problem})
+    if not measured.get("problems"):
+        checks.append({"check": "sound", "level": "fine", "note": "{} LUFS, no holes".format(
+            "{:.0f}".format(measured["loudness"]) if isinstance(measured.get("loudness"), (int, float)) else "?")})
+    passed = not any(c["level"] == "major" for c in checks)
+    problem = "" if passed else "The sound is not usable: {}.".format(next(c["note"] for c in checks if c["level"] == "major"))
+    return {"passed": passed, "problem": problem, "checks": checks, "fix": {}, "at": time.time(),
+            "sound": {k: measured.get(k) for k in ("seconds", "loudness", "true_peak", "silent_share", "clipping")}}
+
+
+async def review_sound(state, user_id, item, asked=None):
+    """Check a sound the agent made (music, a voice track): its length against what was asked, its loudness and its
+    silences, measured with ffmpeg (media.audio_check, the film tool's audio_check), not by a model: nothing is
+    charged. Keeps the verdict with the item."""
+    path = state.outputs.folder(user_id) / item["filename"]
+    if item["kind"] != "audio":
+        raise ReviewError("Only sounds are checked this way.")
+    if not path.is_file():
+        raise ReviewError("The file of {} is missing from storage.".format(item["name"]))
+    try:
+        verdict = sound_verdict(await media.audio_check(path), asked)
+    except media.MediaError as error:
+        raise ReviewError(str(error))
     state.db.run("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
     return verdict

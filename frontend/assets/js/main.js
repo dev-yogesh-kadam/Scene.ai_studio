@@ -65,8 +65,10 @@ async function showAuth() {
     }
     const { renderAuth } = await import('./pages/auth.js');
     if (store.user || here() !== at) return;   // signed in or moved on while it was fetched
-    // Signing in always lands on All projects. replaceState does not fire a route event, so the page is routed once, by showApp.
-    renderAuth(root, (user) => { store.user = user; leaveDoor(); history.replaceState(null, '', LANDING); showApp(); },
+    // Signing in lands on All projects. replaceState does not fire a route event, so the page is routed once, by showApp.
+    // A prompt typed on the landing page lands on Home instead, where it waits in the prompt box.
+    const firstStop = () => { try { return localStorage.getItem('scene.firstPrompt') ? '/home' : LANDING; } catch (e) { return LANDING; } };
+    renderAuth(root, (user) => { store.user = user; leaveDoor(); history.replaceState(null, '', firstStop()); showApp(); },
       at === '/signup' && info.signup_open ? 'register' : 'login');
   };
   if (leaveDoor) leaveDoor();

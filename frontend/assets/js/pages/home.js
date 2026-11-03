@@ -19,6 +19,10 @@ export function render(view) {
     queued.replaceChildren('Added to the queue. ',
       el('a', { href: '/canvas', onclick: () => localStorage.setItem('scene.project', '') }, 'Watch it on the Canvas'));
   } });
+  // A prompt typed on the landing page before signing up (pages/landing.js) is waiting in the prompt box, once.
+  let waiting = '';
+  try { waiting = localStorage.getItem('scene.firstPrompt') || ''; localStorage.removeItem('scene.firstPrompt'); } catch (e) { /* storage off */ }
+  if (waiting) dock.setPrompt(waiting);
   const recent = el('section', { class: 'home-section hidden' });
   const filter = el('div');
   const grid = el('div', { class: 'made-grid' });

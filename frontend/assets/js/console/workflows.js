@@ -27,6 +27,29 @@ function health(w) {
 
 const needsAttention = (w) => w.error || lacking(w) || !w.example;
 
+// Resolutions an admin switched off, for a kind or one workflow: a box for each, ticked while it is on. A job asked at one
+// that is off is made at the next one allowed, and its reply says so. One stays on.
+const TIERS = ['480', '720', '1080'];
+function resolutionSwitches(key, off, onSaved, notice) {
+  const now = new Set(off || []);
+  const boxes = TIERS.map((t) => el('label', { class: 'check', style: 'margin-right:14px' },
+    el('input', { type: 'checkbox', checked: !now.has(t), onchange: async (e) => {
+      const next = new Set(now);
+      if (e.target.checked) next.delete(t); else next.add(t);
+      try {
+        const saved = await api('/api/admin/workflows/resolutions', { method: 'PUT', json: { key, off: TIERS.filter((x) => next.has(x)) } });
+        now.clear();
+        saved.off.forEach((x) => now.add(x));
+        if (notice) { notice.className = 'notice'; notice.textContent = ''; }
+        if (onSaved) onSaved(saved.off);
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        if (notice) { notice.className = 'notice error'; notice.textContent = err.message; } else alert(err.message);
+      }
+    } }), t + 'p'));
+  return el('div', { class: 'row' }, boxes);
+}
+
 async function openWorkflow(ctx, w, report) {
   const panel = drawer(w.title, el('p', { class: 'muted' }, 'Loading…'));
   const notice = el('p', { class: 'notice' });
@@ -58,6 +81,9 @@ async function openWorkflow(ctx, w, report) {
     : el('ul', { class: 'small' }, changes.map((c) => el('li', {}, c))));
   panel.replace(
     section('Offered to', audienceBox, el('p', { class: 'muted small' }, 'Admins only: you and the other admins see it on Create and the agent can use it for you; users don\'t, until you offer it to everyone.')),
+    w.kind !== 'audio' && section('Resolutions', resolutionSwitches(w.id, w.resolutions_off, (off) => { w.resolutions_off = off; }, notice),
+      el('p', { class: 'muted small' }, `Untick one to switch it off for this workflow (768p counts as 720p). ${((report.resolutions_off || {})[w.kind] || []).length
+        ? `Off for every ${w.kind} workflow: ${report.resolutions_off[w.kind].map((t) => t + 'p').join(', ')}. ` : ''}A job asked at one that is off is made at the next one down (or up, when none is lower) and says so. Only workflows that take a resolution change.`)),
     section('Try it', el('p', { class: 'muted small' }, 'Runs it once with its own settings and a sample prompt, as you: free, first in the queue, and even under maintenance.'), test, notice),
     w.missing && (w.missing.files.length || w.missing.nodes.length) && section('Missing on the render server',
       el('p', { class: 'muted small' }, `As its node list said ${report.nodes_saved ? ago(report.nodes_saved) : 'last time'}. A job would fail with "value not in list" or an unknown node.`),
@@ -120,5 +146,10 @@ export async function workflows(ctx) {
         w.done + w.failed ? Math.round((100 * w.done) / (w.done + w.failed)) + '%' : '', w.changed ? ago(w.changed) : '']),
       { onRow: (i) => openWorkflow(ctx, shown[i], report), empty: 'None.' }),
     el('p', { class: 'muted small', style: 'margin-top:10px' }, `Workflow files are read from ${report.folder}. Price: an image, or 5 seconds of video or sound. Select a workflow for its versions, a test run and who it is offered to.`));
-  return [el('div', { class: 'grid-2' }, changes, nodes), list];
+  const resolutions = el('div', { class: 'card' },
+    el('div', { class: 'card-head' }, el('h2', {}, 'Resolutions for everyone')),
+    el('p', { class: 'muted small' }, 'Untick a resolution to switch it off for every workflow of that type. A workflow can switch off more of its own (select it below). A job asked at one that is off is made at the next one allowed, and the reply says so.'),
+    table(['Type', 'On'], ['video', 'image', 'upscaler'].map((kind) => [kind,
+      resolutionSwitches(kind, (report.resolutions_off || {})[kind], (off) => { (report.resolutions_off = report.resolutions_off || {})[kind] = off; })])));
+  return [el('div', { class: 'grid-2' }, changes, nodes), resolutions, list];
 }

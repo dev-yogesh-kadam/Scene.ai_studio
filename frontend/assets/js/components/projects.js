@@ -37,7 +37,7 @@ export function projectDialog({ project, parent = null, count = 0, module = fals
       } },
         el('h2', {}, project ? (canvas ? 'Rename canvas' : module ? 'Rename module' : 'Rename project') : module ? `New module in ${parent.name}` : 'New project'),
         el('p', { class: 'muted' }, project ? 'Its items, canvas and timeline stay as they are.'
-          : module ? 'A module is a canvas of its own, with its own timeline and agent tabs, using the project\'s asset book.'
+          : module ? 'A module is a canvas of its own, with its own timeline and agent tabs, using the project\'s NeuralCore.'
             : 'A project keeps the shots, the canvas and the timeline of one piece of work together.'),
         field('Name', name),
         error,

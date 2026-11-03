@@ -235,12 +235,16 @@ def test_the_servers_that_do_not_answer_are_problems(client):
     import asyncio
     from scene import health
     register(client)
-    found = asyncio.run(health.problems(client.app.state))   # both servers are at an address nothing listens on
-    assert [p["key"] for p in found][:2] == ["render", "model"] and found[0]["level"] == "critical"
-    attention = console(client).get("/api/admin/overview").json()["attention"]
-    assert attention[0]["text"].startswith("The render server") and "model server" in attention[1]["text"]
+    found = asyncio.run(health.problems(client.app.state))   # the render server is at an address nothing listens on
+    assert [p["key"] for p in found][:1] == ["render"] and found[0]["level"] == "critical"
     model = console(client).get("/api/admin/system").json()["model_server"]
-    assert model["online"] is False and model["url"] == "http://127.0.0.1:9" and model["loaded"] == []
+    assert model["online"] is True and model["models"] == ["claude/sonnet", "claude/haiku"]
+    client.app.state.agent.services = {}   # Claude Code not set up: the agent can't plan
+    health.forget(client.app.state, "model")
+    found = asyncio.run(health.problems(client.app.state))
+    assert [p["key"] for p in found][:2] == ["render", "model"] and "Claude Code" in found[1]["text"]
+    attention = console(client).get("/api/admin/overview").json()["attention"]
+    assert attention[0]["text"].startswith("The render server") and "Claude Code" in attention[1]["text"]
 
 
 def test_the_watcher_sends_a_problem_found_twice_and_says_when_it_is_gone(client, monkeypatch):

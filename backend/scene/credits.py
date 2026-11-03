@@ -26,6 +26,10 @@ ASSUMED_SECONDS = 5          # billed when a per-second workflow does not say ho
 FACTORS = {"resolution": {"480": 0.6, "720": 1.0, "1080": 2.0},
            "quality": {"draft": 0.5, "final": 1.0, "low": 0.6, "medium": 0.8, "high": 1.0}}
 RESOLUTION_TIER = {480: "480", 720: "720", 768: "720", 1080: "1080"}
+TIERS = ("480", "720", "1080")
+# Resolutions an admin switched off (the console's Workflows section), in the setting "resolutions_off":
+# {"video": ["1080"], "video/h3_all_in_one": ["480"]}. A kind's list holds for each of its workflows, a workflow's adds to it.
+RESOLUTIONS_OFF = "resolutions_off"
 INR_PER_1000_CREDITS = 100
 ELECTRICITY_INR_PER_KWH = 8
 # What Anthropic charges for a Claude model, in US dollars per million tokens: (input, output, cache read, cache write).
@@ -78,7 +82,7 @@ class Credits:
         return {kind: float(self.db.setting("rate_" + kind, default)) for kind, default in RATES.items()}
 
     def llm_prices(self):
-        """What a message to the agent costs, by model: {"gemini/gemini-3.6-flash": 2}. A model not listed is free."""
+        """What a message to the agent costs, by model: {"claude/opus": 2}. A model not listed is free."""
         try:
             found = json.loads(self.db.setting("llm_prices", "{}") or "{}")
         except ValueError:
@@ -178,6 +182,50 @@ class Credits:
         if chosen.get("quality") is not None:
             factor *= found["quality"].get(str(chosen["quality"]), 1.0)
         return factor
+
+    # ------------------------------------------------------------ resolutions switched off
+
+    def resolutions_off(self):
+        """Every switch: {kind or workflow id: ["1080", ...]}, the tiers in TIERS order."""
+        found = self._json(self.db.setting(RESOLUTIONS_OFF, "") or "{}")
+        return {str(key): [t for t in TIERS if t in {str(v) for v in values}]
+                for key, values in found.items() if isinstance(values, list) and any(str(v) in TIERS for v in values)}
+
+    def set_resolutions_off(self, key, tiers):
+        """Switch off these tiers ("480", "720", "1080") for a kind or one workflow; an empty list switches them all on."""
+        switches = self.resolutions_off()
+        tiers = [t for t in TIERS if t in {str(v) for v in tiers or []}]
+        if tiers:
+            switches[str(key)] = tiers
+        else:
+            switches.pop(str(key), None)
+        self.db.set_setting(RESOLUTIONS_OFF, json.dumps(switches))
+        return tiers
+
+    def tiers_off(self, workflow_id):
+        """The tiers switched off for a workflow: its kind's and its own."""
+        switches = self.resolutions_off()
+        return set(switches.get(kind_of(workflow_id), [])) | set(switches.get(workflow_id, []))
+
+    def allowed_resolutions(self, workflow_id, offered=(480, 720, 768, 1080)):
+        """The resolutions of `offered` (a workflow's, as workflows.describe lists them) that are not switched off. What
+        the agent may choose from; a job asked at another one is made at the next one allowed (fit_resolution)."""
+        off = self.tiers_off(workflow_id)
+        return [r for r in offered if RESOLUTION_TIER.get(_int(r)) not in off]
+
+    def fit_resolution(self, workflow_id, resolution, offered=(480, 720, 768, 1080)):
+        """(the resolution a job is made at, a note saying why it is not the one asked for, or ""). A switched-off one
+        steps down to the largest allowed below it, or else up to the smallest allowed above it. ValueError when the
+        workflow has none left."""
+        asked = _int(resolution)
+        allowed = self.allowed_resolutions(workflow_id, offered)
+        if asked is None or asked in allowed or RESOLUTION_TIER.get(asked) is None:
+            return resolution, ""
+        if not allowed:
+            raise ValueError("Every resolution of this workflow is switched off for now. Try another workflow.")
+        below = [r for r in allowed if r < asked]
+        used = max(below) if below else min(allowed)
+        return used, "{}p is switched off for this workflow, so it is made at {}p.".format(asked, used)
 
     @staticmethod
     def _json(text):

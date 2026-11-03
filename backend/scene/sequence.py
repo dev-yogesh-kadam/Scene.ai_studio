@@ -14,6 +14,7 @@ LOOKS = {   # ground, ink, soft, mark
     "light": ("#f4f4f2", "#171614", "#5c5852", "#c77700"),
     "warm": ("#26170f", "#f6e7d3", "#cfae8c", "#ff8a3d"),
     "cool": ("#0b1522", "#e8f1fa", "#9db4c9", "#5cb8ff"),
+    "clear": ("transparent", "#f7f4ef", "#e4dfd7", "#ffa51f"),   # no ground: a see-through overlay (rendered with alpha)
 }
 MAX_SCENES = 12
 MAX_ITEMS = 5
@@ -87,9 +88,13 @@ def _scene_markup(scene):
     return '<div class="bar"></div><h1 class="a">{}</h1>{}'.format(heading or text, '<p class="a">{}</p>'.format(text) if heading and text else "")
 
 
-def page(scenes, look, width, height):
-    """The HyperFrames composition for the scenes, as one HTML page. Returns (html, seconds)."""
+def page(scenes, look, width, height, alpha=False):
+    """The HyperFrames composition for the scenes, as one HTML page. Returns (html, seconds). The "clear" look has no
+    ground and a soft shadow under its words, so they read over any picture; it is see-through only when rendered
+    with alpha (motion.render_sequence), and on the dark ground otherwise."""
     ground, ink, soft, mark = LOOKS.get(look, LOOKS["dark"])
+    if ground == "transparent" and not alpha:
+        ground = LOOKS["dark"][0]
     parts, plan, at = [], [], 0.0
     for n, scene in enumerate(scenes):
         parts.append('<section id="s{n}" class="clip scene {kind}" data-start="{at}" data-duration="{d}" data-track-index="{n}">{inner}</section>'.format(
@@ -97,8 +102,11 @@ def page(scenes, look, width, height):
         plan.append({"id": "#s{}".format(n), "at": round(at, 3), "for": scene["seconds"], "kind": scene["kind"]})
         at += scene["seconds"]
     total = round(at, 3)
-    return PAGE.format(width=width, height=height, total=total, ground=ground, ink=ink, soft=soft, mark=mark,
-                       scenes="\n      ".join(parts), plan=json.dumps(plan)), total
+    made = PAGE.format(width=width, height=height, total=total, ground=ground, ink=ink, soft=soft, mark=mark,
+                       scenes="\n      ".join(parts), plan=json.dumps(plan))
+    if look == "clear":
+        made = made.replace("</style>", "  #root { text-shadow: 0 0.3vmin 1.4vmin rgba(0, 0, 0, 0.6); }\n    </style>", 1)
+    return made, total
 
 
 PAGE = """<!doctype html>

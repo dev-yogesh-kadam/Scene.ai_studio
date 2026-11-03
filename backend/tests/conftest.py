@@ -40,15 +40,36 @@ def empty_postgres():
         conn.execute("CREATE SCHEMA public")
 
 
+TEST_CLAUDE = {"id": "claude", "name": "Claude", "url": "claude-code", "key": "", "models": ["sonnet", "haiku"], "only": "",
+               "cli": str(ROOT / "no-such-claude.exe"), "timeout": 30, "fast": "", "home": "", "window": 1_000_000}
+
+
+def with_claude(agent):
+    """The agent with TEST_CLAUDE as its model. A test that fakes ask() stands for Claude answering the whole message in
+    one call, with no tool calls: ask_with_tools hands the message to it."""
+    agent.services = {"claude": dict(TEST_CLAUDE, models=list(TEST_CLAUDE["models"]))}
+    looping = agent.ask_with_tools
+
+    async def ask_with_tools(system, message, workflow_ids, tools, finishing=None, **kwargs):
+        if "ask" in vars(agent):
+            return await agent.ask(system, message, workflow_ids, **({"model": kwargs["model"]} if kwargs.get("model") else {}))
+        return await looping(system, message, workflow_ids, tools, finishing, **kwargs)
+    agent.ask_with_tools = ask_with_tools
+    return agent
+
+
 @pytest.fixture
 def client(tmp_path):
     """The app with empty storage and a render server address nothing listens on."""
     if POSTGRES:
         empty_postgres()
-    # local_tools off: these tests fake a local model that answers once; the tool loop of local models has tests of its own.
-    settings = Settings(database_url=POSTGRES, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", ollama_url="http://127.0.0.1:9", local_tools=False, gpu_shared="off", storage_dir=str(tmp_path), signup_credits=500, first_account_local=False,
+    # Claude Code is never run by a test: the real one is switched off, and the agent is given a Claude of its own
+    # whose program does not exist (a test that reaches it fails), as faked by each test (fake_claude, hosted, model).
+    settings = Settings(database_url=POSTGRES, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
+                        storage_dir=str(tmp_path), signup_credits=500, first_account_local=False,
                         workflows_dir=str(ROOT / "workflows"), frontend_dir=str(ROOT / "frontend"))
     with TestClient(create_app(settings)) as test_client:
+        with_claude(test_client.app.state.agent)
         # The video workflow is a normal ComfyUI save: it is read with the node definitions a real server gave.
         test_client.app.state.catalog.saved = json.loads((BACKEND / "tests" / "fixtures" / "node_definitions.json").read_text(encoding="utf-8"))
         # The admin console: a site of its own beside the studio, with its own sign-in and cookie (test_api.console).

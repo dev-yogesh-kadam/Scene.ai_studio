@@ -46,17 +46,39 @@ def test_a_plan_comes_with_what_the_agent_did_and_thought(client, monkeypatch):
     plan = client.post("/api/agent/plan", json={"instruction": "a short ad for a pet shop"}).json()
     assert plan["thought"] == "A pet shop ad: one 6 s portrait shot of a dog." and plan["seconds"] >= 0
     said = [(e["type"], e.get("icon"), e.get("text")) for e in plan["activity"]]
-    assert ("activity", "book", "Opened the asset book: 1 entry") in said
+    assert ("activity", "book", "Opened NeuralCore: 1 entry") in said
     assert ("activity", "look", "Looked at 2 new pictures") in said
     assert ("activity", "skill", "Read the skill “An ad, a promo or a product video”") in said
     assert ("activity", "skip", "Left out “Bad”: there is no workflow “video/nope” it can use") in said
     assert said[-1] == ("activity", "plan", "Checked and priced 1 step")
     thought = next(e for e in plan["activity"] if e["type"] == "thought")
     assert thought["text"].startswith("A pet shop ad") and thought["seconds"] >= 0
-    # an item the model was given becomes a small picture; ids it made up are taken out
-    assert plan["chips"] == {"item:%d" % dog: {"name": "Brown dog", "kind": "image"}}
+    # an item the model was given becomes a small picture, with its studio link; ids it made up are taken out, and said
+    public = client.app.state.db.one("SELECT public_id FROM generations WHERE id = ?", (dog,))["public_id"]
+    assert plan["chips"] == {"item:%d" % dog: {"name": "Brown dog", "kind": "image", "link": "/api/m/" + public}}
     assert "[[item:%d]]" % dog in plan["reply"] and "99999" not in plan["reply"] and "asset:77" not in plan["reply"]
+    assert plan["reply"].endswith(agent.MISSING)
     assert [s["name"] for s in plan["steps"]] == ["Dog in the park"]
+
+
+def test_the_film_a_long_run_made_is_handed_over_when_asked(client, monkeypatch):
+    me = register(client)
+    film = client.post("/api/projects", json={"name": "Ep 6"}).json()["id"]
+    db = client.app.state.db
+    made = db.run("INSERT INTO generations (user_id, project_id, workflow, kind, name, filename, summary, settings, context, run, created) "
+                  "VALUES (?, ?, 'edit/film', 'video', 'Film on the master audio', 'f.mp4', '', '{}', '{}', 'abcdefghijkl', 2)", (me["id"], film))
+    trim = db.run("INSERT INTO generations (user_id, project_id, workflow, kind, name, filename, summary, settings, context, run, created) "
+                  "VALUES (?, ?, 'edit/trim', 'video', 'Trim to frames', 't.mp4', '', '{}', '{}', 'abcdefghijkl', 3)", (me["id"], film))
+    elsewhere = item(client, me["id"], "Not in this project")
+    asked = model(monkeypatch, client, {"thought": "They want the film.", "steps": [],
+                                        "reply": "Here it is:\n[[show:item:%d]]\n[[item:%d]] [[item:%d]]" % (made, trim, elsewhere)})
+    plan = client.post("/api/agent/plan", json={"instruction": "give me the final video here", "project_id": film}).json()
+    # the whole film is among the recent items the model is given, the run's working files are not
+    assert '"id": %d' % made in asked[0] and '"id": %d' % trim not in asked[0]
+    assert plan["chips"]["item:%d" % made]["name"] == "Film on the master audio"
+    assert plan["chips"]["item:%d" % made]["link"].startswith("/api/m/")
+    assert "item:%d" % trim in plan["chips"]   # named by its id: of this project, so shown
+    assert "item:%d" % elsewhere not in plan["chips"] and plan["reply"].endswith(agent.MISSING)
 
 
 def test_a_second_try_is_in_the_log(client, monkeypatch):

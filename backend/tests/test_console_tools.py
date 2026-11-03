@@ -94,7 +94,7 @@ def test_the_overview_has_a_health_summary_and_the_console_hears_the_queue(clien
     desk.put("/api/admin/queue", json={"paused": True})
     post_job(client)
     health = desk.get("/api/admin/overview").json()["health"]
-    assert health["render"] is False and health["model"] is False and health["alerts"] == 0 and health["disk_free"] > 0
+    assert health["render"] is False and health["model"] is True and health["alerts"] == 0 and health["disk_free"] > 0
     assert health["maintenance"] is False and "node_list" in health
     assert client.app.state.hub.queue() == {"running": 0, "waiting": 1}
     with desk.websocket_connect("/api/console/events") as ws:

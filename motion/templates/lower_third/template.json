@@ -6,6 +6,7 @@
     {"id": "title", "label": "Name", "type": "text", "max": 40, "required": true, "placeholder": "Mira Laurent"},
     {"id": "subtitle", "label": "Line under it (optional)", "type": "text", "max": 60, "placeholder": "Harbour pilot"},
     {"id": "at", "label": "Comes in after", "type": "choice", "choices": [0.5, 1, 2], "default": 0.5, "unit": " s"},
-    {"id": "hold", "label": "Stays for", "type": "choice", "choices": [2, 3, 4, 6], "default": 3, "unit": " s"}
+    {"id": "hold", "label": "Stays for", "type": "choice", "choices": [2, 3, 4, 6], "default": 3, "unit": " s"},
+    {"id": "background", "label": "Behind the words", "type": "choice", "choices": ["video", "clear"], "default": "video", "names": {"video": "The video", "clear": "Nothing (a see-through overlay)"}}
   ]
 }

@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, media, moderation, phone, roles, sessions, skills, staff, vault, versions
+from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, skills, staff, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..config import ROOT
@@ -40,7 +40,18 @@ DONE_FAILED = COUNT_IF.format("status = 'done'") + " AS done, " + COUNT_IF.forma
 def _settings(state):
     return {"comfy_url": state.comfy.url, "allow_signup": signup_open(state),
             "signup_credits": state.credits.signup, "daily_cap": state.credits.daily_cap,
-            "admin_mfa": state.db.setting("admin_mfa", "0") == "1"}
+            "admin_mfa": state.db.setting("admin_mfa", "0") == "1",
+            # Langfuse (docs/langfuse.md): whether the words are sent with the numbers, and the share of the agent's turns
+            # (in percent) the fast model grades
+            "langfuse_words": state.db.setting("langfuse_words", "1") != "0",
+            "langfuse_grade_share": _share(state.db.setting("langfuse_grade_share", "0"))}
+
+
+def _share(value):
+    try:
+        return min(100.0, max(0.0, float(value or 0)))
+    except ValueError:
+        return 0.0
 
 
 def _number(body, key, maximum):
@@ -645,6 +656,7 @@ async def workflow_report(request: Request, user: dict = Depends(admin_user)):
     nodes = state.catalog.object_info or state.catalog.saved
     files = state.catalog.files()
     items = await state.catalog.listing()
+    switches = state.credits.resolutions_off()
     for item in items:
         path = files[item["id"]]
         used = usage.get(item["id"], {})
@@ -656,9 +668,10 @@ async def workflow_report(request: Request, user: dict = Depends(admin_user)):
                     jobs=used.get("jobs", 0), done=used.get("done", 0) or 0, failed=used.get("failed", 0) or 0,
                     avg_seconds=used.get("avg_seconds"), last_used=used.get("last_used"),
                     audience=versions.audience(state.credits.pricing(item["id"])), example=state.credits.cost(item["id"], 5),
-                    missing=needs, versions=kept.get(item["id"], {}).get("versions", 0), changed=kept.get(item["id"], {}).get("changed"))
+                    missing=needs, versions=kept.get(item["id"], {}).get("versions", 0), changed=kept.get(item["id"], {}).get("changed"),
+                    resolutions_off=switches.get(item["id"], []))
     return {"workflows": items, "folder": str(state.catalog.directory), "nodes_saved": state.catalog.nodes_saved(),
-            "new_admins_only": state.db.setting("new_workflows_admins_only", "0") == "1", **state.versions.drops()}
+            "new_admins_only": state.db.setting("new_workflows_admins_only", "0") == "1", "resolutions_off": switches, **state.versions.drops()}
 
 
 @router.get("/workflows/history")
@@ -689,6 +702,30 @@ async def workflow_settings(body: dict, request: Request, user: dict = Depends(a
     request.app.state.db.set_setting("new_workflows_admins_only", "1" if hold else "0")
     audit.record(request, user, "New workflows start for admins only" if hold else "New workflows start for everyone")
     return {"new_admins_only": hold}
+
+
+@router.get("/workflows/resolutions")
+async def workflow_resolutions(request: Request, user: dict = Depends(admin_user)):
+    """The resolutions switched off, for each kind and each workflow: {"tiers", "kinds", "off": {kind or id: [tier]}}."""
+    return {"tiers": list(credits_module.TIERS), "kinds": list(KINDS) + ["upscaler"], "off": request.app.state.credits.resolutions_off()}
+
+
+@router.put("/workflows/resolutions")
+async def set_workflow_resolutions(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """{key: a kind ("video") or a workflow id, off: ["1080", ...]}: switch those resolutions off for every workflow of the
+    kind, or for the one workflow. A job asked at one of them is made at the next one allowed, and says so."""
+    state = request.app.state
+    key, off = str(body.get("key") or ""), body.get("off")
+    if key not in KINDS and key != "upscaler" and key not in state.catalog.files():
+        raise HTTPException(404, "There is no workflow or kind named '{}'.".format(key))
+    if not isinstance(off, list) or any(str(t) not in credits_module.TIERS for t in off):
+        raise HTTPException(400, "Name the resolutions to switch off: 480, 720 or 1080.")
+    if len({str(t) for t in off}) == len(credits_module.TIERS):
+        raise HTTPException(400, "Leave at least one resolution on. To stop a workflow, switch it off instead.")
+    tiers = state.credits.set_resolutions_off(key, off)
+    audit.record(request, user, "Switched resolutions off" if tiers else "Switched every resolution on", key,
+                 ", ".join(t + "p" for t in tiers) or "all on")
+    return {"key": key, "off": tiers}
 
 
 @router.post("/workflows/nodes")
@@ -862,7 +899,7 @@ async def audit_log(request: Request, q: str = "", user: dict = Depends(admin_us
 
 @router.get("/endpoints")
 async def list_endpoints(request: Request, fresh: bool = False, user: dict = Depends(admin_user)):
-    """The ComfyUI servers, Ollama servers and hosted APIs, each with whether it answers (endpoints.py): as found in the
+    """The ComfyUI servers, each with whether it answers (endpoints.py): as found in the
     last few seconds, or now (`fresh`, the section's Check again)."""
     state = request.app.state
     found = await health.remembered(state, "endpoints", lambda: endpoints.status(state), fresh)
@@ -870,7 +907,6 @@ async def list_endpoints(request: Request, fresh: bool = False, user: dict = Dep
 
 
 def _endpoints_changed(state, main_before):
-    endpoints.apply(state.db, state.agent, state.settings)
     health.forget(state, "endpoints")   # the section shows the change at once
     health.forget(state, "status")
     if state.comfy.url != main_before:   # another main server: its nodes are read again
@@ -943,6 +979,10 @@ async def put_settings(body: dict, request: Request, user: dict = Depends(admin_
             raise HTTPException(400, "Turn on two-step sign-in for your own account first (Settings, Two-step sign-in), "
                                      "so this does not lock you out.")
         state.db.set_setting("admin_mfa", "1" if body["admin_mfa"] else "0")
+    if "langfuse_words" in body:
+        state.db.set_setting("langfuse_words", "1" if body["langfuse_words"] else "0")
+    if "langfuse_grade_share" in body:
+        state.db.set_setting("langfuse_grade_share", _number(body, "langfuse_grade_share", 100))
     after = _settings(state)
     changed = ["{}: {} to {}".format(k.replace("_", " "), before[k], after[k]) for k in after if after[k] != before[k]]
     if changed:
@@ -965,7 +1005,7 @@ IN_PROJECT = "({0}.project_id = p.id OR {0}.project_id IN (SELECT m.id FROM proj
 
 @router.get("/projects")
 async def list_projects(request: Request, q: str = "", user: dict = Depends(admin_user)):
-    """Every user's projects, the most recently used first: their modules, asset book, items, jobs and space. `q` finds
+    """Every user's projects, the most recently used first: their modules, NeuralCore, items, jobs and space. `q` finds
     a project by its name, its owner, or its id or one of its modules' (PRJ..., MOD..., from a link)."""
     where, params = "p.parent_id IS NULL", []
     if q.strip():
@@ -987,7 +1027,7 @@ async def list_projects(request: Request, q: str = "", user: dict = Depends(admi
 
 @router.get("/projects/{project_id}")
 async def project_detail(project_id: int, request: Request, user: dict = Depends(admin_user)):
-    """One project: its owner, its modules, its asset book (the entries the agent and the canvas use by name) and its
+    """One project: its owner, its modules, its NeuralCore (the entries the agent and the canvas use by name) and its
     latest items."""
     db = request.app.state.db
     project = db.one("SELECT p.*, u.name AS user_name, u.email AS user_email FROM projects p JOIN users u ON u.id = p.user_id "
@@ -1143,7 +1183,10 @@ async def agent_report(request: Request, days: int = 7, user: dict = Depends(adm
                                                 "GROUP BY model ORDER BY calls DESC", (since,))],
         "by_purpose": [_speed(r) for r in db.all("SELECT purpose, " + CALL_STATS + " FROM agent_calls WHERE started > ? "
                                                   "GROUP BY purpose ORDER BY calls DESC", (since,))],
-        "runs": sorted(runs.values(), key=lambda r: r["started"], reverse=True)[:40],
+        "runs": [dict(r, trace=None if r["run"].startswith("call-") else langfuse_trace.trace_id(r["run"]))
+                 for r in sorted(runs.values(), key=lambda r: r["started"], reverse=True)[:40]],
+        # where a run's trace opens in Langfuse ({url}/project/{project}/traces/{trace}), when one is in use
+        "langfuse": await state.traces.langfuse.link(),
     }
 
 
@@ -1158,7 +1201,8 @@ async def agent_run(run: str, request: Request, user: dict = Depends(admin_user)
     if not found:
         raise HTTPException(404, "No such run.")
     who = db.one("SELECT name, email FROM users WHERE id = ?", (found[0]["user_id"],)) if found[0]["user_id"] else None
-    return {"run": run, "calls": found, "user": who}
+    return {"run": run, "calls": found, "user": who, "trace": None if run.startswith("call-") else langfuse_trace.trace_id(run),
+            "langfuse": await request.app.state.traces.langfuse.link()}
 
 
 @router.get("/agent/calls/{call_id}")
@@ -1186,6 +1230,35 @@ async def replay_call(call_id: int, body: dict, request: Request, user: dict = D
     audit.record(request, user, "Replayed an agent call", str(call_id), answer.get("_model") or "")
     return {"model": answer.get("_model"), "seconds": round(time.time() - started, 2), "usage": answer.get("_usage"),
             "answer": {k: v for k, v in answer.items() if not k.startswith("_")}, "pictures_left_out": pictures}
+
+
+@router.post("/agent/calls/{call_id}/dataset")
+async def call_to_dataset(call_id: int, body: dict, request: Request, user: dict = Depends(admin_user)):
+    """Keep this call in a Langfuse dataset, to test the agent's prompts and models against later: {dataset, note?}.
+    The dataset is made when it is not there. What was sent is the item's input, the answer what is expected."""
+    state = request.app.state
+    row = state.db.one("SELECT id, run FROM agent_calls WHERE id = ?", (call_id,))
+    if row is None:
+        raise HTTPException(404, "No such call.")
+    name = " ".join(str(body.get("dataset") or "").split())[:100]
+    if not name:
+        raise HTTPException(400, "Name the dataset.")
+    kept = state.traces.exchange(call_id)
+    if not kept:
+        raise HTTPException(404, "The words of this call are no longer kept: they are kept for a week.")
+    sender = state.traces.langfuse
+    if not sender.words():
+        raise HTTPException(400, "Words are not sent to Langfuse (Settings, Langfuse). Turn that on to keep calls in a dataset.")
+    try:
+        item = await sender.to_dataset(name, kept["messages"], kept["answer"], row["run"], str(body.get("note") or "").strip()[:500])
+    except LookupError as error:
+        raise HTTPException(400, str(error))
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(502, "Langfuse refused it ({}): {}".format(error.response.status_code, error.response.text[:200]))
+    except httpx.HTTPError as error:
+        raise HTTPException(502, "Langfuse did not answer ({}).".format(type(error).__name__))
+    audit.record(request, user, "Kept an agent call in a Langfuse dataset", str(call_id), name)
+    return {"dataset": name, "item": item.get("id")}
 
 
 @router.put("/agent/roles")
@@ -1748,6 +1821,36 @@ async def admin_delete_skill(skill_id: str, request: Request, user: dict = Depen
     if not skills.remove(skill_id):
         raise HTTPException(404, "No such skill.")
     audit.record(request, user, "Deleted skill", skill_id)
+    return {"ok": True}
+
+
+# Skills drafted in a chat ("make this a skill", the agent's skill_draft): they wait here until an admin publishes them.
+
+@router.get("/skills/drafts")
+async def admin_list_skill_drafts(user: dict = Depends(admin_user)):
+    """The drafts waiting, newest first, with who drafted each."""
+    return {"drafts": skills.drafts(), "can_publish": user["role"] == "admin"}
+
+
+@router.post("/skills/drafts/{draft_id}/publish")
+async def admin_publish_skill_draft(draft_id: str, body: dict, request: Request, user: dict = Depends(admin_user)):
+    """Make a draft a skill the agent uses, with the admin's changes to its title, desc, words or text. Admins only."""
+    if user["role"] != "admin":
+        raise HTTPException(403, "Only an admin can publish a skill.")
+    try:
+        saved = skills.publish(draft_id, {k: v for k, v in (body or {}).items() if k in ("title", "desc", "words", "text")})
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    audit.record(request, user, "Published skill", saved["id"], saved["title"])
+    return {"skill": {"id": saved["id"], "title": saved["title"], "desc": saved["desc"], "version": saved["version"],
+                      "words": saved["words"].pattern, "text": saved["text"]}}
+
+
+@router.delete("/skills/drafts/{draft_id}")
+async def admin_discard_skill_draft(draft_id: str, request: Request, user: dict = Depends(admin_user)):
+    if not skills.discard(draft_id):
+        raise HTTPException(404, "No such draft.")
+    audit.record(request, user, "Discarded skill draft", draft_id)
     return {"ok": True}
 
 

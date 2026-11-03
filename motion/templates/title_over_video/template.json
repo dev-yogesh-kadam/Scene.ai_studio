@@ -6,6 +6,7 @@
     {"id": "title", "label": "Title", "type": "text", "max": 60, "required": true, "placeholder": "The harbour"},
     {"id": "subtitle", "label": "Line under it (optional)", "type": "text", "max": 90, "placeholder": "Six in the morning"},
     {"id": "place", "label": "Where", "type": "choice", "choices": ["centre", "top", "bottom"], "default": "centre"},
-    {"id": "hold", "label": "Stays for", "type": "choice", "choices": [2, 3, 4, 0], "default": 3, "unit": " s", "names": {"0": "The whole video"}}
+    {"id": "hold", "label": "Stays for", "type": "choice", "choices": [2, 3, 4, 0], "default": 3, "unit": " s", "names": {"0": "The whole video"}},
+    {"id": "background", "label": "Behind the words", "type": "choice", "choices": ["video", "clear"], "default": "video", "names": {"video": "The video", "clear": "Nothing (a see-through overlay)"}}
   ]
 }

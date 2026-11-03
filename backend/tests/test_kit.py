@@ -109,7 +109,7 @@ def test_the_agent_keeps_and_names_entries_itself(client, monkeypatch):
     seen = hosted(monkeypatch, client, {"tool": "book_save", "item": sheet, "text": "Maya", "op": "character", "settings": "always"},
                   {"tool": "finish", "reply": "Kept Maya.", "steps": []})
     plan = client.post("/api/agent/plan", json={"instruction": "keep that sheet as Maya", "project_id": project}).json()
-    assert plan["reply"] == "Kept Maya." and any(e["text"] == "Kept “Maya” (character) in the asset book" for e in plan["activity"])
+    assert plan["reply"] == "Kept Maya." and any(e["text"] == "Kept “Maya” (character) in NeuralCore" for e in plan["activity"])
     told = [m["content"] for m in seen[-1] if m["role"] == "user"]
     entry = json.loads(next(t for t in told if t.startswith("Result of book_save")).split("\n", 1)[1])
     assert entry["name"] == "Maya" and entry["always"] is True
@@ -118,12 +118,12 @@ def test_the_agent_keeps_and_names_entries_itself(client, monkeypatch):
            {"tool": "finish", "reply": "Renamed.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "her name is Maya Rao", "project_id": project})
     assert [e["name"] for e in kit.entries(client.app.state.db, me["id"], project)] == ["Maya Rao"]
-    # outside a project there is no asset book: the agent is told so, and nothing is kept
+    # outside a project there is no NeuralCore: the agent is told so, and nothing is kept
     seen = hosted(monkeypatch, client, {"tool": "book_save", "item": sheet, "text": "Lone", "op": "character"},
                   {"tool": "finish", "reply": "No project.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "keep it as Lone"})
     told = [m["content"] for m in seen[-1] if m["role"] == "user"]
-    assert any("There is no asset book here" in t for t in told)
+    assert any("There is no NeuralCore here" in t for t in told)
     assert not client.app.state.db.one("SELECT 1 FROM assets WHERE name = 'Lone'")
 
 
@@ -139,7 +139,7 @@ def test_a_long_run_keeps_pictures_nobody_named_and_the_agent_is_told_to_ask(cli
                                                 "run": "pm-k", "project_id": project}).json()
     entries = {e["name"]: e for e in kit.entries(client.app.state.db, me["id"], project)}
     assert entries["Maya"]["named"] == 1 and entries["stranger"]["named"] == 0
-    assert any(e["text"] == "Kept 1 picture without a name in the asset book" for e in plan["activity"])
+    assert any(e["text"] == "Kept 1 picture without a name in NeuralCore" for e in plan["activity"])
     told = seen[0][1]["content"]
     assert '"unnamed": true' in told and "ask the" in seen[0][0]["content"]
     # named later, it is an entry like any other
@@ -150,12 +150,12 @@ def test_a_long_run_keeps_pictures_nobody_named_and_the_agent_is_told_to_ask(cli
 def test_assets_of_no_project_are_not_used_anywhere(client):
     me = register(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
-    for origin in ("saved", "kit", "upload"):   # what was kept before every asset book belonged to a project
+    for origin in ("saved", "kit", "upload"):   # what was kept before every NeuralCore belonged to a project
         client.app.state.db.run("INSERT INTO assets (user_id, name, tag, kind, filename, size, created, origin) "
                                 "VALUES (?, 'Meera', 'character', 'image', 'meera.png', 1, 1, ?)", (me["id"], origin))
     listed = client.get("/api/kit?project=%d" % project).json()
     assert listed["entries"] == [] and "earlier" not in listed
-    assert client.get("/api/kit").json() == {"entries": [], "project": False, "types": listed["types"]}
+    assert client.get("/api/kit").json() == {"entries": [], "project": False, "module": False, "types": listed["types"]}
     assert memory.book(client.app.state.db, me["id"], project) == [] and memory.book(client.app.state.db, me["id"], 0) == []
     assert client.post("/api/kit/import", json={"project_id": project, "ids": [1]}).status_code in (404, 405)
 

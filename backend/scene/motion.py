@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -88,10 +89,12 @@ def clean(template, values):
     return out
 
 
-async def render(template_id, values, target, source=None, node="", work_dir=None):
+async def render(template_id, values, target, source=None, node="", work_dir=None, alpha=False):
     """Render one template to the video file `target`. source: the video a template is laid over.
+    alpha (or the template's "background" set to "clear"): only the words, on nothing, as a see-through WebM at the
+    video's size and length, for laying over it (or another) later; see _produce.
 
-    Returns {"seconds", "width", "height"} of the result."""
+    Returns {"seconds", "width", "height"} of the result, and "file" when it was written elsewhere than `target`."""
     template = next((t for t in templates() if t["id"] == template_id), None)
     if template is None:
         raise MotionError("There is no motion template called {}.".format(template_id))
@@ -99,6 +102,7 @@ async def render(template_id, values, target, source=None, node="", work_dir=Non
     if not ready["ready"]:
         raise MotionError(ready["detail"])
     values = clean(template, values)
+    alpha = alpha or values.pop("background", "video") == "clear"
 
     sound = "muted"
     if template["needs"] == "video":
@@ -110,7 +114,7 @@ async def render(template_id, values, target, source=None, node="", work_dir=Non
         if found["seconds"] > MAX_SOURCE_SECONDS:
             raise MotionError("The video is longer than {} s. Trim it first.".format(MAX_SOURCE_SECONDS))
         width, height, seconds, fps = found["width"] // 2 * 2, found["height"] // 2 * 2, round(found["seconds"], 3), media.FPS
-        sound = 'data-has-audio="true"' if found["audio"] else "muted"
+        sound = 'data-has-audio="true"' if found["audio"] and not alpha else "muted"
     else:
         width, height = SHAPES[values.pop("shape", "landscape")]
         seconds, fps = float(values.pop("seconds", 5)), CARD_FPS
@@ -120,29 +124,35 @@ async def render(template_id, values, target, source=None, node="", work_dir=Non
         page = (project / "index.html").read_text(encoding="utf-8")
         for mark, value in (("__WIDTH__", width), ("__HEIGHT__", height), ("__DURATION__", seconds), ("__SOUND__", sound)):
             page = page.replace(mark, str(value))
+        if alpha:   # the words alone: no video under them, nothing behind the page
+            page = re.sub(r'<video id="clip"[^>]*>\s*</video>', "", page)
+            page = page.replace("</head>", "<style>html, body { background: transparent !important; }</style>\n  </head>", 1)
         (project / "index.html").write_text(page, encoding="utf-8")
-        if source is not None:
+        if source is not None and not alpha:
             shutil.copy(source, project / "clip.mp4")
 
-    return await _produce(fill, values, target, fps, template["title"], node, work_dir)
+    return await _produce(fill, values, target, fps, template["title"], node, work_dir, alpha)
 
 
-async def render_sequence(scenes, look, shape, target, node="", work_dir=None):
-    """Render a video made of scenes of words (see sequence.py) to the video file `target`.
+async def render_sequence(scenes, look, shape, target, node="", work_dir=None, alpha=False):
+    """Render a video made of scenes of words (see sequence.py) to the video file `target`. alpha: see-through (the
+    "clear" look's words on nothing), see _produce.
 
-    Returns {"seconds", "width", "height"} of the result."""
+    Returns {"seconds", "width", "height"} of the result, and "file" when it was written elsewhere than `target`."""
     ready = status(node)
     if not ready["ready"]:
         raise MotionError(ready["detail"])
     width, height = SHAPES.get(shape, SHAPES["landscape"])
-    page, _ = sequence.page(scenes, look, width, height)
+    page, _ = sequence.page(scenes, look, width, height, alpha)
     return await _produce(lambda project: (project / "index.html").write_text(page, encoding="utf-8"), {}, target, CARD_FPS,
-                          "Sequence", node, work_dir)
+                          "Sequence", node, work_dir, alpha)
 
 
-async def _produce(fill, values, target, fps, name, node, work_dir):
-    """Build a HyperFrames project in a temporary folder (fill(project) writes its index.html) and render it."""
-    target = Path(target)
+async def _produce(fill, values, target, fps, name, node, work_dir, alpha=False):
+    """Build a HyperFrames project in a temporary folder (fill(project) writes its index.html) and render it.
+    alpha: rendered see-through, as a WebM (VP9 with alpha: it plays see-through in a browser, and ffmpeg keeps the
+    alpha when it decodes it with libvpx, see montage.composite) next to `target`, with the type .webm."""
+    target = Path(target).with_suffix(".webm") if alpha else Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if work_dir:
         Path(work_dir).mkdir(parents=True, exist_ok=True)
@@ -156,11 +166,13 @@ async def _produce(fill, values, target, fps, name, node, work_dir):
             shutil.copy(MOTION_DIR / "node_modules" / "gsap" / "dist" / "gsap.min.js", project / "gsap.min.js")
             shutil.copy(FONT, project / "Archivo.woff2")
             await _run([node_path(node), str(CLI), "render", str(project), "--output", str(target), "--fps", str(fps),
+                        *(["--format", "webm"] if alpha else []),
                         "--variables-file", str(project / "variables.json"), "--quiet"], project)
     if not target.is_file() or not target.stat().st_size:
         raise MotionError("HyperFrames finished without making a video.")
     made = await media.probe(target)
-    return {"seconds": made["seconds"], "width": made["width"], "height": made["height"]}
+    return {"seconds": made["seconds"], "width": made["width"], "height": made["height"],
+            **({"file": target, "alpha": True} if alpha else {})}
 
 
 async def _run(command, folder):

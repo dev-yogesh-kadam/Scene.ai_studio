@@ -19,7 +19,7 @@ import httpx
 import websockets
 from fastapi import HTTPException
 
-from . import edits, errors, gpu, health, media, memory, moderation, motion, sequence, sharing
+from . import core, edits, errors, health, langfuse_trace, media, memory, moderation, motion, placement, sequence, sharing, traces
 from .comfy import workflows
 from .agent import AgentError
 from .comfy.client import ComfyError
@@ -61,8 +61,9 @@ class JobManager:
         self.tmp_dir = Path(tmp_dir)    # working files of chained videos
         self.notify = notify      # notify(user_id, library_changed=False)
         self.live = {}            # job id -> progress of the running job (not stored)
-        self.gpu = gpu.Gate(lambda: False)   # the GPU it may share with the agent's model (main.py sets the real one)
         self.agent = None         # the agent's model, which writes the captions some image models need (main.py sets it)
+        self.langfuse = None      # each finished job, as a span of its turn's trace (langfuse_trace.Sender; main.py sets it)
+        self.finished = []        # functions(job, status) told when a job ends (aftercare.install: the agent checks its shots)
         self.wake = asyncio.Event()
         self.hold_offline = True    # renders wait for the render server instead of failing (settings.hold_queue_offline)
         self.server_down = False    # the render server did not answer the last time a render was about to start
@@ -123,6 +124,9 @@ class JobManager:
             if cost:
                 self.credits.add(user_id, cost, "refund", note="Prompt refused")
             raise HTTPException(400, "This prompt can't be made here. Change its words and try again.")
+        # The turn it belongs to, for Langfuse: the one the agent planned it in (a plan's step carries it to its
+        # approval), else the one queueing it now.
+        settings["turn"] = langfuse_trace.job_turn(settings) or traces.mark()
         job_id = uuid.uuid4().hex[:12]
         self.db.run(
             "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, summary, status, est_seconds, cost, "
@@ -200,6 +204,7 @@ class JobManager:
                 self.live[job["id"]]["comfy"] = self.pool.client(server["url"]) if self.pool else self.comfy
             self.db.run("UPDATE jobs SET status = 'running', started = ?, server = ? WHERE id = ?",
                         (job["started"], name, job["id"]))
+            job["server"], job["server_url"] = name, server["url"] if server is not None else ""
             self._notify_all_waiting(job["user_id"])
             if local:
                 await self._work(job, local)
@@ -258,6 +263,7 @@ class JobManager:
             return
         self.db.run("UPDATE jobs SET status = ?, error = ?, finished = ? WHERE id = ?",
                     (status, error, time.time(), job["id"]))
+        self._traced(job, status, error)
         if status == "done":
             self.db.run("UPDATE jobs SET credits_reserved = 0, credits_consumed = cost, output_size = "
                         "(SELECT SUM(size) FROM generations WHERE job_id = jobs.id) WHERE id = ?", (job["id"],))
@@ -269,6 +275,11 @@ class JobManager:
                 if person != job["user_id"]:
                     self.notify(person, library_changed=True)
         self._notify_all_waiting(None)
+        for told in self.finished:   # what is done once a job ends must never stop the queue
+            try:
+                told(job, status)
+            except Exception as problem:
+                print("A finished job's follow-up failed: {}".format(problem))
 
     async def _render_server_up(self):
         try:
@@ -292,6 +303,27 @@ class JobManager:
             self.db.run("UPDATE jobs SET priority = ? WHERE id = ? AND status = 'queued'", (top + 1, job_id))
         self._notify_all_waiting(None)
 
+    def _traced(self, job, status, error):
+        """The job, finished, as a span of its turn's trace in Langfuse: how long it waited and ran, where, and its price.
+        Nothing here may stop the queue."""
+        if self.langfuse is None:
+            return
+        try:
+            turn = langfuse_trace.job_turn(job["settings"]) or {"run": "", "name": "Render"}
+            options = job["settings"].get("options") if isinstance(job["settings"].get("options"), dict) else {}
+            ended = time.time()
+            self.langfuse.span(
+                "{} {}".format("edit" if edits.is_edit(job["workflow"]) else "render", job["workflow"]), job["started"], ended,
+                turn["run"], {"name": turn["name"], "tags": [job["kind"]],
+                              "metadata": {"project": job.get("project_id"), "quality": options.get("quality")}},
+                {"workflow": job["workflow"], "kind": job["kind"], "status": status, "server": job.get("server") or "",
+                 "server_url": job.get("server_url") or "", "queue_seconds": round(job["started"] - job["created"], 1),
+                 "render_seconds": round(ended - job["started"], 1), "credits": job["cost"] if status == "done" else 0,
+                 "job": job["id"]},
+                user=job["user_id"], error=error if status == "failed" else None, fallback=turn["name"])
+        except Exception as problem:   # Langfuse is a help: the job is done all the same
+            print("The job could not be readied for Langfuse: {}".format(problem))
+
     def _refund(self, job):
         """Give back what was held for a job that did not finish."""
         self.credits.add(job["user_id"], job["cost"], "refund", job["id"])
@@ -314,7 +346,11 @@ class JobManager:
             job["summary"] = "{} · {:.0f} s".format(job["summary"], made[0][2]["duration"])
             self.db.run("UPDATE jobs SET summary = ? WHERE id = ?", (job["summary"], job["id"]))
         for target, kind, ctx in made:
-            self._record(job, kind, target, ctx)
+            # An op that makes several files names each (a keyframe's time) and may keep each in the run (save_to).
+            name, keep_path, keep = ctx.pop("_name", None), ctx.pop("_keep_at", None), ctx.pop("_keep", None)
+            item_id = self._record(job, kind, target, ctx, name)
+            if keep_path and item_id:
+                edits.keep_at(self.db, job, item_id, keep_path, keep)
 
     async def _captions(self, job):
         """Write the structured caption this job needs (an image model such as Ideogram is trained on them), and those of
@@ -324,53 +360,38 @@ class JobManager:
         with as_everyone():
             rows = self.db.all("SELECT id, user_id, settings FROM jobs WHERE status = 'queued' AND settings LIKE ?", ('%"caption": {%',))
         todo = [(job["id"], job["settings"])] + [(r["id"], json.loads(r["settings"])) for r in rows if r["id"] != job["id"]]
-
-        def waiting():
-            live["node"] = "Waiting for the GPU…"
-            self.notify(job["user_id"])
         live["node"] = "Writing the caption…"
         self.notify(job["user_id"])
         if self.agent is None:
             raise ComfyError("This model needs a structured caption, which the agent writes, and there is no agent here.")
-        async with self.gpu.use("llm", waiting, stop=lambda: live.get("cancel")):
-            for job_id, settings in todo:
-                rule = settings.get("caption")
-                if not isinstance(rule, dict):
-                    continue
-                try:
-                    caption = await self.agent.caption(rule["template"], str(settings.get("prompt") or ""), str(rule.get("ratio") or "auto"))
-                except AgentError as error:
-                    if job_id == job["id"]:
-                        raise ComfyError("This model needs a structured caption, which the agent writes from your prompt. {}".format(error))
-                    continue   # that job tries again when its turn comes
-                settings.setdefault("values", {})[rule["prompt"]] = caption
-                settings.pop("caption", None)
-                with as_everyone():
-                    self.db.run("UPDATE jobs SET settings = ? WHERE id = ?", (json.dumps(settings), job_id))
+        for job_id, settings in todo:
+            rule = settings.get("caption")
+            if not isinstance(rule, dict):
+                continue
+            try:
+                caption = await self.agent.caption(rule["template"], str(settings.get("prompt") or ""), str(rule.get("ratio") or "auto"))
+            except AgentError as error:
+                if job_id == job["id"]:
+                    raise ComfyError("This model needs a structured caption, which the agent writes from your prompt. {}".format(error))
+                continue   # that job tries again when its turn comes
+            settings.setdefault("values", {})[rule["prompt"]] = caption
+            settings.pop("caption", None)
+            with as_everyone():
+                self.db.run("UPDATE jobs SET settings = ? WHERE id = ?", (json.dumps(settings), job_id))
         live["node"] = ""
 
     async def _run(self, job):
         if edits.is_edit(job["workflow"]):
             return await self._run_edit(job)
         live = self.live[job["id"]]
-        # On a GPU shared with the agent's model, a render waits while the agent thinks, and the model is put out of
-        # the GPU before the render starts.
-        def waiting():
-            live["node"] = "Waiting for the GPU: the agent is thinking"
-            self.notify(job["user_id"])
         live.setdefault("comfy", self.comfy)
-        if live["comfy"] is not self.comfy:   # another server: no GPU shared with the agent there, but the files to send
+        if live["comfy"] is not self.comfy:   # another server: the files it needs are sent there first
             live["node"] = "Sending the files it needs"
             self.notify(job["user_id"])
             await self._send_inputs(job["settings"], live["comfy"])
             live["node"] = ""
             return await self._render_job(job, live)
-        try:
-            async with self.gpu.use("render", waiting, stop=lambda: live.get("cancel")):
-                live["node"] = ""
-                await self._render_job(job, live)
-        except gpu.Stopped:
-            raise Cancelled()
+        await self._render_job(job, live)
 
     async def _send_inputs(self, settings, comfy):
         """Copy the uploaded files a render uses from the main server to the one it runs on, under the same names."""
@@ -578,13 +599,20 @@ class JobManager:
             "INSERT INTO generations (user_id, job_id, project_id, workflow, kind, name, filename, summary, settings, "
             "context, seconds, size, run, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job["user_id"], job["id"], job.get("project_id"), job["workflow"], kind, name or job["name"], filename,
-             job["summary"], json.dumps(job["settings"]), json.dumps(ctx), round(time.time() - job["started"], 1),
+             job["summary"], json.dumps({k: v for k, v in job["settings"].items() if k != "turn"}), json.dumps(ctx), round(time.time() - job["started"], 1),
              target.stat().st_size, str((job.get("settings") or {}).get("run") or ""), time.time()))
         if kind in ("image", "video"):   # its thumbnail, made now rather than when the canvas first asks for it
             try:
                 asyncio.get_running_loop().create_task(media.make_poster_soon(target))
             except RuntimeError:
                 pass
+        # A step the agent told where to keep its result ("save_to": /videos/3) puts it there; earlier tries become takes.
+        slot = (job.get("settings") or {}).get("save_to_state")
+        if slot and item_id:
+            core.keep_take(self.db, job["user_id"], slot, item_id)
+        # A job that names a board of the canvas ("board": Characters, Outputs) puts its result there (placement.py).
+        if item_id:
+            placement.place(self.db, job, item_id)
         # A step the agent planned as something to reuse ("keep": a character called Maya) goes into shared memory.
         keep = (job.get("settings") or {}).get("keep")
         if keep and item_id and self.assets_dir:
@@ -592,6 +620,7 @@ class JobManager:
                 memory.keep_made(self.db, self.assets_dir / str(job["user_id"]), job["user_id"], item_id, target, kind, keep)
             except OSError:
                 pass   # the result is in the library either way; only its copy for reuse is missing
+        return item_id
 
     # ------------------------------------------------------------ helpers
 

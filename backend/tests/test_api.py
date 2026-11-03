@@ -193,7 +193,7 @@ def test_asset_book_entries_belong_to_a_project_and_are_private(client):
     other = client.post("/api/projects", json={"name": "Other"}).json()["id"]
     entry = client.post("/api/kit", files={"file": ("anna.png", png, "image/png")}, data={"name": "Anna", "type": "character", "project_id": str(film)}).json()
     assert [(e["name"], e["type"]) for e in client.get("/api/kit?project=%d" % film).json()["entries"]] == [("Anna", "character")]
-    assert client.get("/api/kit?project=%d" % other).json()["entries"] == []   # one project's asset book is not another's
+    assert client.get("/api/kit?project=%d" % other).json()["entries"] == []   # one project's NeuralCore is not another's
     assert client.get("/api/kit").json()["entries"] == []                       # and there is none outside a project
     assert client.post("/api/kit", files={"file": ("anna.png", png, "image/png")}, data={"name": "Anna"}).status_code == 400
     assert client.get("/api/kit/%d/file" % entry["id"]).content == png
@@ -464,8 +464,8 @@ def test_a_plain_prompt_becomes_a_caption_just_before_it_renders_with_the_others
         "5": {"class_type": "PrimitiveStringMultiline", "inputs": {"value": "How to write a caption.\n[USER]\nRATIO: {{ratio}}.\nUser idea: {{original_prompt}}"}},
         "9": {"class_type": "SaveImage", "inputs": {"images": ["1", 0], "filename_prefix": "t"}}}))
     (folder / "captioned.studio.json").write_text(json.dumps({"caption": {"template": "5:value", "ratio": "3:shape"}, "hide": ["5:value"]}))
-    app = create_app(Settings(comfy_url="http://127.0.0.1:9", first_account_local=False, ollama_url="http://127.0.0.1:9", storage_dir=str(tmp_path / "storage"),
-                              workflows_dir=str(tmp_path / "workflows"), gpu_shared="off"))
+    app = create_app(Settings(comfy_url="http://127.0.0.1:9", first_account_local=False, claude_models="off", storage_dir=str(tmp_path / "storage"),
+                              workflows_dir=str(tmp_path / "workflows")))
     asked = []
 
     async def fake_chat(messages, answer_format, context=None, model=None, **kwargs):
@@ -561,6 +561,38 @@ def test_agent_edits_selected_videos_instead_of_generating(client, monkeypatch):
     assert 1.3 < made["context"]["duration"] < 1.7 and client.get("/api/auth/me").json()["credits"] == 500
 
 
+def test_agent_joins_the_takes_it_names_without_a_selection(client, monkeypatch):
+    from scene import media
+    me = register(client)
+    film = client.post("/api/projects", json={"name": "Ep 7"}).json()["id"]
+    folder = client.app.state.outputs.folder(me["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    ids = []
+    for name in ("one", "two", "three"):
+        asyncio_run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=2:r=24", "-pix_fmt", "yuv420p",
+                                  folder / (name + ".mp4")))
+        ids.append(client.app.state.db.run(
+            "INSERT INTO generations (user_id, project_id, workflow, kind, name, filename, summary, settings, context, run, created) "
+            "VALUES (?, ?, 'video/h3_all_in_one', 'video', ?, ?, '', '{}', '{}', 'abcdefghijkl', 1)", (me["id"], film, name, name + ".mp4")))
+    elsewhere = client.app.state.db.run(   # a video of no project: not this project's, so never put in its cut
+        "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, created) "
+        "VALUES (?, 'video/h3_all_in_one', 'video', 'other', 'one.mp4', '', '{}', '{}', 1)", (me["id"],))
+    clips = lambda *order: [{"item": i, "asset": 0, "slot": "clip"} for i in order]
+    answers = [{"reply": "Joined.", "steps": [{"tool": "join", "name": "Cut", "uses": clips(ids[2], ids[0], elsewhere, ids[1])}]},
+               {"reply": "The film.", "steps": [{"tool": "assemble", "name": "Final cut", "uses": clips(*ids),
+                                                 "scenes": [{"kind": "title", "heading": "Married Today", "seconds": 3}]}]}]
+
+    async def fake_ask(system, message, workflow_ids, history=()):
+        return answers.pop(0)
+
+    monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
+    plan = client.post("/api/agent/plan", json={"instruction": "join them", "project_id": film}).json()
+    assert [s["edit"]["clips"] for s in plan["steps"]] == [[{"id": i, "start": 0, "end": 0} for i in (ids[2], ids[0], ids[1])]]
+    plan = client.post("/api/agent/plan", json={"instruction": "make the final cut", "project_id": film}).json()
+    cut = plan["steps"][0]["assemble"]
+    assert [c["id"] for c in cut["clips"]] == ids and cut["title"]["heading"] == "Married Today"
+
+
 def asyncio_run(coroutine):
     import asyncio
     return asyncio.run(coroutine)
@@ -652,95 +684,23 @@ def test_a_shot_takes_the_shape_of_the_picture_it_starts_on(client, monkeypatch)
     assert settings["values"]["9:aspect_ratio"] == "9:16 (Portrait Widescreen)" and agent.shape_of(schema, settings, {})[0] < 1000
 
 
-def test_the_agent_uses_the_model_the_user_picked_when_the_server_has_it(client, monkeypatch):
+def test_the_agent_uses_the_claude_model_the_user_picked(client, monkeypatch):
     register(client)
     brain = client.app.state.agent
     used = []
-
-    async def fake_models():
-        return ["small:9b", "large:27b"]
 
     async def fake_ask(system, message, workflow_ids, history=(), model=None):
         used.append(await brain.pick_model(model))
         return {"reply": "Hello.", "steps": []}
 
-    monkeypatch.setattr(brain, "models", fake_models)
     monkeypatch.setattr(brain, "ask", fake_ask)
-    monkeypatch.setattr(brain, "model", "small:9b")
+    monkeypatch.setattr(brain, "model", "haiku")   # config.json may name it without "claude/"
     found = client.get("/api/agent/status").json()
-    assert found == {"online": True, "model": "small:9b", "models": ["small:9b", "large:27b"], "hosted": [], "prices": {}, "by_tokens": []}
-    for picked in ("large:27b", "not-installed", "", None):
+    assert found == {"online": True, "model": "claude/haiku", "models": ["claude/sonnet", "claude/haiku"],
+                     "hosted": [{"id": "claude", "name": "Claude"}], "prices": {}, "by_tokens": ["claude/sonnet", "claude/haiku"]}
+    for picked in ("claude/sonnet", "gemini/flash", "", None):
         client.post("/api/agent/plan", json={"instruction": "hi", "model": picked})
-    assert used == ["large:27b", "small:9b", "small:9b", "small:9b"]
-
-
-def test_a_hosted_model_is_listed_beside_the_local_ones_and_asked_over_its_api(monkeypatch):
-    import asyncio
-    from scene.agent import Agent, AgentError, service
-    brain = Agent("http://127.0.0.1:9", "", [service("kimi", "Kimi", "https://api.example.com/v1/", "secret-key", "kimi-k3, kimi-k2.6"),
-                                             service("gemini", "Gemini", "https://g.example.com/openai", "g-key", "gemini-flash"),
-                                             service("other", "Other", "https://o.example.com", "", "x"),      # no key: not offered
-                                             service("idle", "Idle", "https://i.example.com", "i-key", "off")])  # switched off, key kept
-    sent = []
-
-    class Reply:
-        def __init__(self, status, body):
-            self.status_code, self.body = status, body
-
-        def json(self):
-            return self.body
-
-    async def fake_post(url, json=None, headers=None):
-        sent.append({"url": url, "body": dict(json), "auth": headers.get("Authorization")})
-        if "temperature" in json:
-            return Reply(400, {"error": {"message": "invalid temperature: only 1 is allowed for this model"}})
-        return Reply(200, {"choices": [{"message": {"content": '```json\n{"reply": "Hello.", "steps": []}\n```'}}]})
-
-    monkeypatch.setattr(brain.http, "post", fake_post)
-    # Ollama is down, and the hosted models are still there to pick from
-    assert asyncio.run(brain.models()) == ["kimi/kimi-k3", "kimi/kimi-k2.6", "gemini/gemini-flash"]
-    assert brain.hosted() == [{"id": "kimi", "name": "Kimi"}, {"id": "gemini", "name": "Gemini"}]
-    asyncio.run(brain.ask("You plan.", "hi", [], model="gemini/gemini-flash"))
-    assert sent.pop()["url"] == "https://g.example.com/openai/chat/completions" and sent.pop()["auth"] == "Bearer g-key"
-    answer = asyncio.run(brain.ask("You plan.", "hi", ["video/h3_all_in_one"], model="kimi/kimi-k2.6"))
-    assert answer == {"thought": "", "reply": "Hello.", "steps": [], "model": "kimi/kimi-k2.6", "direction": "", "question": None,
-                      "tokens": {"prompt": 0, "cached": 0, "written": 0, "answer": 0}}
-    assert [s["url"] for s in sent] == ["https://api.example.com/v1/chat/completions"] * 2 and sent[0]["auth"] == "Bearer secret-key"
-    assert sent[1]["body"]["model"] == "kimi-k2.6" and "temperature" not in sent[1]["body"]            # asked again without it
-    assert sent[1]["body"]["response_format"] == {"type": "json_object"} and '"required": ["thought", "reply", "steps", "direction", "question"]' in sent[1]["body"]["messages"][0]["content"]
-
-    # a busy service is tried again, and when it stays busy the smallest local model answers and the reply says so
-    calls = []
-
-    async def busy(url, json=None, headers=None):
-        calls.append(url)
-        if "chat/completions" in url:
-            return Reply(503, {"error": {"message": "This model is currently experiencing high demand."}})
-        return Reply(200, {"message": {"content": '{"reply": "From here.", "steps": []}'}})
-
-    async def local_models(url, headers=None):
-        return Reply(200, {"models": [{"name": "big:27b", "size": 17}, {"name": "small:9b", "size": 6}]})
-
-    async def no_wait(seconds):
-        return None
-
-    monkeypatch.setattr(brain.http, "post", busy)
-    monkeypatch.setattr(brain.http, "get", local_models)
-    monkeypatch.setattr("scene.agent.asyncio.sleep", no_wait)
-    answer = asyncio.run(brain.ask("You plan.", "hi", [], model="kimi/kimi-k3"))
-    assert answer["reply"] == "From here. (Kimi was busy, so small:9b answered.)"
-    assert [c.rsplit("/", 2)[-2:] for c in calls] == [["chat", "completions"]] * 2 + [["api", "chat"]]
-
-    async def refused(url, json=None, headers=None):
-        return Reply(401, {"error": {"message": "Invalid Authentication"}})
-
-    monkeypatch.setattr(brain.http, "post", refused)
-    try:
-        asyncio.run(brain.ask("You plan.", "hi", [], model="kimi/kimi-k3"))
-        raise AssertionError("a refused key must be reported")
-    except AgentError as error:
-        assert "Kimi refused the API key" in str(error) and "secret-key" not in str(error)
-    assert asyncio.run(Agent("http://127.0.0.1:9")._hosted_models()) == []                                    # no services, no hosted models
+    assert used == ["claude/sonnet", "claude/haiku", "claude/haiku", "claude/haiku"]
 
 
 def test_every_account_has_the_agent(client):
@@ -752,11 +712,12 @@ def test_every_account_has_the_agent(client):
     assert client.post("/api/agent/plan", json={"instruction": "hi"}).status_code != 403
 
 
-def test_agent_says_so_when_its_model_server_is_down(client):
+def test_agent_says_so_when_claude_is_not_set_up(client):
     register(client)
+    client.app.state.agent.services = {}
     assert client.get("/api/agent/status").json()["online"] is False
     refused = client.post("/api/agent/plan", json={"instruction": "Make a street shot"})
-    assert refused.status_code == 400 and "Ollama" in refused.json()["detail"]
+    assert refused.status_code == 400 and "Claude Code" in refused.json()["detail"]
 
 
 def test_an_upload_over_the_size_limit_is_refused(client, monkeypatch):
@@ -1205,7 +1166,7 @@ def test_every_workflow_is_listed_in_the_section_of_its_kind(client):
     assert {w for w in listed if w.startswith("video/")} == {
         "video/h3_all_in_one", "video/h3_15s_720p", "video/h3_chunk", "video/talking_head_narration", "video/video_lipsync",
         "video/video_ltx2_5_t2v", "video/video_wan_animate2", "video/video_v2v_ltx23_iclora", "video/video_v2v_wan22_fun_control",
-        "video/video_v2v_wan_vace"}
+        "video/video_v2v_wan_vace", "video/video_outpaint_wan_vace"}
     assert {w["kind"] for w in listed.values()} == {"video", "image", "audio", "upscaler"}
     assert client.get("/api/workflows/video/h3_director").json()["id"] == "video/h3_all_in_one"   # gone: served by what replaced it
 
@@ -1358,7 +1319,7 @@ def test_a_project_holds_modules_that_share_its_kit(client):
     # the kit of a module is the project's kit
     from scene import kit
     assert kit.root(db, one["id"]) == film and kit.root(db, film) == film
-    # what is kept from a module's canvas is in the project's asset book, and no other project's
+    # what is kept from a module's canvas is in the project's NeuralCore, and no other project's
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     kept = client.post("/api/kit", files={"file": ("maya.png", png, "image/png")}, data={"name": "Maya", "project_id": str(one["id"])}).json()
     assert db.one("SELECT project_id FROM assets WHERE id = ?", (kept["id"],))["project_id"] == film

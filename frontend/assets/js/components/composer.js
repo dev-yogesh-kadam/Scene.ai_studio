@@ -159,5 +159,6 @@ export function composer({ startFrom = () => null, projectId = () => null, onQue
   loadCatalog().catch(showError);
   const unsubscribe = subscribe((change) => { if (change === 'credits') refreshEstimate(); });
   // refresh(): call when the selection changes, so the "start on" line follows it.
-  return { node, refresh: () => { form.useStart = true; if (form.wf) draw(); }, focus: () => prompt.focus(), destroy: unsubscribe };
+  return { node, refresh: () => { form.useStart = true; if (form.wf) draw(); }, focus: () => prompt.focus(),
+    setPrompt: (text) => { prompt.value = text; prompt.dispatchEvent(new Event('input')); }, destroy: unsubscribe };
 }

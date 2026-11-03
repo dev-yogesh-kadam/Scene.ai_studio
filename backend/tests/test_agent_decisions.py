@@ -85,21 +85,6 @@ def test_the_settings_offered_include_choice_lists_and_unknown_values_are_ignore
     assert agent.spoken_seconds("The dog's bowl is empty and it doesn't care.") == 0      # apostrophes, not quotes
 
 
-def test_only_the_local_models_named_in_the_settings_are_offered():
-    import asyncio
-    import httpx
-    from scene.agent import Agent
-    tags = {"models": [{"name": "qwen3.5:9b", "size": 6}, {"name": "qwen3.6:35b", "size": 23}, {"name": "nemotron3:33b", "size": 26},
-                       {"name": "nomic-embed-text:latest", "size": 1}]}
-    for local, offered in (("", ["qwen3.5:9b", "qwen3.6:35b", "nemotron3:33b"]),   # never the embedding model
-                           ("qwen3.6:35b, nemotron3:33b", ["qwen3.6:35b", "nemotron3:33b"])):
-        brain = Agent("http://ollama", local=local)
-        brain.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=tags)))
-        assert asyncio.run(brain.models()) == offered
-    # A busy hosted model falls back to the smallest local model offered: with the list, never the embedding model.
-    assert min(brain.sizes, key=brain.sizes.get) == "qwen3.6:35b"
-
-
 def test_a_reply_that_says_it_is_making_something_without_a_plan_is_caught():
     from scene import agent
     assert agent.claims_work("generate", "Generating the 480p clip now.")

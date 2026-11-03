@@ -1,6 +1,9 @@
 {
   "title": "H3 All In One",
-  "replaces": ["video/h3_master", "video/h3_director"],
+  "replaces": [
+    "video/h3_master",
+    "video/h3_director"
+  ],
   "description": "Every MiniMax H3 job in one workflow: reference mode, first and last frame, keyframes built by Qwen Image Edit, a voice track, and an optional SeedVR2 upscale.",
   "output_name": "16.filename_prefix",
   "labels": {
@@ -299,8 +302,10 @@
     }
   ],
   "hints": [
-    "Reference mode builds a new scene from your references; first-frame mode keeps the first frame exactly.",
+    "Reference mode builds a new scene from your references; first-frame mode keeps the first frame exactly and takes no other references: then describe only motion and camera.",
     "Best results come from 5-6 s clips, one action each. Durations from 3 to 15 s work.",
-    "For speech put the words in quotes after \"Audio:\". With a VOICE TRACK the lips follow your own audio."
+    "Prompt blocks, short: GOAL · SCENE · OPENING · SHOTS timed '[0-2s] size, lens, angle → one action → dialogue → move' · STYLE · END STATE · LOCKS. No shape or length words.",
+    "For speech put the words in quotes after \"Audio:\", tied to the speaker. With a VOICE TRACK the lips follow your own audio. A silent clip says 'No dialogue. No music.'",
+    "Identity in words: age, build, the features that tell them apart; the same words every clip. No negative prompt: put short 'No ...' lines in LOCKS."
   ]
 }

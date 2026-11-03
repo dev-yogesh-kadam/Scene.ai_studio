@@ -211,6 +211,9 @@ def recovery_hash(code):
 # ---------------------------------------------------------------- uploaded files
 
 # The first bytes of each kind of file the studio takes. A file is judged by what it is, not by its name.
+STILL_BRANDS = {b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx", b"mif1", b"msf1", b"avif", b"avis"}
+
+
 def sniff(data):
     """"image", "video", "audio", "video/audio" (an MP4-family file that may be either) or None."""
     head = data[:16]
@@ -221,6 +224,8 @@ def sniff(data):
     if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
         return "audio"
     if head[4:8] == b"ftyp":
+        if head[8:12] in STILL_BRANDS:
+            return "image"     # HEIC (an iPhone's photos) and AVIF are this family too, holding a still
         return "video/audio"   # MP4, MOV and M4A all start this way
     if head.startswith(b"\x1a\x45\xdf\xa3"):
         return "video/audio"   # Matroska: MKV or WebM, which may hold only sound

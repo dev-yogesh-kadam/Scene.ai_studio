@@ -23,14 +23,50 @@
       "primary": false
     }
   ],
-  "options": [],
-  "rules": [],
+  "options": [
+    {
+      "id": "speakers",
+      "label": "Speaker labels",
+      "default": "on",
+      "choices": [
+        {
+          "id": "on",
+          "label": "On",
+          "hint": "who speaks each line (pyannote on Zoro)"
+        },
+        {
+          "id": "off",
+          "label": "Off",
+          "hint": "every line SPEAKER_00, a little faster"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "when": {
+        "speakers": "on"
+      },
+      "set": {
+        "12.diarize": true
+      }
+    },
+    {
+      "when": {
+        "speakers": "off"
+      },
+      "set": {
+        "12.diarize": false
+      }
+    }
+  ],
   "hide": [],
   "pricing": {},
   "hints": [
     "Outputs are in /history under outputs['12']['transcripts']: one .json and one .srt item {filename, subfolder, type: output}.",
     "Word times come only from forced alignment. Words the aligner cannot spell (digits, symbols) have start/end null.",
     "Paste the episode script into SCRIPT so names are spelled right.",
-    "Speaker labels are off (every word SPEAKER_00) until the pyannote model is installed; then set 12.diarize = true."
+    "Speaker labels are on by default (pyannote speaker-diarization-community-1 on Zoro): lines come back as SPEAKER_00, SPEAKER_01... in order of first speech. 12.min_speakers / 12.max_speakers (0 = find it) help when the count is known.",
+    "Language hi gives Hindi word times (indicwav2vec-hindi aligner)."
   ]
 }

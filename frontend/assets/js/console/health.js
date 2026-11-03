@@ -1,4 +1,4 @@
-// The studio's health in the admin console: the agent's model server, maintenance mode, the watcher's alerts, and
+// The studio's health in the admin console: the agent's model (Claude), maintenance mode, the watcher's alerts, and
 // where alerts are sent (Telegram, ntfy). See backend/scene/health.py and phone.py.
 
 import { api } from '../api.js';
@@ -8,21 +8,15 @@ import { span, stamp, ago, table, facts } from './shared.js';
 const LEVEL = { critical: 'Critical', serious: 'Serious', warning: 'Warning' };
 const gb = (v) => (v / 1024 ** 3).toFixed(1) + ' GB';
 
-// The agent's model server (Ollama): whether it answers, and the models it holds in memory now.
+// The agent's model: Claude, through Claude Code on the studio's PC. Whether it is set up, its models and its usage.
 export function modelServerCard(m) {
-  if (!m.url) {
-    return el('div', { class: 'card' }, el('div', { class: 'card-head' }, el('h2', {}, 'Model server')),
-      el('p', { class: 'muted' }, 'No local model server is set (ollama_url is empty in config.json). The agent uses hosted models only.'));
-  }
-  const until = (when) => { const left = (Date.parse(when) - Date.now()) / 1000; return left > 0 ? `unloads in ${span(left)}` : 'unloading'; };
+  const limits = m.limits && typeof m.limits === 'object' ? Object.entries(m.limits) : [];
   return el('div', { class: 'card' },
-    el('div', { class: 'card-head' }, el('h2', {}, 'Model server'), el('span', { class: 'pill ' + (m.online ? 'done' : 'failed') }, m.online ? 'Online' : 'Offline')),
-    facts([[m.online ? 'Online since' : 'Offline since', stamp(m.since)], ['Address', m.url], ['Ollama', m.version]]),
-    !m.online && el('p', { class: 'muted' }, 'It does not answer. Check that the machine is on, Tailscale is connected and Ollama is running, and that ollama_url in config.json is right.'),
-    m.online && el('h3', {}, 'In memory now'),
-    m.online && (m.loaded.length
-      ? table(['Model', 'Video memory', 'Size', ''], m.loaded.map((x) => [x.name, gb(x.vram), gb(x.size), el('span', { class: 'muted small' }, until(x.until))]))
-      : el('p', { class: 'muted' }, 'No model is loaded. The first message to the agent loads one, which takes a moment.')));
+    el('div', { class: 'card-head' }, el('h2', {}, 'Agent model'), el('span', { class: 'pill ' + (m.online ? 'done' : 'failed') }, m.online ? 'Claude ready' : 'Not set up')),
+    facts([['Models', (m.models || []).join(', ') || 'none'], ['Claude Code', m.url || 'not found']]),
+    !m.online && el('p', { class: 'muted' }, m.detail || 'Install Claude Code on the studio\'s PC and sign in, and name the models in claude_models in config.json.'),
+    limits.length > 0 && el('h3', {}, 'Usage as Claude last reported it'),
+    limits.length > 0 && table(['Window', 'Used'], limits.map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)])));
 }
 
 // Maintenance mode: new jobs are refused and their credits given back; the waiting ones still finish.

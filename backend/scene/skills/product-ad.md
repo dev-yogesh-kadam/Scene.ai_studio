@@ -4,9 +4,9 @@ version: 2
 desc: Use to make an ad, promo or product video, keeping the product and logo consistent.
 words: \b(ad|ads|advert\w*|commercial|promo\w*|product|brand\w*|launch|sale|offer|campaign|marketing|packshot|logo)\b
 ---
-1. When the asset book has the product, the logo or a presenter, use them in every shot they are in, in the product,
+1. When NeuralCore has the product, the logo or a presenter, use them in every shot they are in, in the product,
    prop or character slot, and do not describe the product's look again in the prompt: say "the product" and what
-   happens to it. When the book does not have them, do not ask for them and do not use anything else in their place:
+   happens to it. When NeuralCore does not have them, do not ask for them and do not use anything else in their place:
    describe the product or subject in words (for a pet page, the pet) and plan the ad.
 2. Build the ad in this order: a hook in the first two seconds (something moving, a surprise, a close detail), the
    product seen clearly, the product in use, what it gives the person, and an end card.

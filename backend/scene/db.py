@@ -228,6 +228,27 @@ CREATE TABLE IF NOT EXISTS credit_packages (
     active INTEGER NOT NULL DEFAULT 1,
     created REAL NOT NULL
 );
+-- What the agent remembers of a user across all their projects (recall.py): preferences, what they keep using, lessons.
+CREATE TABLE IF NOT EXISTS user_memory (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated REAL NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+-- What one module changes of its project's NeuralCore for itself (kit.py): an entry hidden there, always on or not
+-- there, its own use note, or the picture of it to prefer there. The project's entry stays as it is for the others.
+CREATE TABLE IF NOT EXISTS kit_overrides (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    module_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    removed INTEGER NOT NULL DEFAULT 0,
+    always INTEGER,
+    use_note TEXT,
+    preferred_item INTEGER,
+    updated REAL NOT NULL,
+    PRIMARY KEY (module_id, asset_id)
+);
 CREATE TABLE IF NOT EXISTS run_state (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     run TEXT NOT NULL,
@@ -258,7 +279,7 @@ CREATE TABLE IF NOT EXISTS servers (
     active INTEGER NOT NULL DEFAULT 1,
     created REAL NOT NULL
 );
--- The ComfyUI servers, Ollama servers and hosted APIs the studio uses (endpoints.py), set in the console's Servers section.
+-- The ComfyUI servers the studio renders on (endpoints.py), set in the console's Servers section.
 CREATE TABLE IF NOT EXISTS endpoints (
     id INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -298,7 +319,7 @@ COLUMNS = [
     ("users", "daily_cap", "INTEGER"),
     # A job an admin moved to the front of the queue is taken before older ones: higher first, then oldest first.
     ("jobs", "priority", "INTEGER NOT NULL DEFAULT 0"),
-    # The asset book of the agent: what a saved asset or a library item shows, written by the agent's model looking at
+    # NeuralCore of the agent: what a saved asset or a library item shows, written by the agent's model looking at
     # it, and the user's own note on when and how to use a saved asset.
     ("assets", "about", "TEXT NOT NULL DEFAULT ''"),
     ("assets", "use_note", "TEXT NOT NULL DEFAULT ''"),
@@ -349,6 +370,23 @@ COLUMNS = [
     ("workflow_pricing", "admins_only", "INTEGER NOT NULL DEFAULT 0"),
     # A project's or module's public id, what its links show (refs.py): PRJ... for a project, MOD... for a module.
     ("projects", "ref", "TEXT NOT NULL DEFAULT ''"),
+    # What the agent learnt of an item or a NeuralCore entry by looking at it, as JSON (core.py, the asset catalogue):
+    # photoreal, has_person, subjects, scene, description, tags and any key of its own.
+    ("generations", "facts", "TEXT NOT NULL DEFAULT ''"),
+    ("assets", "facts", "TEXT NOT NULL DEFAULT ''"),
+    # The id an item or an entry has in a module's memory (core.py, /assets/<id>): twelve random hex digits, given the
+    # first time it is listed there, so the memory never shows the database's own numbers.
+    ("generations", "public_id", "TEXT NOT NULL DEFAULT ''"),
+    ("assets", "public_id", "TEXT NOT NULL DEFAULT ''"),
+    # How NeuralCore entries hang together (kit.py): a look of a character or a time of day of a location ("Maya - torn
+    # sleeve", "Kitchen - night") is an entry of its own with look_of its base entry and variant its words, from_scene
+    # the scene a changed look starts in; a location's palette (shadow and highlight colours); a character's relatives,
+    # as JSON [{"to": entry id, "relation": "mother", "blood": true}], "to" being this entry's <relation>.
+    ("assets", "look_of", "INTEGER"),
+    ("assets", "variant", "TEXT NOT NULL DEFAULT ''"),
+    ("assets", "from_scene", "INTEGER"),
+    ("assets", "palette", "TEXT NOT NULL DEFAULT ''"),
+    ("assets", "relations", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 # Indexes for what the studio looks up often, made once the columns of later releases are there (some are on those).
@@ -368,12 +406,17 @@ CREATE INDEX IF NOT EXISTS claude_sessions_active ON claude_sessions(active);
 CREATE INDEX IF NOT EXISTS claude_events_session ON claude_events(session_id, id);
 CREATE INDEX IF NOT EXISTS agent_calls_run ON agent_calls(run);
 CREATE INDEX IF NOT EXISTS moderation_item ON moderation(generation_id);
+CREATE INDEX IF NOT EXISTS generations_public ON generations(public_id);
+CREATE INDEX IF NOT EXISTS assets_public ON assets(public_id);
+DROP TABLE IF EXISTS brands;
+DROP TABLE IF EXISTS brand_fonts;
+DROP TABLE IF EXISTS brand_assets;
 """
 
 # The studio's two machines, added to an installation that has no servers yet. Every value can be changed in the
 # admin console; the power of Zoro is a first assumption until it is measured at the wall.
 SERVERS = [
-    ("Lufi", "Ryzen 9 7900X", "RTX 4060 Ti", 8, "Hosting, the agent's local models, light workflows", 0, None),
+    ("Lufi", "Ryzen 9 7900X", "RTX 4060 Ti", 8, "Hosting the studio, light workflows", 0, None),
     ("Zoro", "Ryzen 9 9950X", "RTX 5090", 32, "Heavy image, video and audio generation", 1, 950),
 ]
 
@@ -513,7 +556,8 @@ ID_TABLES = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \(\s*id INTEGER PR
 # and writes only that user's rows, even if its SQL forgot to say so. Tables of the whole installation (settings,
 # pricing, servers, the audit log) have no owner.
 OWNED = {"users": "id", "sessions": "user_id", "jobs": "user_id", "generations": "user_id", "projects": "user_id",
-         "boards": "user_id", "assets": "user_id", "credit_events": "user_id", "uploads": "user_id", "run_state": "user_id"}
+         "boards": "user_id", "assets": "user_id", "credit_events": "user_id", "uploads": "user_id", "run_state": "user_id",
+         "kit_overrides": "user_id", "user_memory": "user_id"}
 ACTING_SQL = "current_setting('app.user_id', true)"
 OWN_ROWS = ("{acting} = 'all' OR {column} = (CASE WHEN {acting} ~ '^[0-9]+$' THEN {acting}::bigint END)")
 

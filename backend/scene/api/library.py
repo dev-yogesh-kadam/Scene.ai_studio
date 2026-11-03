@@ -4,6 +4,7 @@ import contextlib
 import csv
 import io
 import json
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import audit, fetch, media, kit, refs, sharing
+from .. import audit, fetch, media, kit, placement, refs, sharing
 from ..db import as_everyone
 from ..catalog import KINDS
 from ..outputs import MAIN_CANVAS
@@ -87,12 +88,25 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
     return {"items": items}
 
 
+@router.get("/library/placement")
+async def canvas_placement(request: Request, project: int = 0, user: dict = Depends(current_user)):
+    """The named boards of a canvas and the stacks on them, as finished jobs placed their results (placement.py). Items
+    deleted since are left out. `project` 0: the canvas of the user's work in no project."""
+    db = request.app.state.db
+    owner = _own_project(request, user, project, "viewer")["owner_id"] if project else user["id"]
+    with as_everyone():
+        known = {r["id"] for r in db.all("SELECT id FROM generations WHERE " + ("project_id = ?" if project else "user_id = ? AND project_id IS NULL"),
+                                         (project or user["id"],))}
+    return {"boards": placement.boards(db, owner, project, known), "names": list(placement.BOARDS)}
+
+
 UPLOADED = "upload/file"   # what an item the user brought in is filed under: it was not made with a workflow
 
 
 @router.post("/library/upload", dependencies=[limited("upload", 60, 600), uploading])
 async def upload_item(request: Request, user: dict = Depends(current_user)):
-    """Multipart form with "file" (an image, a video, a sound, or a transcript: .srt, .json) and "project_id".
+    """Multipart form with "file" (an image, a video, a sound, a script: .docx, .pdf, .txt, or a transcript: .srt,
+    .json) and "project_id".
     The file joins the library and the project's canvas like a finished generation, so it can be a frame to start on, a
     reference or a clip on the timeline. Nothing is charged."""
     form = await request.form(max_files=1, max_fields=10)
@@ -104,7 +118,7 @@ async def upload_item(request: Request, user: dict = Depends(current_user)):
         (data, filename), kind = await read_text_upload(upload), "text"
     else:
         data = await read_upload(upload)   # refuses what is too large or is not the image, video or sound it says it is
-        kind = media_kind(upload.filename)
+        filename, kind = upload.filename, media_kind(upload.filename)   # a HEIC or AVIF photo is a JPEG or PNG now
     project = str(form.get("project_id") or "")
     project_id = _own_project(request, user, int(project), "creator")["id"] if project.isdigit() and int(project) else None
     return await _file_in(request, user, data, filename, kind, project_id, "Uploaded")
@@ -172,6 +186,29 @@ async def get_file(item_id: int, request: Request, download: bool = False, user:
     return FileResponse(path, filename=path.name if download else None)
 
 
+PUBLIC_ID = re.compile(r"[0-9a-f]{12}")
+
+
+@router.get("/m/{ref}")
+async def media_link(ref: str, request: Request, download: bool = False, user: dict = Depends(current_user)):
+    """The studio's own link to a result or a NeuralCore entry, by its 12-character id (/api/m/3f9a1c2b7e44): it stays
+    the same however the file is moved or renamed. Only someone signed in who may see the item opens it: the file is
+    served by the item's or the entry's own route, which asks."""
+    ref = ref.split(".", 1)[0].lower()
+    if not PUBLIC_ID.fullmatch(ref):
+        raise HTTPException(404, "No such item.")
+    db = request.app.state.db
+    with as_everyone():
+        item = db.one("SELECT id FROM generations WHERE public_id = ?", (ref,))
+        entry = None if item else db.one("SELECT id FROM assets WHERE public_id = ?", (ref,))
+    if item:
+        return await get_file(item["id"], request, download, user)
+    if entry:
+        from .kit import entry_file
+        return await entry_file(entry["id"], request, user)
+    raise HTTPException(404, "No such item.")
+
+
 async def poster_response(request, path):
     """A video's poster. The browser keeps it and only asks whether it has changed, which costs no download."""
     if not path.is_file():
@@ -221,6 +258,8 @@ async def update_item(item_id: int, body: dict, request: Request, user: dict = D
         if body["rating"] not in (1, -1, 0) or isinstance(body["rating"], bool):
             raise HTTPException(400, "A rating is 1, -1 or 0.")
         db.run("UPDATE generations SET rating = ? WHERE id = ?", (body["rating"], item_id))
+        if body["rating"]:   # Langfuse: the user's thumb, as a score on the turn that made it (turned over, it is replaced)
+            request.app.state.traces.langfuse.item_score(item_id, "user-feedback", 1 if body["rating"] > 0 else 0, "rating-{}".format(item_id))
     if "project_id" in body:
         if body["project_id"] is not None:
             _own_project(request, user, body["project_id"], "creator")
@@ -449,7 +488,7 @@ async def project_analytics_csv(project_id: int, request: Request, period: str =
 
 @router.post("/projects/{project_id}/duplicate")
 async def duplicate_project(project_id: int, request: Request, user: dict = Depends(current_user)):
-    """A copy of a project to start again from: its modules (empty canvases of the same names) and its asset book,
+    """A copy of a project to start again from: its modules (empty canvases of the same names) and its NeuralCore,
     named "<name> copy". What was made stays with the first project."""
     db = request.app.state.db
     row = _own_project(request, user, project_id)
@@ -519,7 +558,7 @@ async def rename_canvas(project_id: int, body: dict, request: Request, user: dic
 async def delete_project(project_id: int, request: Request, user: dict = Depends(current_user)):
     """Delete a project, or a module, and everything in it, so nothing that can no longer be used stays in storage: what
     was made in it (the files, their posters and keyframes), its jobs still waiting or running (their credits given
-    back), and its canvases, timelines and agent tabs. A project takes its modules and its asset book with it. The jobs'
+    back), and its canvases, timelines and agent tabs. A project takes its modules and its NeuralCore with it. The jobs'
     records stay, in no project, for the credit history."""
     probe = _own_project(request, user, project_id, "viewer")
     here = _own_project(request, user, project_id, "manager" if probe["parent_id"] else "owner")   # a module: a manager; a project: its owner
@@ -540,7 +579,7 @@ async def delete_project(project_id: int, request: Request, user: dict = Depends
             db.run("UPDATE jobs SET project_id = NULL WHERE project_id = ?", (one,))
             # Its canvas, timeline and agent tabs go with it: a project made later must not open with them.
             db.run("DELETE FROM boards WHERE project_id = ?", (one,))
-            if not here["parent_id"]:   # the asset book is the project's: its modules share it, so it goes only with the project
+            if not here["parent_id"]:   # NeuralCore is the project's: its modules share it, so it goes only with the project
                 for row in db.all("SELECT id FROM assets WHERE project_id = ? AND user_id = ?", (one, owner)):
                     kit.remove(db, state.assets_dir / str(owner), owner, row["id"])   # files too
             db.run("DELETE FROM projects WHERE id = ?", (one,))

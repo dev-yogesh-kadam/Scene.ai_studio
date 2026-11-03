@@ -11,12 +11,23 @@ Each skill is a Markdown file in skills/ that starts with a few "key: value" lin
 
 "words" is a regular expression; a skill is given to the agent when the user's new message (or, for a short follow-up,
 the message before it) matches it. The files are read on every message, so a change to one counts at once.
+
+Two more keys a skill may have:
+
+    next: director, sound-pass     the skills it hands on to when its own steps are done (read_skill loads them)
+    craft: true                    a craft skill (directing, coverage, continuity, the sound pass): never picked by its
+                                   words alone, only loaded by a skill that names it, or by the user with /<id>
+
+A skill drafted in a chat ("make this a skill", skill_draft) waits in skills/drafts/ until an admin publishes it: the
+agent never reads a draft.
 """
 
 import re
+import time
 from pathlib import Path
 
 FOLDER = Path(__file__).parent / "skills"
+DRAFTS = "drafts"   # the folder under FOLDER where drafts wait for an admin
 MAX_GIVEN = 2   # skills given with one message, the best matches first
 MAX_CHARS = 150_000   # the most of one skill that goes to a hosted model (about 40,000 tokens); a longer one is cut here, and the agent says so
 
@@ -83,8 +94,18 @@ def _short(text, limit=160):
     return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0].rstrip(",;:. ") + "…"
 
 
+def ids_in(value):
+    """The skill ids of a "next:" line ("director, sound-pass"), in order, each once."""
+    return list(dict.fromkeys(w for w in re.split(r"[\s,;]+", str(value or "").lower()) if SLUG.match(w)))
+
+
+def is_on(value):
+    return str(value or "").strip().lower() in ("true", "yes", "1", "on")
+
+
 def load(folder=FOLDER):
-    """Every skill in the folder: [{"id", "title", "version", "desc", "words", "text"}], in file-name order."""
+    """Every skill in the folder: [{"id", "title", "version", "desc", "words", "text", "next", "craft"}], in file-name
+    order. A draft (in DRAFTS) is not one of them."""
     found = []
     for path in sorted(Path(folder).glob("*.md")):
         meta, text = parse(path.read_text(encoding="utf-8"))
@@ -100,7 +121,8 @@ def load(folder=FOLDER):
         except re.error:
             continue   # a skill whose words can't be read is left out rather than breaking the agent
         found.append({"id": slug, "title": title, "version": meta.get("version") or "1",
-                      "desc": meta.get("desc") or _short(meta.get("user_description") or meta.get("description")), "words": words, "text": text})
+                      "desc": meta.get("desc") or _short(meta.get("user_description") or meta.get("description")), "words": words, "text": text,
+                      "next": [n for n in ids_in(meta.get("next")) if n != slug], "craft": is_on(meta.get("craft"))})
     return found
 
 
@@ -121,8 +143,9 @@ def _line(value):
 
 
 def save(meta, folder=FOLDER):
-    """Write a skill file from fields (id, title, desc, version, words, text) and return the saved skill. Admin only
-    (the caller checks). Raises ValueError on a bad id or a words pattern that is not a valid regular expression."""
+    """Write a skill file from fields (id, title, desc, version, words, text, and next and craft) and return the saved
+    skill. Admin only (the caller checks). Raises ValueError on a bad id or a words pattern that is not a valid regular
+    expression. A skill saved again without "next" or "craft" (the console's form has neither) keeps the ones it had."""
     sid = _line(meta.get("id")).lower()
     if not SLUG.match(sid):
         raise ValueError("The id must be lower-case letters, numbers and hyphens, and start with a letter or number.")
@@ -136,6 +159,13 @@ def save(meta, folder=FOLDER):
     if desc:
         head += "desc: {}\n".format(desc)
     head += "version: {}\nwords: {}\n".format(_line(meta.get("version")) or "1", words)
+    before = find(sid, folder) or {}
+    given = meta.get("next")
+    after = ids_in(", ".join(given) if isinstance(given, list) else given if isinstance(given, str) else ", ".join(before.get("next") or []))
+    if after:
+        head += "next: {}\n".format(", ".join(after))
+    if is_on(meta["craft"]) if "craft" in meta else before.get("craft"):
+        head += "craft: true\n"
     path = Path(folder) / (sid + ".md")
     path.write_text(head + "---\n" + str(meta.get("text") or "").strip() + "\n", encoding="utf-8")
     return find(sid, folder)
@@ -166,7 +196,8 @@ def pick(instruction, history=(), folder=FOLDER, force=()):
         said += "\n" + str(last["instruction"])
     all_skills = load(folder)
     chosen = [s for s in all_skills if s["id"] in (force or [])]   # the ones the user named, first and always kept
-    scored = [(len(s["words"].findall(said)), s) for s in all_skills if s["id"] not in (force or [])]
+    # a craft skill is never picked by its words: a skill that names it loads it, or the user names it with /<id>
+    scored = [(len(s["words"].findall(said)), s) for s in all_skills if s["id"] not in (force or []) and not s["craft"]]
     matched = [s for count, s in sorted(scored, key=lambda pair: -pair[0]) if count]
     return (chosen + matched)[:max(MAX_GIVEN, len(chosen))]
 
@@ -189,6 +220,23 @@ def parts(text):
     return found
 
 
+def catalogue(given=(), folder=FOLDER):
+    """Every skill not given with this message, one line each ("id: when to use it"), for the agent to load with
+    read_skill when the message fits one the words did not find. A craft skill is marked so: it is loaded for a skill in
+    use that calls for it, or when the user asks for exactly that work, never because a message's words fit it."""
+    taken = {s["id"] for s in given}
+    return "\n".join("- {}{}: {}".format(s["id"], " (craft: for a skill in use that calls for it, or when the user asks for exactly this)"
+                                         if s["craft"] else "", s["desc"] or s["title"]) for s in load(folder) if s["id"] not in taken)
+
+
+def hand_off(skill):
+    """The line that ends a skill which names the skills after it, or ""."""
+    if not skill.get("next"):
+        return ""
+    return ("[When this skill's own steps are done, hand on to {}: load it with read_skill (op its id, query 0) and follow it "
+            "from its first step. Say so to the user in one line.]").format(" then ".join(skill["next"]))
+
+
 def guide(picked, limit=MAX_CHARS):
     """The picked skills as one text for the model, or "" when none fits. A skill longer than `limit` characters is never
     cut: the model is given its opening and a list of its parts, and reads each part with the read_skill tool when it comes
@@ -198,7 +246,8 @@ def guide(picked, limit=MAX_CHARS):
         text = s["text"]
         if limit is not None and len(text) > limit:
             text = outline(s, limit)
-        out.append("{} (skill {} v{}):\n{}".format(s["title"], s["id"], s["version"], text))
+        ending = hand_off(s)
+        out.append("{} (skill {} v{}):\n{}{}".format(s["title"], s["id"], s["version"], text, "\n" + ending if ending else ""))
     return "\n\n".join(out)
 
 
@@ -238,3 +287,86 @@ def read_part(skill, query, offset=0):
     more = "" if offset + len(page) >= len(chunk) else "\n[{:,} of {:,} characters of this part: read_skill again with offset {}.]".format(
         offset + len(page), len(chunk), offset + len(page))
     return page + more, None
+
+
+# ---------------------------------------------------------------- drafts: skills written in a chat, for an admin to publish
+
+DRAFT_CHARS = 60_000   # the most of a draft's steps that is kept
+
+
+def _drafts(folder):
+    return Path(folder) / DRAFTS
+
+
+def slug_of(title):
+    """A skill id made from a title ("Hindi wedding reel" -> "hindi-wedding-reel")."""
+    return re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:48].strip("-")
+
+
+def save_draft(fields, by, folder=FOLDER):
+    """Keep a skill drafted in a chat: fields {"id"?, "title", "desc" (when to use it), "text" (the steps), "words"?}.
+    by: {"id", "name"} of who drafted it. A draft never replaces a skill or another draft: its id gets a number.
+    Returns the draft as drafts() lists it. Raises ValueError when there is no title or no steps."""
+    title, text = _line(fields.get("title"))[:120], str(fields.get("text") or "").strip()[:DRAFT_CHARS]
+    if not title or not text:
+        raise ValueError("A draft needs a title and its steps.")
+    words = _line(fields.get("words"))
+    try:
+        re.compile(words or r"(?!)", re.IGNORECASE)
+    except re.error:
+        words = ""
+    base = slug_of(fields.get("id") or title) or "skill"
+    if not SLUG.match(base):
+        base = "skill-" + base
+    place = _drafts(folder)
+    place.mkdir(parents=True, exist_ok=True)
+    sid, n = base, 1
+    while find(sid, folder) or (place / (sid + ".md")).is_file():
+        n += 1
+        sid = "{}-{}".format(base, n)
+    head = "id: {}\ntitle: {}\ndesc: {}\nversion: 1\nwords: {}\ndrafted_by: {}\ndrafted_by_name: {}\ndrafted: {}\n".format(
+        sid, title, _line(fields.get("desc"))[:300], words, int(by.get("id") or 0), _line(by.get("name"))[:80], int(time.time()))
+    (place / (sid + ".md")).write_text(head + "---\n" + text + "\n", encoding="utf-8")
+    return next(d for d in drafts(folder) if d["id"] == sid)
+
+
+def _number(value):
+    return int(value) if str(value or "").isdigit() else 0
+
+
+def drafts(folder=FOLDER):
+    """The skills drafted in chats, waiting: [{"id", "title", "desc", "words", "text", "by", "by_name", "at"}], newest first."""
+    found = []
+    for path in sorted(_drafts(folder).glob("*.md")) if _drafts(folder).is_dir() else []:
+        meta, text = parse(path.read_text(encoding="utf-8"))
+        found.append({"id": path.stem, "title": meta.get("title") or path.stem, "desc": meta.get("desc") or "",
+                      "words": meta.get("words") or "", "text": text, "by": _number(meta.get("drafted_by")),
+                      "by_name": meta.get("drafted_by_name") or "", "at": _number(meta.get("drafted"))})
+    return sorted(found, key=lambda d: -d["at"])
+
+
+def publish(draft_id, changes=None, folder=FOLDER):
+    """Make a draft a skill the agent uses (admins only: the caller checks), with any changes the admin made to its
+    fields. Returns the skill. Raises ValueError when there is no such draft or its id is a skill's already."""
+    sid = _line(draft_id).lower()
+    path = _drafts(folder) / (sid + ".md")
+    if not SLUG.match(sid) or not path.is_file():
+        raise ValueError("There is no draft “{}”.".format(sid))
+    if find(sid, folder):
+        raise ValueError("A skill with the id “{}” already exists.".format(sid))
+    draft = next(d for d in drafts(folder) if d["id"] == sid)
+    fields = {k: draft[k] for k in ("title", "desc", "words", "text")}
+    fields.update({k: v for k, v in (changes or {}).items() if k in ("title", "desc", "words", "text", "next", "craft")})
+    saved = save(dict(fields, id=sid, version="1"), folder)
+    path.unlink()
+    return saved
+
+
+def discard(draft_id, folder=FOLDER):
+    """Throw a draft away. Returns True when there was one."""
+    sid = _line(draft_id).lower()
+    path = _drafts(folder) / (sid + ".md")
+    if SLUG.match(sid) and path.is_file():
+        path.unlink()
+        return True
+    return False

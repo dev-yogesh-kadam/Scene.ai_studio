@@ -98,7 +98,7 @@ def test_without_a_run_the_state_tools_say_so(client, monkeypatch):
     register(client)
     seen = hosted(monkeypatch, client, {"tool": "state_read", "path": "/motion/status"}, {"tool": "finish", "reply": "ok", "steps": [STEP]})
     client.post("/api/agent/plan", json={"instruction": "a dog film"})
-    assert any("keeps no run state" in m["content"] for m in seen[-1] if m["role"] == "user")
+    assert any("keeps no state" in m["content"] for m in seen[-1] if m["role"] == "user")
 
 
 def test_a_question_needs_two_options():
@@ -150,7 +150,7 @@ def test_a_runs_step_may_use_its_own_working_files(client, monkeypatch):
     hosted(monkeypatch, client, {"tool": "finish", "reply": "One shot.", "steps": [use]})
     in_run = client.post("/api/agent/plan", json={"instruction": "the anchor", "run": "pm-1"}).json()
     assert [u["name"] for u in in_run["steps"][0]["uses"]] == ["Maya at 1500"]
-    # without the run the working file is no one's reference, and it is not in the asset book either
+    # without the run the working file is no one's reference, and it is not in NeuralCore either
     outside = client.post("/api/agent/plan", json={"instruction": "the anchor"}).json()
     assert outside["steps"][0]["uses"] == []
     from scene import memory

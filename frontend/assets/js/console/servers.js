@@ -1,17 +1,16 @@
-// The console's Servers & APIs section: the ComfyUI servers the renders run on, the Ollama servers of the agent's local
-// models, and hosted APIs that speak the OpenAI chat API. Each can be added, switched off or removed while the studio
-// runs. A waiting render goes to the first ComfyUI server that is free; a call to a local model goes to the Ollama
-// server that has it and is answering the fewest calls. See backend/scene/endpoints.py.
+// The console's Servers section: the ComfyUI servers the renders run on, and Langfuse, which is sent every call of the
+// agent's models. Each can be added, switched off or removed while the studio runs; a waiting render goes to the first
+// one that is free. The agent's model is Claude, through Claude Code on the studio's PC: it needs no server here.
+// See backend/scene/endpoints.py and langfuse_trace.py.
 
 import { api } from '../api.js';
 import { el, field } from '../dom.js';
 
 const ABOUT = {
   comfy: 'Renders go to the first one that answers and is not rendering. The first is the main one: uploaded files are kept there and copied to the others when a render needs them.',
-  ollama: 'The agent\'s local models. Every model these servers have is offered; each call goes to the server that has the model and is least busy.',
-  openai: 'Hosted models through the OpenAI chat API (Kimi, Gemini, an Ollama behind /v1...). Its models show in the agent\'s model picker as "<name>/<model>".',
+  langfuse: 'Every call of the agent\'s models is sent here too: the words, the answer, the tokens and what they cost, one trace per turn and one session per Agent tab. The keys are the project\'s, from Langfuse\'s Settings → API keys.',
 };
-const PLACEHOLDER = { comfy: 'http://100.123.221.34:8188', ollama: 'https://name.trycloudflare.com', openai: 'https://api.moonshot.ai/v1' };
+const PLACEHOLDER = { comfy: 'http://100.123.221.34:8188', langfuse: 'http://127.0.0.1:3000' };
 
 // The form for one: a new one (`row` without an id) or an existing one.
 function form(kinds, row, ctx, close) {
@@ -19,17 +18,30 @@ function form(kinds, row, ctx, close) {
   // No autofill: a browser would put the console's sign-in email and password in the address and the key.
   const name = el('input', { type: 'text', autocomplete: 'off', maxlength: 60, value: row.name || '', placeholder: 'Zoro, Kaggle…' });
   const url = el('input', { type: 'text', autocomplete: 'off', value: row.url || '', placeholder: PLACEHOLDER[row.kind] });
-  const key = el('input', { type: 'password', autocomplete: 'new-password', placeholder: row.has_key ? 'Kept; type to replace it' : 'Only for an API' });
-  const models = el('input', { type: 'text', autocomplete: 'off', value: row.models || '', placeholder: 'Empty: all it has. Or qwen3:14b, kimi-k2.6' });
   const active = el('input', { type: 'checkbox', checked: row.active !== 0 });
+  // Langfuse's two keys, sent as "public:secret"; left empty on an edit, the ones it has are kept.
+  const kept = row.has_key ? 'Kept unless you type new ones' : '';
+  const publicKey = el('input', { type: 'text', autocomplete: 'off', placeholder: kept || 'pk-lf-…' });
+  const secretKey = el('input', { type: 'password', autocomplete: 'new-password', placeholder: kept || 'sk-lf-…' });
+  const keys = el('div', { class: 'grid2' }, field('Public key', publicKey), field('Secret key', secretKey));
   const notice = el('p', { class: 'notice' });
-  kind.onchange = () => { url.placeholder = PLACEHOLDER[kind.value]; };
+  const showKeys = () => { keys.style.display = kind.value === 'langfuse' ? '' : 'none'; };
+  kind.onchange = () => { url.placeholder = PLACEHOLDER[kind.value]; showKeys(); };
+  showKeys();
   const submit = el('button', { class: 'btn primary' }, row.id ? 'Save' : 'Add');
   const save = async () => {
     if (submit.disabled) return;   // one click, one server: a second click while it saves does nothing
     submit.disabled = true;
     submit.textContent = row.id ? 'Saving…' : 'Adding…';
-    const body = { kind: kind.value, name: name.value, url: url.value, api_key: key.value, models: models.value, active: active.checked };
+    const body = { kind: kind.value, name: name.value, url: url.value, active: active.checked };
+    if (kind.value === 'langfuse' && (publicKey.value.trim() || secretKey.value.trim())) {
+      if (!publicKey.value.trim() || !secretKey.value.trim()) {
+        notice.className = 'notice error'; notice.textContent = 'Type both keys, or neither to keep the ones it has.';
+        submit.disabled = false; submit.textContent = row.id ? 'Save' : 'Add';
+        return;
+      }
+      body.api_key = publicKey.value.trim() + ':' + secretKey.value.trim();
+    }
     try {
       await api('/api/admin/endpoints' + (row.id ? '/' + row.id : ''), { method: row.id ? 'PUT' : 'POST', json: body });
       ctx.draw();
@@ -40,8 +52,8 @@ function form(kinds, row, ctx, close) {
   };
   submit.onclick = save;
   return el('div', { class: 'card' },
-    el('div', { class: 'grid2' }, field('What it is', kind), field('Name', name), field('Address', url), field('API key', key),
-      field('Models', models)),
+    el('div', { class: 'grid2' }, field('What it is', kind), field('Name', name), field('Address', url)),
+    keys,
     el('label', { class: 'check' }, active, 'In use'),
     notice,
     el('div', { class: 'row', style: 'margin-top:12px' },
@@ -64,14 +76,13 @@ function line(e, kinds, ctx) {
     try { await api('/api/admin/endpoints/' + e.id, { method: 'PUT', json: { active: !e.active } }); ctx.draw(); } catch (err) { alert(err.message); }
   };
   const state = !e.active ? 'Off' : !e.online ? 'Not answering'
-    : e.kind === 'comfy' ? (e.running ? 'Rendering' : 'Free') + (e.detail ? ' · ' + e.detail : '')
-      : e.kind === 'ollama' ? `${e.calls ? e.calls + ' calls now' : 'Free'} · ${(e.found || []).join(', ') || 'no models'}`
-        : 'Answers';
+    : e.kind === 'langfuse' ? e.detail || 'Answering'
+    : (e.running ? 'Rendering' : 'Free') + (e.detail ? ' · ' + e.detail : '');
   const row = el('div', { class: 'card' },
     el('div', { class: 'card-head', style: 'justify-content:flex-start;gap:10px' },
       dot(e), el('h2', {}, e.name)),
     address(e.url),
-    el('p', { class: 'muted small' }, state, e.models ? ` · offered: ${e.models}` : ''),
+    el('p', { class: 'muted small' }, state),
     el('div', { class: 'row' },
       el('button', { class: 'btn small', onclick: () => slot.replaceChildren(form(kinds, e, ctx, () => slot.replaceChildren())) }, 'Edit'),
       el('button', { class: 'btn small', onclick: toggle }, e.active ? 'Switch off' : 'Switch on'),
@@ -94,7 +105,7 @@ export async function servers(ctx) {
   };
   return [
     el('div', { class: 'row' },
-      el('p', { class: 'muted', style: 'flex:1' }, 'Add a server or an API here and the studio uses it at once, no restart.'),
+      el('p', { class: 'muted', style: 'flex:1' }, 'Add a server here and the studio uses it at once, no restart.'),
       el('button', { class: 'btn small', onclick: () => { checkNow = true; ctx.draw(); } }, 'Check again')),
     ...Object.entries(d.kinds).flatMap(([kind, label]) => [
       el('div', { class: 'card-head', style: 'margin-top:18px' }, el('h2', {}, label),

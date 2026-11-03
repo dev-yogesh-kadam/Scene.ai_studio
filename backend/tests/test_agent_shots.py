@@ -109,7 +109,7 @@ def test_a_hosted_model_looks_checks_and_then_finishes(client, monkeypatch):
     plan = client.post("/api/agent/plan", json={"instruction": "a dog film"}).json()
     assert [s["name"] for s in plan["steps"]] == ["Dog in the park"] and plan["direction"] == "Film: dog"
     said = [e["text"] for e in plan["activity"] if e["type"] == "activity"]
-    assert any(t.startswith("Looked in the asset book for “meera”: 1 found") for t in said)
+    assert any(t.startswith("Looked in NeuralCore for “meera”: 1 found") for t in said)
     assert any(t.startswith("Checked 1 step, 1 left out") for t in said)
     assert any("A step could not run" in t for t in said)
     # the model was told what each tool found, and the hint when its finishing answer was wrong

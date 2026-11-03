@@ -7,7 +7,7 @@ The agent also knows what was made in the project (the library, on the canvas).
 
 What a picture shows is written once by the agent's model looking at it, and kept with it (assets.about,
 generations.about), so the agent knows what is in a picture and not only its name. The agent gets all of it as its
-"asset book": the saved assets and uploads in full, the latest items in full, older items by name.
+"NeuralCore": the saved assets and uploads in full, the latest items in full, older items by name.
 """
 
 import asyncio
@@ -213,6 +213,9 @@ def _asset_entry(row):
         entry["unnamed"] = True
     if row["use_note"]:
         entry["use"] = row["use_note"]
+    if row.get("preferred_item"):   # the picture of it this module prefers (kit.override)
+        entry["prefer_item"] = row["preferred_item"]
+    _add_facts(entry, row)
     return entry
 
 
@@ -229,7 +232,18 @@ def _item_entry(row, in_cast):
         entry["review"] = checked
     if row.get("rating"):   # the user's thumbs: reuse what they liked, never what they did not
         entry["liked" if row["rating"] > 0 else "disliked"] = True
+    _add_facts(entry, row)
     return entry
+
+
+def _add_facts(entry, row):
+    """What the agent noted of it in the catalogue (core.py): /assets/<id>/facts, so find_assets finds it by them too."""
+    try:
+        facts = json.loads(row.get("facts") or "{}")
+    except ValueError:
+        facts = {}
+    if isinstance(facts, dict) and facts:
+        entry["facts"] = facts
 
 
 def _project_items(db, user_id, project, limit, kinds=("image", "video")):
@@ -237,7 +251,7 @@ def _project_items(db, user_id, project, limit, kinds=("image", "video")):
     out: there are hundreds of them, and the run's own state names them."""
     where, params = ("project_id = ?", (user_id, project)) if project else ("project_id IS NULL", (user_id,))
     marks = ", ".join("?" for _ in kinds)
-    return db.all("SELECT id, name, kind, filename, about, settings, workflow, created, review, rating FROM generations WHERE user_id = ? AND "
+    return db.all("SELECT id, name, kind, filename, about, settings, workflow, created, review, rating, facts FROM generations WHERE user_id = ? AND "
                   + where + " AND run = '' AND kind IN (" + marks + ") ORDER BY created DESC LIMIT ?", (*params, *kinds, limit))
 
 
@@ -247,7 +261,7 @@ def _uploads(db, user_id, project, limit):
 
 
 def book(db, user_id, project, pinned=None):
-    """The agent's asset book for a project: [entry], the project's kit first (its always-on entries first), then the
+    """The agent's NeuralCore for a project: [entry], the project's kit first (its always-on entries first), then the
     project's items. pinned: unused (the always-on entries of the kit are the cast now).
 
     Each entry: {"asset" or "item": id, "name", "type", "kind", "shows", "use"?, "always"?, "unnamed"?}; a kit entry kept
@@ -288,7 +302,12 @@ def kit_row(row):
     return {"id": row["id"], "name": row["name"], "tag": row["tag"], "type": TYPES.get(row["tag"], "other"), "kind": row["kind"],
             "about": row["about"], "use_note": row["use_note"], "origin": row["origin"], "created": row["created"],
             "always": bool(row["always"]), "named": bool(row["named"]), "position": row["position"], "item": row["made_from"],
-            "url": "/api/kit/{}/file".format(row["id"])}
+            "url": "/api/kit/{}/file".format(row["id"]),
+            # what a module changed of the project's entry for itself (kit.override)
+            "hidden": bool(row.get("hidden")), "changed_here": bool(row.get("changed_here")), "preferred_item": row.get("preferred_item"),
+            # how it hangs together with the other entries (kit.py): a look or time of day, a palette, relatives as stored
+            "look_of": row.get("look_of"), "variant": row.get("variant") or "", "from_scene": row.get("from_scene"),
+            "palette": row.get("palette") or "", "relations": kit.relations_of(row)}
 
 
 # ---------------------------------------------------------------- looking at pictures
@@ -302,6 +321,27 @@ async def _picture(path):
     """A small JPEG of a picture or of a video's first moments, base64, for the model to look at."""
     still = await media.poster(path)   # reads an image as well as a video, and keeps the result next to the file
     return base64.b64encode(still.read_bytes()).decode("ascii")
+
+
+async def analyse(state, user_id, entry, model=None):
+    """A close study of one picture or clip of the book (agent.analyse), its facts kept in the catalogue (core.py):
+    photoreal, has_person, scene, and what must be preserved and avoided. Raises AgentError or OSError."""
+    path = _path(state, user_id, entry["_file"])
+    if not path.is_file():
+        raise OSError("its file is gone")
+    found = await state.agent.analyse(await _picture(path), entry["name"], entry["kind"], **({"model": model} if model else {}))
+    key = entry.get("asset") if entry["_table"] == "assets" else entry.get("item")
+    row = state.db.one("SELECT facts FROM {} WHERE id = ? AND user_id = ?".format(entry["_table"]), (key, user_id))
+    if row is not None:
+        try:
+            facts = json.loads(row["facts"] or "{}")
+        except ValueError:
+            facts = {}
+        facts.update(photoreal=found["photoreal"], has_person=found["has_person"], scene=found["scene"][:200],
+                     preserve=found["preserve"][:10], avoid=found["avoid"][:10])
+        state.db.run("UPDATE {} SET facts = ? WHERE id = ? AND user_id = ?".format(entry["_table"]),
+                     (json.dumps(facts, ensure_ascii=False)[:4000], key, user_id))
+    return found
 
 
 async def describe_missing(state, user_id, entries, limit=DESCRIBE_AT_ONCE, seconds=DESCRIBE_SECONDS, model=None):

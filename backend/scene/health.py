@@ -1,5 +1,5 @@
-"""Whether the studio is well: its two servers (the render server, ComfyUI, and the agent's model server, Ollama), its
-disk, its backups and its queue.
+"""Whether the studio is well: its render server (ComfyUI), the agent's model (Claude, through Claude Code on this
+machine), its disk, its backups and its queue.
 
 `problems` says what is wrong right now; the admin console's Overview lists it. The `Watcher` asks it every minute
 while the app runs, so nobody has to have the console open: a problem found twice in a row becomes an alert (the
@@ -23,7 +23,7 @@ DAY = 86400
 # What is said when a problem is gone, by its key.
 RESOLVED = {
     "render": "The render server answers again",
-    "model": "The agent's model server answers again",
+    "model": "Claude is set up for the agent again",
     "disk": "There is enough disk space again",
     "backup": "The database has been backed up",
     "backup_check": "The newest backup reads back whole",
@@ -99,26 +99,19 @@ async def _render_server(state):
 
 
 async def model_server(state, fresh=False):
-    """The agent's model server (Ollama): whether it answers, its version, and the models it holds in memory now.
-    `online` is None when the studio has none (an empty ollama_url)."""
-    return dict(await remembered(state, "model:" + state.agent.url, lambda: _model_server(state), fresh))
+    """The agent's model: Claude, through Claude Code on this machine. {"online": whether Claude Code is there and models
+    are named for it, "url": the claude program, "models", "limits": its usage as last reported, "detail", "since"}."""
+    return dict(await remembered(state, "model", lambda: _model_server(state), fresh))
 
 
 async def _model_server(state):
     agent = state.agent
-    if not agent.url:
-        return {"online": None, "url": "", "loaded": []}
-    try:
-        version = (await agent.http.get(agent.url + "/api/version", timeout=5)).json().get("version", "")
-        loaded = (await agent.http.get(agent.url + "/api/ps", timeout=5)).json().get("models") or []
-        _mark(state.model_seen, True)
-        found = {"online": True, "version": version, "loaded": [
-            {"name": m.get("name", ""), "size": m.get("size") or 0, "vram": m.get("size_vram") or 0, "until": m.get("expires_at")}
-            for m in loaded]}
-    except (httpx.HTTPError, ValueError, AttributeError):
-        _mark(state.model_seen, False)
-        found = {"online": False, "loaded": []}
-    return dict(found, url=agent.url, since=state.model_seen["since"])
+    s = agent.services.get("claude")
+    online = bool(s and s.get("models"))
+    _mark(state.model_seen, online)
+    detail = "" if online else ("Claude Code isn't installed on the studio's PC, or claude_models is empty in config.json.")
+    return {"online": online, "url": (s or {}).get("cli", ""), "models": ["claude/" + m for m in (s or {}).get("models", [])],
+            "limits": agent.claude_limits, "detail": detail, "since": state.model_seen["since"]}
 
 
 def problem(key, level, text, tab):
@@ -137,8 +130,8 @@ async def problems(state, render=None, model=None):
         found.append(problem("render", "critical", "The render server has not answered at {} since {}. No renders can run.".format(
             render["url"], clock(render["since"])), "system"))
     if model["online"] is False:
-        found.append(problem("model", "serious", "The agent's model server has not answered at {} since {}. The agent can't plan "
-                                                 "and image prompts get no captions.".format(model["url"], clock(model["since"])), "system"))
+        found.append(problem("model", "serious", "{} The agent can't plan and image prompts get no captions.".format(
+            model["detail"]), "system"))
     state.output_dir.mkdir(parents=True, exist_ok=True)
     disk = shutil.disk_usage(state.output_dir)   # finished work is what fills a disk
     if disk.free < 10 * 1024 ** 3:

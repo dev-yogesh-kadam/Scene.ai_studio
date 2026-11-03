@@ -8,12 +8,17 @@ import { number, span, ago, stamp, tile, table, drawer, section, facts, person }
 const ROLES = [
   { id: 'main', label: 'Main model', hint: 'Plans and answers when the user picks none.', none: 'the first one there is' },
   { id: 'fast', label: 'Fast model', hint: 'The small jobs: image captions, notes, the check of a skill.', none: 'the model in use' },
-  { id: 'vision', label: 'Vision model', hint: 'Looks at pictures for a model that can\'t.', none: 'the first local model that can see' },
 ];
 const speed = (r) => (r.tokens_per_second ? `${r.tokens_per_second} tok/s` : '');
 const tokens = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : number(n));
 
-// A list of models to pick from, kept as typed text so a model can be named while the model server is off.
+// Where a run's trace opens in Langfuse, when one is set in Servers & APIs (docs/langfuse.md).
+const traceLink = (langfuse, trace, label = 'Open in Langfuse') => (langfuse && trace
+  ? el('a', { href: `${langfuse.url}/project/${encodeURIComponent(langfuse.project)}/traces/${trace}`, target: '_blank', rel: 'noopener',
+    class: 'small', onclick: (e) => e.stopPropagation() }, label)
+  : null);
+
+// A list of models to pick from, kept as typed text so a model can be named while Claude Code is not set up.
 function modelList(id, models) {
   return el('datalist', { id }, models.map((m) => el('option', { value: m })));
 }
@@ -39,8 +44,8 @@ function rolesCard(report, ctx) {
   return el('div', { class: 'card' },
     el('div', { class: 'card-head' }, el('h2', {}, 'Models for each role')),
     el('p', { class: 'muted small' }, report.models.length
-      ? `Any of the ${report.models.length} models the model server and the hosted services have now. Empty follows config.json.`
-      : 'The model server does not answer now, so no list: a model can still be named. Empty follows config.json.'),
+      ? `Any of the ${report.models.length} Claude models set up now. Empty follows config.json.`
+      : 'Claude Code is not set up on the studio PC, so no list: a model can still be named. Empty follows config.json.'),
     modelList('agent-models', report.models),
     ROLES.map((r) => {
       inputs[r.id] = el('input', { type: 'text', list: 'agent-models', value: report.roles[r.id], placeholder: `config.json: ${report.configured[r.id] || r.none}` });
@@ -75,7 +80,25 @@ async function openCall(call, models, holder) {
         el('details', { class: 'words-part', open: true }, el('summary', {}, 'answer'), el('pre', { class: 'words' }, JSON.stringify(words.answer, null, 2))))
       : el('p', { class: 'muted small' }, 'Its words are no longer kept: they are kept for a week.'),
     words && el('div', { class: 'row', style: 'margin-top:8px' }, modelList('agent-models-drawer', models), model, replay),
+    words && datasetRow(call),
     out);
+}
+
+// Keep a call in a Langfuse dataset: what was sent as its input, its answer as what is expected.
+function datasetRow(call) {
+  const name = el('input', { type: 'text', placeholder: 'Dataset name', value: 'agent-' + (call.purpose || 'calls').replace(/\s+/g, '-') });
+  const note = el('input', { type: 'text', placeholder: 'Note (optional)' });
+  const said = el('span', { class: 'muted small' });
+  const save = el('button', { class: 'btn small', onclick: async () => {
+    save.disabled = true;
+    try {
+      const r = await api(`/api/admin/agent/calls/${call.id}/dataset`, { method: 'POST', json: { dataset: name.value, note: note.value } });
+      said.className = 'muted small';
+      said.textContent = `Kept in “${r.dataset}”.`;
+    } catch (e) { said.className = 'error small'; said.textContent = e.message; }
+    save.disabled = false;
+  } }, 'Save to dataset');
+  return el('div', { class: 'row', style: 'margin-top:8px' }, name, note, save, said);
 }
 
 async function openRun(run, models) {
@@ -83,7 +106,8 @@ async function openRun(run, models) {
   const found = await api('/api/admin/agent/runs/' + encodeURIComponent(run.run));
   panel.replace(
     section('Run', facts([['Who', found.user ? `${found.user.name} (${found.user.email})` : 'The studio itself (a job, a check)'], ['Started', stamp(run.started)],
-      ['Calls', number(found.calls.length)], ['Time', span(run.seconds)], ['Tokens', tokens(run.tokens)]])),
+      ['Calls', number(found.calls.length)], ['Time', span(run.seconds)], ['Tokens', tokens(run.tokens)],
+      ...(found.langfuse && found.trace ? [['Langfuse', traceLink(found.langfuse, found.trace)]] : [])])),
     section('Calls, in order', found.calls.map((c, i) => {
       const holder = el('div');
       return el('div', { class: 'version' },
@@ -113,10 +137,11 @@ export async function agent(ctx) {
     el('div', { class: 'grid-2' },
       el('div', { class: 'card' },
         el('div', { class: 'card-head' }, el('h2', {}, 'Latest runs'), el('span', { class: 'muted small' }, 'a run: the calls of one request')),
-        table(['When', 'Who', 'For', 'Model', 'Tools', 'Calls', 'Time'], report.runs.map((r) => [
+        table(['When', 'Who', 'For', 'Model', 'Tools', 'Calls', 'Time', ...(report.langfuse ? [''] : [])], report.runs.map((r) => [
           ago(r.started), r.user_name ? person(r.user_name, r.user_email) : el('span', { class: 'muted' }, 'the studio'),
           r.purposes.join(', '), el('span', { class: 'small' }, r.models.join(', ')), el('span', { class: 'small' }, r.tools.join(', ')),
-          r.errors ? el('span', { class: 'error' }, `${r.calls} (${r.errors} failed)`) : number(r.calls), span(r.seconds)]),
+          r.errors ? el('span', { class: 'error' }, `${r.calls} (${r.errors} failed)`) : number(r.calls), span(r.seconds),
+          ...(report.langfuse ? [traceLink(report.langfuse, r.trace, 'Langfuse')] : [])]),
         { onRow: (i) => openRun(report.runs[i], report.models), empty: 'No calls yet. They appear as people use the agent.' }),
         el('p', { class: 'muted small', style: 'margin-top:10px' }, 'Each call is kept for 30 days; its words (what was sent and the answer) for a week, to read them again or replay them with another model.')),
       rolesCard(report, ctx)),

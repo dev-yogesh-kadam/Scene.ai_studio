@@ -46,7 +46,7 @@ const scenes = {
         <linearGradient id="${id}haze" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff9a5c" stop-opacity="0"/><stop offset="1" stop-color="#ff9a5c" stop-opacity=".55"/></linearGradient>
       </defs>
       <rect width="1600" height="900" fill="url(#${id}sky)"/>
-      <circle cx="1060" cy="560" r="330" fill="url(#${id}sun)"/>
+      <circle class="la-a-glow" cx="1060" cy="560" r="330" fill="url(#${id}sun)"/>
       <circle cx="1060" cy="560" r="62" fill="#fff1d2"/>
       <path d="${skyline(640, 7, 150, 70)}" fill="#7a3a5e" opacity=".55"/>
       <rect y="430" width="1600" height="260" fill="url(#${id}haze)"/>
@@ -77,12 +77,12 @@ const scenes = {
       <path d="M1600 0 L980 300 L980 640 L1600 900 Z" fill="#080c18"/>
       <rect x="620" y="300" width="360" height="340" fill="#101c38"/>
       <g filter="url(#${id}glow)"><rect x="150" y="220" width="210" height="64" fill="#ff2e88"/><rect x="1220" y="300" width="70" height="230" fill="#22e3ff"/><rect x="700" y="360" width="200" height="34" fill="#ffb02e"/></g>
-      <rect x="150" y="220" width="210" height="64" fill="none" stroke="#ffd1e6" stroke-width="5"/>
+      <rect class="la-a-flicker" x="150" y="220" width="210" height="64" fill="none" stroke="#ffd1e6" stroke-width="5"/>
       <rect x="1220" y="300" width="70" height="230" fill="none" stroke="#d6fbff" stroke-width="5"/>
       <rect x="700" y="360" width="200" height="34" fill="none" stroke="#ffe7bf" stroke-width="4"/>
       <path d="M0 900 L620 640 L980 640 L1600 900 Z" fill="url(#${id}wet)"/>
       <g filter="url(#${id}glow)" opacity=".55"><rect x="330" y="700" width="120" height="16" fill="#ff2e88"/><rect x="1080" y="690" width="26" height="120" fill="#22e3ff"/></g>
-      <g stroke="#9fb6ff" stroke-width="2" opacity=".35">${Array.from({ length: 70 }, (_, i) => { const x = (i * 233) % 1600, y = (i * 137) % 900; return `<path d="M${x} ${y} l-10 46"/>`; }).join('')}</g>
+      <g class="la-a-rain" stroke="#9fb6ff" stroke-width="2" opacity=".35">${Array.from({ length: 70 }, (_, i) => { const x = (i * 233) % 1600, y = (i * 137) % 900; return `<path d="M${x} ${y} l-10 46"/>`; }).join('')}</g>
       <g transform="translate(820 690) scale(1.5)" fill="#02030a"><path d="${RUNNER}"/></g>`,
     sketch: (id) => `
       <path d="M0 0 L620 300 L620 640 L0 900"/><path d="M1600 0 L980 300 L980 640 L1600 900"/><path d="M620 640 L980 640"/>
@@ -99,13 +99,16 @@ const scenes = {
         <radialGradient id="${id}dust" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#f3d7a6" stop-opacity=".95"/><stop offset="1" stop-color="#f3d7a6" stop-opacity="0"/></radialGradient>
       </defs>
       <rect width="1600" height="900" fill="url(#${id}sky)"/>
-      <circle cx="1240" cy="150" r="60" fill="#fffaf0"/>
-      <path d="M0 600 C220 520 420 560 640 530 C900 495 1150 560 1600 510 L1600 900 L0 900 Z" fill="#e9b97a"/>
-      <path d="M0 690 C300 610 520 700 820 640 C1080 590 1300 660 1600 620 L1600 900 L0 900 Z" fill="#d79a5a"/>
-      <path d="M0 800 C260 730 600 820 900 760 C1200 700 1400 780 1600 750 L1600 900 L0 900 Z" fill="#b7733d"/>
-      <ellipse cx="640" cy="640" rx="420" ry="70" fill="url(#${id}dust)"/>
-      <ellipse cx="420" cy="620" rx="260" ry="90" fill="url(#${id}dust)" opacity=".8"/>
-      <g transform="translate(980 650)" fill="#3a2414"><path d="M-80 0 L-70 -34 L-30 -40 L-10 -62 L44 -62 L56 -36 L84 -32 L88 0 Z"/><circle cx="-50" cy="2" r="17"/><circle cx="58" cy="2" r="17"/></g>`,
+      <circle class="la-a-halo" cx="1240" cy="150" r="130" fill="url(#${id}dust)" opacity=".5"/>
+      <circle class="la-a-sun" cx="1240" cy="150" r="60" fill="#fffaf0"/>
+      <g class="la-a-far"><path d="M-160 600 C220 520 420 560 640 530 C900 495 1150 560 1760 510 L1760 900 L-160 900 Z" fill="#e9b97a"/></g>
+      <g class="la-a-heat"><ellipse cx="640" cy="640" rx="420" ry="70" fill="url(#${id}dust)"/>
+      <ellipse cx="420" cy="620" rx="260" ry="90" fill="url(#${id}dust)" opacity=".8"/></g>
+      <g class="la-a-mid"><path d="M-160 690 C300 610 520 700 820 640 C1080 590 1300 660 1760 620 L1760 900 L-160 900 Z" fill="#d79a5a"/>
+      <g class="la-a-trail" fill="#f0cf98">${[0, 1, 2, 3, 4].map((i) => `<circle cx="890" cy="640" r="${18 + i * 4}" style="--i:${i}"/>`).join('')}</g>
+      <g transform="translate(980 650)"><g class="la-a-car" fill="#3a2414"><path d="M-80 0 L-70 -34 L-30 -40 L-10 -62 L44 -62 L56 -36 L84 -32 L88 0 Z"/><circle cx="-50" cy="2" r="17"/><circle cx="58" cy="2" r="17"/></g></g></g>
+      <g class="la-a-near"><path d="M-160 800 C260 730 600 820 900 760 C1200 700 1400 780 1760 750 L1760 900 L-160 900 Z" fill="#b7733d"/></g>
+      <g class="la-a-sand" fill="#fff3dc">${Array.from({ length: 26 }, (_, i) => `<circle cx="${(i * 263) % 1600}" cy="${520 + ((i * 97) % 330)}" r="${1.5 + (i % 3)}" style="--i:${i}"/>`).join('')}</g>`,
     sketch: (id) => `
       <circle cx="1240" cy="150" r="60"/><path d="M0 600 C220 520 420 560 640 530 C900 495 1150 560 1600 510"/>
       <path d="M0 690 C300 610 520 700 820 640 C1080 590 1300 660 1600 620"/><path d="M0 800 C260 730 600 820 900 760 C1200 700 1400 780 1600 750"/>

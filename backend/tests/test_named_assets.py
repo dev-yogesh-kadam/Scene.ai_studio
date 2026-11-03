@@ -43,7 +43,7 @@ def test_named_pictures_are_kept_once_and_an_object_is_a_prop(client):
              {"item": cam, "name": "Madelyn's Vlog Camera", "type": "character", "said": False},
              {"item": place, "name": "Bonfire Party Clearing", "type": "location", "said": True}]
     folder, outputs = client.app.state.assets_dir / str(me["id"]), client.app.state.outputs.folder(me["id"])
-    assert memory.keep_named(db, folder, outputs, me["id"], named) == []   # outside a project: there is no asset book
+    assert memory.keep_named(db, folder, outputs, me["id"], named) == []   # outside a project: there is no NeuralCore
     kept = memory.keep_named(db, folder, outputs, me["id"], named, film)
     assert [(k["name"], k["type"]) for k in kept] == [("Voilet", "character"), ("Madelyn's Vlog Camera", "prop"), ("Bonfire Party Clearing", "location")]
     assert memory.keep_named(db, folder, outputs, me["id"], named, film) == []   # named again: kept already
@@ -62,7 +62,7 @@ def test_a_message_that_names_its_pictures_keeps_them_for_every_tab(client, monk
     maya = picture(client, me["id"], "maya", "A woman in a red coat.", film)
     model(monkeypatch, client, {"thought": "", "reply": "Got it.", "steps": []})
     plan = client.post("/api/agent/plan", json={"instruction": "characters-\nMaya - @1", "selection": [maya], "project_id": film}).json()
-    assert any(e["text"] == "Kept in the asset book: Maya (character)" for e in plan["activity"])
+    assert any(e["text"] == "Kept in NeuralCore: Maya (character)" for e in plan["activity"])
     # a new tab, with nothing attached, finds her in the book by name
     asked = model(monkeypatch, client, {"thought": "", "reply": "Maya it is.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "a shot of Maya walking", "run": "tab-2", "project_id": film})

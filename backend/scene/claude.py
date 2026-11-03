@@ -1,10 +1,11 @@
 """Claude as a model of the agent, through Claude Code on this machine: the `claude` program the CLI and the VS Code
 extension share, signed in with its owner's Claude account, so no API key is needed. Each call runs `claude -p` once
-with Claude Code's own tools, settings, MCP servers and skills off: Claude only answers. The agent's tools, skills,
+with Claude Code's own tools, settings, MCP servers and skills off (but its web search, when the agent may research:
+WEB_TOOLS): Claude only answers. The agent's tools, skills,
 questions and Approve all stay in the studio (agent.py), the same as with any other model.
 
 Calls draw on the account's usage limits (a five-hour and a seven-day window), shared with everything else its owner
-does with Claude. A call refused at the limit is AgentBusy in agent.py, so the smallest local model answers instead.
+does with Claude. A call refused at the limit is AgentBusy in agent.py: the user is told when the limit lifts.
 
 A conversation of the studio is one session of Claude Code's (a thread, see agent.py): its first message carries
 everything, and each later one only what is new; Claude Code keeps the rest and its cache holds it, so the turns
@@ -17,6 +18,7 @@ off in it, and it is compacted, still the same session, when its context is COMP
 import asyncio
 import contextvars
 import glob
+import hashlib
 import json
 import os
 import re
@@ -33,6 +35,11 @@ except ImportError:
 
 PARALLEL = 3   # calls running at once; more wait their turn (each is a program of its own, and all share one account)
 MAX_TURNS = 3  # an answer in a schema takes two turns of Claude Code's (the answer, then its check)
+# Claude Code's own web search, the one of its tools a studio session may use: the search runs at Anthropic, so it
+# reaches nothing on this machine or its network. Reading a page is the studio's own tool (web_fetch, web.py), which
+# fetches only public addresses: Claude Code's WebFetch runs here and would reach the render PC and localhost.
+WEB_TOOLS = ("WebSearch",)
+WEB_TURNS = 6  # more turns for a call that may search first
 WINDOW = 1_000_000   # tokens of context the models have (Sonnet 5, Opus 4.7, Haiku 5.5 and later); claude_context in config.json
 COMPACT = 0.9        # a session is compacted when its context is this full (sessions.COMPACT)
 NO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}   # the owner's own notes of the folder never reach a studio session
@@ -110,12 +117,12 @@ def prompt_of(messages):
 gate = None   # made on first use, inside the event loop that uses it
 
 
-async def ask(s, model, messages, schema, images=(), thread=None):
+async def ask(s, model, messages, schema, images=(), thread=None, web=False):
     """Ask Claude through Claude Code. Returns (the answer as JSON text, {"prompt", "cached", "answer"} tokens, the
     account's usage limits as Claude Code reported them or None). Raises Busy, Lost or Failed.
     thread: the conversation's session ({"id", "sent"}), or None for a call of its own. With an id, only the messages
     after the first `sent` go, and only the user's: the session already holds Claude's own answers. Its id and `sent`
-    are kept up to date here."""
+    are kept up to date here. web: Claude may search the web (WEB_TOOLS) before it answers."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
     going_on = bool(thread and thread.get("id"))
@@ -129,8 +136,10 @@ async def ask(s, model, messages, schema, images=(), thread=None):
                                                                                 "data": picture}} for picture in images)]
     line = json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False)
     args = [s["cli"], "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", model,
-            "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--max-turns", str(MAX_TURNS),
-            "--settings", session_settings(s)]
+            "--tools", ",".join(WEB_TOOLS) if web else "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
+            "--max-turns", str(MAX_TURNS + (WEB_TURNS if web else 0)), "--settings", session_settings(s)]
+    if web:
+        args += ["--allowedTools", " ".join(WEB_TOOLS)]
     if going_on:
         args += ["--resume", thread["id"]]
     elif thread is None:
@@ -262,14 +271,28 @@ def _handlers(entry, names):
     return {name: one(name) for name in names}
 
 
+PROMPTS = Path(tempfile.gettempdir()) / "scene-claude-prompts"
+
+
+def prompt_file(system):
+    """The file a live session reads its system prompt from. On the command line the prompt (with a long skill, tens of
+    thousands of characters) would pass Windows' limit of about 32,000, and the program would not start at all."""
+    path = PROMPTS / (hashlib.sha1(system.encode("utf-8")).hexdigest() + ".txt")
+    if not path.is_file():
+        PROMPTS.mkdir(parents=True, exist_ok=True)
+        path.write_text(system, encoding="utf-8")
+    return str(path)
+
+
 async def _open(s, settings):
     """A connected client for one conversation. settings: {"model", "system", "schema", "tools": {name: (about, input
-    schema)}, "handlers", "resume", "max_turns"}."""
+    schema)}, "handlers", "resume", "max_turns", "web"}. With "web", Claude Code's web search (WEB_TOOLS) is on too."""
     tools = [sdk.tool(name, about, shape)(settings["handlers"][name]) for name, (about, shape) in settings["tools"].items()]
     Path(s["home"]).mkdir(parents=True, exist_ok=True)
+    web = list(WEB_TOOLS) if settings.get("web") else []
     options = sdk.ClaudeAgentOptions(
-        cli_path=s["cli"], model=settings["model"], system_prompt=settings["system"], tools=[],
-        allowed_tools=["mcp__{}__{}".format(TOOLS_SERVER, name) for name in settings["tools"]],
+        cli_path=s["cli"], model=settings["model"], system_prompt={"type": "file", "path": prompt_file(settings["system"])}, tools=web,
+        allowed_tools=["mcp__{}__{}".format(TOOLS_SERVER, name) for name in settings["tools"]] + web,
         mcp_servers={TOOLS_SERVER: sdk.create_sdk_mcp_server(TOOLS_SERVER, tools=tools)} if tools else {},
         strict_mcp_config=True, setting_sources=[], cwd=s["home"], resume=settings["resume"] or None,
         max_turns=settings["max_turns"], output_format={"type": "json_schema", "schema": settings["schema"]},
@@ -335,6 +358,8 @@ def _told(entry, message):
     for kind, text, data in _events_of(message):
         if kind == "compact":
             entry.compacted.append(data)
+        if kind == "tool_call" and text in WEB_TOOLS:   # Claude Code's own tool: it is not one of the studio's handlers
+            entry.called.append(text)
         if entry.record:
             try:
                 entry.record(kind, text, data)
@@ -359,16 +384,17 @@ async def _turn(entry, text):
     return result, limits
 
 
-async def converse(s, model, system, text, schema, thread, tools, about, finish_now, max_turns, result_chars=8000):
+async def converse(s, model, system, text, schema, thread, tools, about, finish_now, max_turns, result_chars=8000, web=False):
     """One message of a conversation in its live session. Returns (the answer as JSON text, {"prompt", "cached",
     "answer"} tokens, the usage limits or None, the names of the tools it called in order). Raises Busy, Lost or Failed.
     thread: the conversation's {"key", "id", ...}; its id (the session) and size are kept up to date here.
     tools: {name: async function(call) -> str}, the studio's tools for this message; about: {name: (what it does,
-    its input schema)}, every tool the session offers. A turn that runs out of max_turns is asked finish_now."""
+    its input schema)}, every tool the session offers. A turn that runs out of max_turns is asked finish_now. web: Claude
+    Code's web search is on in the session (WEB_TOOLS)."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
     key = thread.get("key") or thread.get("id") or "default"
-    signature = json.dumps([model, system, schema, sorted(about), max_turns], sort_keys=True)
+    signature = json.dumps([model, system, schema, sorted(about), max_turns, bool(web)], sort_keys=True)
     if text.lstrip().startswith("/"):   # a message is never taken for a command of Claude Code's (/compact): command() runs those
         text = "Message:\n" + text
     await _tidy()
@@ -384,7 +410,8 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
         try:
             if entry.client is None:
                 entry.client = await _open(s, {"model": model, "system": system, "schema": schema, "tools": about,
-                                               "handlers": _handlers(entry, about), "resume": thread.get("id"), "max_turns": max_turns})
+                                               "handlers": _handlers(entry, about), "resume": thread.get("id"), "max_turns": max_turns,
+                                               "web": web})
             result, limits = await _turn(entry, text)
             tokens = None
             if (result or {}).get("subtype") == "error_max_turns":   # still working when its turns ran out: it answers now
