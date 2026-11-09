@@ -107,6 +107,25 @@ def verdict_from(answer):
                                       "why": " ".join(str(fix.get("why") or "").split())[:240]}}
 
 
+# What a reference kept for reuse must be, by the type it is kept as (memory.KEEP_AS's tags), checked with its review:
+# a blurred, dark or cluttered sheet carries its flaws into every shot made from it.
+SHEET = ("This picture is kept as a reference for reuse: every later shot takes {what} from it. Check it as a reference "
+         "too, under \"clean\": it must be sharp and evenly lit, {how}, with no words, logos or watermarks that were not "
+         "asked for. {major} is major.")
+SHEET_CHECKS = {
+    "character": SHEET.format(what="this character's face, body and clothes", how="on a plain, clean background, only who "
+                              "it is of (several views of them are fine), with at least one view of the whole figure, head to toe",
+                              major="Blur, a busy background, someone who should not be there, or no view of the whole figure"),
+    "outfit": SHEET.format(what="these clothes", how="on a plain, clean background, the whole outfit in view",
+                           major="Blur, a busy background, or part of the outfit cut off"),
+    "prop": SHEET.format(what="this object", how="on a plain, clean background, the one object only, the whole of it in frame",
+                         major="Blur, a busy background, a second object, or the object cut off"),
+    "background": SHEET.format(what="this place's layout and light", how="the whole place readable from a clear viewpoint, "
+                               "with no people in it unless they were asked for", major="Blur, people who were not asked for, "
+                               "or a view so close the place cannot be read"),
+}
+
+
 def summary(verdict):
     """One line of a verdict, for Shared memory and the agent's book."""
     if not verdict:
@@ -145,6 +164,9 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
     focus = " ".join(str(made_with.get("check") or "").split())[:400] if isinstance(made_with, dict) else ""
     if focus:   # what the plan asked to check closely in this shot, besides the usual checks
         prompt = "{}\n\nCheck closely, besides the usual checks: {}".format(prompt, focus)
+    kept = (made_with.get("keep") or {}).get("tag") if isinstance(made_with, dict) and isinstance(made_with.get("keep"), dict) else None
+    if kept in SHEET_CHECKS:   # a reference kept for reuse: every later shot that uses it inherits its flaws
+        prompt = "{}\n\n{}".format(prompt, SHEET_CHECKS[kept])
     pictures = []
     for label, ref in list(references)[:MAX_REFERENCES]:
         if Path(ref).is_file():

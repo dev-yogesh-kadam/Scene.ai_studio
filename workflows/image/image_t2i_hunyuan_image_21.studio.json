@@ -1,6 +1,7 @@
 {
   "title": "Text to Image: HunyuanImage 2.1",
   "description": "HunyuanImage 2.1 text-to-image (Tencent Hunyuan Community (not EU/UK/S.Korea)). Native 2K; ByT5 glyph encoder helps text in images.",
+  "pick_when": "A portrait, or a title, sign or poster with words in it (first on a portrait and second on a poster in the studio's test). Weak on busy street scenes, where it writes garbled signs. Takes no reference pictures. Not for users in the EU, UK or South Korea.",
   "output_name": "9.filename_prefix",
   "labels": {},
   "required_refs": [],

@@ -2,6 +2,7 @@
   "title": "Restyle Video: LTX-2.3",
   "description": "A video given a new look: the motion and camera of your video are kept, the look comes from a style frame and the prompt (LTX-2.3 IC-LoRA, with sound).",
   "output_name": "68.filename_prefix",
+  "size_multiple": 64,
   "labels": {
     "900:value": "Describe the new look (the motion comes from the video)",
     "901:value": "Seconds of the video to use",
@@ -17,6 +18,7 @@
     "129_112",
     "129_704"
   ],
+  "pick_when": "Restyle a longer clip at 720p quickly, keeping its sound. In tests a painted style washed out and the clothes changed by the end: Wan VACE or Fun Control hold a style better.",
   "hints": [
     "Make the style frame from the video's first frame with a picture model, so the people and their places match.",
     "Describe what changes: the place, the clothes, the light, the style."

@@ -9,8 +9,11 @@ Each skill is a Markdown file in skills/ that starts with a few "key: value" lin
     ---
     The steps, in plain words.
 
-"words" is a regular expression; a skill is given to the agent when the user's new message (or, for a short follow-up,
-the message before it) matches it. The files are read on every message, so a change to one counts at once.
+A skill is given to the agent only when the user picks it (/<id>, or the panel), the run already follows it, or the
+skill in use hands on to it or calls for it. A message that asks for a video, with no skill picked, gets the default
+skill (DEFAULT, script-to-video), which hands on to the craft skills. "words" is a regular expression: the user naming
+a skill in words ("use the director skill") is found by it, and the console keeps it. The files are read on every
+message, so a change to one counts at once.
 
 Two more keys a skill may have:
 
@@ -28,8 +31,39 @@ from pathlib import Path
 
 FOLDER = Path(__file__).parent / "skills"
 DRAFTS = "drafts"   # the folder under FOLDER where drafts wait for an admin
-MAX_GIVEN = 2   # skills given with one message, the best matches first
 MAX_CHARS = 150_000   # the most of one skill that goes to a hosted model (about 40,000 tokens); a longer one is cut here, and the agent says so
+DEFAULT = "script-to-video"   # the skill of a message that asks for a video when the user picked none
+# A message that asks for a video to be made: a verb of making, then within a few words a video, film, reel... that is
+# not one already there ("make the video shorter" is an edit, not a new video).
+MAKES_VIDEO = re.compile(
+    r"\bscript[- ]to[- ]video\b"
+    r"|\b(make|making|create|creating|generate|produce|shoot|build|turn|convert|animate|want|need|like|do)\b[^.?!\n]{0,60}?"
+    r"(?<!\bthis )(?<!\bthat )(?<!\bthe )(?<!\bthese )(?<!\bthose )(?<!\bit )(?<!\bmy )"
+    r"\b(video|videos|film|films|movie|movies|reel|reels|animation|cartoon|episode|trailer|short film)\b",
+    re.IGNORECASE)
+# ...said as a request now: an order ("make…", also after a comma: "here is my script, turn it…"), or "can you",
+# "please", "I want", "let's"...
+REQUEST = re.compile(
+    r"(^|[.,;:!?\n]\s*)(please\s+)?(make|create|generate|produce|shoot|build|turn|convert|animate|do|direct)\b"
+    r"|\bscript[- ]to[- ]video\b|\b(can|could|would|will) you\b|\bplease\b|\b(i|we) (want|need)\b|\b(i|we)('d| would) like\b"
+    r"|\blet'?s\b|\bhelp me\b|\bi'?m (trying|looking) to\b",
+    re.IGNORECASE)
+# ...not what the user does as a rule, or did ("I always make Reels", "I made a film last week")
+HABIT = re.compile(r"\b(i|we)\s+(always|usually|often|sometimes|never|generally|normally|mostly|typically|mainly)\b"
+                   r"|\b(i|we)\s*('ve| have)?\s+(made|created|shot|produced)\b", re.IGNORECASE)
+# ...and more than one clip: a length of a clip at most (15 s), or "a clip" / "one shot", is made without the skill
+ONE_CLIP_SECONDS = 15
+SECONDS = re.compile(r"\b(\d{1,3}(?:\.\d+)?)\s*-?\s*(s|sec|secs|second|seconds)\b", re.IGNORECASE)
+ONE_CLIP = re.compile(r"\b(a|one|single|quick|short) (short |quick |little )?(clip|shot)\b", re.IGNORECASE)
+LONGER = re.compile(r"\b(minutes?|mins?|scenes|episodes?|story|script|series|several|many)\b", re.IGNORECASE)
+MATERIAL = ("audio", "text")   # an attached sound or script: the work of this skill, whatever the length said
+# ...and not a video of words and shapes: motion graphics are pages the agent designs (the film tool's html op), not a
+# film of shots made from a script.
+MOTION_GRAPHICS = re.compile(
+    r"\bhyper\s?frames?\b|\bmotion[- ]?graphic\w*|\bkinetic (type|typography|text)\b|\btypograph\w* (video|animation)\b"
+    r"|\b(animated|moving) (text|titles?|typography|infographics?|charts?)\b|\btext animation\b|\btitle (card|sequence)s?\b"
+    r"|\blower[- ]thirds?\b|\blyric video\b|\binfographic (video|animation)\b|\bexplainer (animation|motion)\b|\bhtml\b",
+    re.IGNORECASE)
 
 
 def _pairs(block):
@@ -126,12 +160,24 @@ def load(folder=FOLDER):
     return found
 
 
+CRAFT_PREFIX = "craft-"   # the craft skills name each other "craft-director", "craft-anchor": here they are director, anchor
+
+
 def find(skill_id, folder=FOLDER):
-    """The one skill with this id, or None. Used when the user asks for a skill by name with /<id>."""
-    for skill in load(folder):
-        if skill["id"] == skill_id:
-            return skill
+    """The one skill with this id, or None. Used when the user asks for a skill by name with /<id>. A craft skill's name
+    for another ("craft-director") finds it by its id here ("director") when no skill has that whole name."""
+    found = load(folder)
+    for wanted in (skill_id, canonical(skill_id)):
+        for skill in found:
+            if skill["id"] == wanted:
+                return skill
     return None
+
+
+def canonical(skill_id):
+    """A skill's id as this studio names it: "craft-anchor" is "anchor"."""
+    said = str(skill_id or "").strip().lower()
+    return said[len(CRAFT_PREFIX):] if said.startswith(CRAFT_PREFIX) else said
 
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -183,27 +229,38 @@ def remove(skill_id, folder=FOLDER):
 
 
 def pick(instruction, history=(), folder=FOLDER, force=()):
-    """The skills that fit a message, with any the user named by /<id> first; the rest fill up to MAX_GIVEN.
+    """The skills of a message: the ones the user chose (`force`: from a /command, the panel, or the run's own skill),
+    in that order. A message's words never pick a skill.
 
-    `force` is a list of skill ids the user chose explicitly (from a /command). They are always included.
+    `instruction` and `history` are kept for the callers; the default skill is wants_video()'s to decide."""
+    found = {s["id"]: s for s in load(folder)}
+    named = [i if i in found else canonical(i) for i in force or []]
+    return [found[i] for i in dict.fromkeys(named) if i in found]
 
-    A short follow-up ("make it portrait", "now the second scene") is about the same work as the message before it,
-    so that message counts too.
-    """
+
+def wants_video(instruction, history=(), attached=()):
+    """Whether a message asks for a film to be made now, so the default skill runs when the user picked none: a video
+    asked for, as a request, not a habit, and more than one clip. attached: the kinds of the files attached ("audio",
+    "text", "image"...); a sound or a script attached makes it a request for the skill's work, at any length said.
+    A short follow-up ("yes, portrait") is about the same work as the message before it, so that message counts too."""
     said = str(instruction or "")
     last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
     if len(said) < 60 and last.get("instruction"):
         said += "\n" + str(last["instruction"])
-    all_skills = load(folder)
-    chosen = [s for s in all_skills if s["id"] in (force or [])]   # the ones the user named, first and always kept
-    # a craft skill is never picked by its words: a skill that names it loads it, or the user names it with /<id>
-    scored = [(len(s["words"].findall(said)), s) for s in all_skills if s["id"] not in (force or []) and not s["craft"]]
-    matched = [s for count, s in sorted(scored, key=lambda pair: -pair[0]) if count]
-    return (chosen + matched)[:max(MAX_GIVEN, len(chosen))]
+    if not MAKES_VIDEO.search(said) or HABIT.search(said) or MOTION_GRAPHICS.search(said):
+        return False
+    if any(kind in MATERIAL for kind in attached or ()):
+        return True
+    if not REQUEST.search(said):
+        return False
+    lengths = [float(n) for n, _ in SECONDS.findall(said)]
+    one_clip = (lengths and max(lengths) <= ONE_CLIP_SECONDS) or ONE_CLIP.search(said)
+    return not (one_clip and not LONGER.search(said))
 
 
 PART = re.compile(r"(?m)^#{2,3} \S")   # a part of a skill begins at a heading of the second or third level
-PAGE = 12_000                          # characters of a part read at a time
+PAGE = 39_000                          # characters of a part read at a time: one read fits in read_skill's result (agent.SKILL_RESULT)
+READ_WHOLE = 39_000                    # a skill read_skill gives comes whole up to this, in one result; a longer one as its opening and parts
 OPENING_SHARE = 0.75                   # of the room a model has for a skill, what its opening may take
 
 

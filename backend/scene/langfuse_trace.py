@@ -214,13 +214,19 @@ class Sender:
         return sent
 
     async def run_forever(self):
+        down = False   # said once when Langfuse stops answering, and once when it answers again, not every half minute
         async with httpx.AsyncClient(timeout=httpx.Timeout(10, connect=3)) as http:
             while True:
                 await asyncio.sleep(EVERY)
                 try:
-                    await self.send(http)
+                    sent = await self.send(http)
+                    if down and sent:
+                        print("Langfuse answers again: the agent's calls held meanwhile were sent.")
+                        down = False
                 except (httpx.HTTPError, OSError) as error:
-                    print("The agent's calls could not be sent to Langfuse: {}".format(error))
+                    if not down:
+                        print("The agent's calls could not be sent to Langfuse: {} (kept, and tried again every 30 s)".format(error))
+                        down = True
                     await asyncio.sleep(30)   # down or restarting: a while before trying again
                 except Exception as error:   # whatever it is, the next calls are still sent
                     print("Langfuse: {}".format(error))

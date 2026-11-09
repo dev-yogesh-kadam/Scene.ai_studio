@@ -1,5 +1,5 @@
 // A project's page: on the left its cover, its analytics, its details and what can be done with it; on the right its
-// modules. A module is a canvas of its own, with its own timeline and agent tabs, inside the project; the project's own
+// modules. A module is a canvas of its own, with its own agent tabs, inside the project; the project's own
 // canvas is the first one, "Main". The page is /project/<project's id> (/project?id=<number> from before); opening a
 // module goes to its canvas.
 
@@ -55,7 +55,7 @@ export function render(view) {
         onclick: act(async () => { if (await projectDialog({ project: m, module: true, canvas: m.main })) load(); }) }, icon('pencil')),
       !m.main && el('button', { class: 'icon-btn', title: 'Delete', 'aria-label': 'Delete ' + m.name, onclick: act(async () => {
         if (await ask({ title: `Delete "${m.name}"?`, danger: true, confirm: 'Delete module',
-          message: `Its ${m.items} ${m.items === 1 ? 'item is' : 'items are'} deleted with it, for good, with its canvas, timeline and agent tabs. This can't be undone.` })) {
+          message: `Its ${m.items} ${m.items === 1 ? 'item is' : 'items are'} deleted with it, for good, with its canvas and agent tabs. This can't be undone.` })) {
           run(() => api('/api/projects/' + m.id, { method: 'DELETE' }));
         }
       }) }, icon('trash'))));

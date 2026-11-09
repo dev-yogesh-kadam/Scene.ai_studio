@@ -142,7 +142,7 @@ def test_a_long_skill_run_is_reminded_once_to_save_its_work(client, monkeypatch)
     me = register(client)
     db = client.app.state.db
     assert not runs.saved_any(db, me["id"], "pm-2")
-    runs.keep_skill(db, me["id"], "pm-2", "pocket-motion-seedance-v2")
+    runs.keep_skill(db, me["id"], "pm-2", "script-to-video")
     assert not runs.saved_any(db, me["id"], "pm-2")   # what the studio keeps for it is not the agent's work
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "Pick the models.", "steps": []})
     ready = {"ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}

@@ -4,7 +4,8 @@ A job's settings may carry:
 - "shot_number": the number of the story shot it is (1, 2, 3...). The canvas puts it in the row of that shot, rows in
   order of their numbers, and a retake (same number) stacks on the shot: the newest on top, the earlier takes behind.
 - "board": the name of a board of the canvas ("Characters", "Locations", "Props", "Styles", "Outputs", or any other).
-  The result goes on that board, which is made the first time a result names it.
+  The result goes on that board, which is made the first time a result names it. The whole film, the clips patched
+  into one (FINISHED), goes on "Final video" whether its job names no board or "Outputs".
 - "placement_group": what the result is a version of. Results of one group stack on their board instead of each taking
   a card: a re-render of the same deliverable lands on top of the one before. Without it, the shot or step id the job
   came from stands for it.
@@ -21,9 +22,10 @@ import time
 from .db import as_everyone
 
 KIND = "placement"
-BOARDS = ("Characters", "Locations", "Props", "Styles", "Outputs")   # the names the agent uses
+BOARDS = ("Characters", "Locations", "Props", "Styles", "Outputs", "Final video")   # the names the agent uses
 OUTPUTS = "Outputs"
-FINISHED = ("edit/film", "edit/assemble")   # the whole film: on Outputs, one card, when its job names no board
+FINAL_VIDEO = "Final video"   # the whole film, its clips patched into one: a board of its own, left of Outputs
+FINISHED = ("edit/film", "edit/assemble")   # the whole film: on Final video, one card, unless its job names another board
 FINAL = "final"
 MAX_SHOT = 999
 MAX_NAME = 40
@@ -98,13 +100,22 @@ def _write(db, owner, project_id, data):
                (owner, project_id or 0, KIND, json.dumps(data), time.time()))
 
 
+def run_of(job):
+    """The run a result is a working file of, "" when it is none. What goes on a board is there to be seen, so a run's
+    whole film, or anything else its job names a board for, is listed like any other result."""
+    settings = job.get("settings") or {}
+    if job.get("workflow") in FINISHED or clean_board(settings.get("board")):
+        return ""
+    return str(settings.get("run") or "")
+
+
 def place(db, job, item_id):
     """Put a finished result on the board its job names, making the board on first use, and on the stack of its group.
-    Returns {"board", "group"}, or None when the job names no board. The whole film (FINISHED) goes on Outputs without
-    one, each new cut stacking on the one before."""
+    Returns {"board", "group"}, or None when the job names no board. The whole film (FINISHED) goes on Final video when
+    it names none or Outputs, each new cut stacking on the one before."""
     settings = job.get("settings") or {}
-    finished = job.get("workflow") in FINISHED and not settings.get("board")
-    name = OUTPUTS if finished else clean_board(settings.get("board"))
+    finished = job.get("workflow") in FINISHED and clean_board(settings.get("board")) in (None, OUTPUTS)
+    name = FINAL_VIDEO if finished else clean_board(settings.get("board"))
     if not name or not item_id:
         return None
     owner, project_id = canvas_of(db, job["user_id"], job.get("project_id"))

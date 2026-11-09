@@ -1,6 +1,8 @@
 {
   "title": "Talking Head / Narration",
   "description": "A portrait and a voice make a lip-synced talking video: MiniMax H3 (best quality, up to 15 s) or Wan 2.2 S2V (long form, up to about 29 s).",
+  "pick_when": "A person talking to camera from a portrait and a voice track, up to about 29 s. Engine H3 holds the face and the lips best; Wan S2V only for one take longer than 15 s.",
+  "slots": {"voice_track": "3:audio"},
   "output_name": "92.filename_prefix",
   "labels": {
     "4:value": "Describe the delivery, motion and camera (not the words). Call the portrait <Picture 1>.",
@@ -204,6 +206,7 @@
   ],
   "hints": [
     "Describe the delivery, not the words: \"speaks warmly to camera, small natural nods\".",
+    "The video opens on the portrait, so the camera keeps its framing: a wide portrait stays wide. A closer framing in the prompt makes a hard cut away from it; for a close-up give a close portrait.",
     "For more than 15 s with H3, split the voice into 10-15 s pieces with the start offset and cut between them."
   ]
 }

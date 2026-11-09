@@ -1,6 +1,7 @@
 {
   "title": "Text to Image: FLUX.2 Klein 9B (distilled)",
   "description": "FLUX.2 Klein 9B (distilled) text-to-image (FLUX Non-Commercial (outputs usable)). Distilled: 4-6 steps, cfg 1, no negative prompt.",
+  "pick_when": "Quick drafts and options, about 20 s a picture, with references (up to 16). It follows details less closely than FLUX.2 dev (in the studio's test it put orange slices where petals were asked): make the final on FLUX.2 dev.",
   "output_name": "9.filename_prefix",
   "labels": {},
   "required_refs": [],

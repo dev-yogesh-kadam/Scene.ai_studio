@@ -190,39 +190,34 @@ def test_a_step_naming_state_that_is_not_there_is_left_out_with_the_reason(clien
     assert [s["name"] for s in plan["steps"]] == ["Dog in the park"]
 
 
-def test_a_module_changes_the_projects_neuralcore_for_itself(client, monkeypatch):
+def test_each_module_has_a_neuralcore_of_its_own(client, monkeypatch):
     ada, film = setup(client)
     one, two = module_of(client, film), module_of(client, film, "Episode 2")
-    upload(client, film)
-    item = db_of(client).one("SELECT id FROM generations WHERE project_id = ? ORDER BY id DESC", (film,))["id"]
-    hosted(monkeypatch, client, {"tool": "book_save", "item": item, "text": "Maya", "op": "character"}, {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "keep maya", "project_id": film})
-    [maya] = client.get("/api/kit", params={"project": film}).json()["entries"]
-    # module one hides Maya; module two and the project still have her
-    hidden = client.put("/api/kit/{}/here".format(maya["id"]), json={"project_id": one, "removed": True}).json()
-    assert hidden["hidden"] and hidden["changed_here"]
-    assert [e["hidden"] for e in client.get("/api/kit", params={"project": one}).json()["entries"]] == [True]
+    upload(client, one)
+    item = db_of(client).one("SELECT id FROM generations WHERE project_id = ? ORDER BY id DESC", (one,))["id"]
+    hosted(monkeypatch, client, {"tool": "book_save", "item": item, "text": "Maya", "op": "character", "settings": "always"},
+           {"tool": "finish", "reply": "ok", "steps": []})
+    client.post("/api/agent/plan", json={"instruction": "keep maya", "project_id": one})
+    [maya] = client.get("/api/kit", params={"project": one}).json()["entries"]
+    # module one has her; module two and the main canvas never see her
     from scene import kit
-    assert kit.entries(db_of(client), ada["id"], one) == []
-    assert [e["name"] for e in kit.entries(db_of(client), ada["id"], two)] == ["Maya"]
-    # module two's memory has her under /cast, with a reference to her picture in the catalogue
-    cast = core.Core(db_of(client), ada["id"], "tab1", two).read("/cast/maya")["value"]
+    assert [e["name"] for e in kit.always(db_of(client), ada["id"], one)] == ["Maya"]
+    assert client.get("/api/kit", params={"project": two}).json()["entries"] == []
+    assert kit.entries(db_of(client), ada["id"], film) == []
+    cast = core.Core(db_of(client), ada["id"], "tab1", one).read("/cast/maya")["value"]
     assert cast["type"] == "character" and cast["ref"].startswith("$state:/assets/") and cast["entry"] == maya["id"]
-    assert core.Core(db_of(client), ada["id"], "tab1", one).read("/cast/maya")["value"]["hidden_here"] is True
+    assert core.Core(db_of(client), ada["id"], "tab1", two).read("/cast")["value"] == {}
     with pytest.raises(runs.RunError, match="book_save"):
-        core.Core(db_of(client), ada["id"], "tab1", two).write("/cast/maya/type", "prop")
-    # the agent in module two makes her always on there only; renaming her needs the user's yes ("project")
-    seen = hosted(monkeypatch, client,
-                  {"tool": "book_save", "asset": maya["id"], "text": "Maya", "op": "character", "settings": "always"},
-                  {"tool": "book_save", "asset": maya["id"], "text": "Maya Rao", "op": "character"},
+        core.Core(db_of(client), ada["id"], "tab1", one).write("/cast/maya/type", "prop")
+    # the agent in module two cannot change module one's entry by its id
+    seen = hosted(monkeypatch, client, {"tool": "book_save", "asset": maya["id"], "text": "Maya Rao", "op": "character"},
                   {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "maya in every shot here", "project_id": two})
-    told = [m["content"] for m in seen[-1] if m["role"] == "user"]
-    assert any('"changed_in": "this module"' in t for t in told)
-    assert any("for the whole project" in t for t in told)
-    assert [e["name"] for e in kit.always(db_of(client), ada["id"], two)] == ["Maya"]
-    assert kit.always(db_of(client), ada["id"], film) == []
-    assert client.put("/api/kit/{}/here".format(maya["id"]), json={"project_id": film, "removed": True}).status_code == 400
+    client.post("/api/agent/plan", json={"instruction": "rename maya", "project_id": two})
+    assert any("in this module" in m["content"] for m in seen[-1] if m["role"] == "user")
+    assert [e["name"] for e in kit.entries(db_of(client), ada["id"], one)] == ["Maya"]
+    # deleting module one takes its NeuralCore with it
+    assert client.delete("/api/projects/{}".format(one)).status_code == 200
+    assert db_of(client).one("SELECT 1 FROM assets WHERE id = ?", (maya["id"],)) is None
 
 
 def test_the_agent_finds_an_entry_in_another_project_and_copies_it_here(client, monkeypatch):
@@ -254,7 +249,7 @@ def test_the_agent_remembers_a_user_across_projects_and_says_what_it_used(client
     hosted(monkeypatch, client, {"tool": "memory", "op": "remember", "path": "pref.shape", "value": "portrait, for Reels"},
            {"tool": "memory", "op": "remember", "path": "bad key", "value": "x"},
            {"tool": "finish", "reply": "Noted.", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "I always make Reels", "project_id": film})
+    client.post("/api/agent/plan", json={"instruction": "I always post Reels", "project_id": film})
     assert [(e["key"], e["value"]) for e in recall.entries(db_of(client), ada["id"])] == [("pref.shape", "portrait, for Reels")]
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "Portrait, as you make Reels.\n[from memory: pref.shape, pref.made_up]", "steps": []})
     plan = client.post("/api/agent/plan", json={"instruction": "a dog video", "project_id": other}).json()

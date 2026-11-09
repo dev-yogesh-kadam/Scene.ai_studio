@@ -216,8 +216,32 @@ def _scenes(folder=SCENE_FOLDER):
 
 
 SCENES = _scenes()
+
+# The scene recipes of the craft script writer (craft skills v2): the same kinds of scene, and more, written as craft for
+# telling the story rather than for shooting it. Searched as "scene-<kind>" in their own category, each given whole.
+RECIPE_FOLDER = Path(__file__).parent / "scene_recipes"
+RECIPE_CATEGORY = "scene-recipes"
+RECIPE_PREFIX = "scene-"
+
+
+def _recipes(folder=RECIPE_FOLDER):
+    """The scene recipes, one file per kind (awakening, backstory, battle...), as {"scene-<kind>": preset}: its title the
+    first heading, its use the line under it, the rest its craft."""
+    found = {}
+    for path in sorted(Path(folder).glob("*.md")):
+        lines = path.read_text(encoding="utf-8").strip().splitlines()
+        if not lines:
+            continue
+        key = RECIPE_PREFIX + path.stem
+        use = lines[1].strip() if len(lines) > 1 else ""
+        found[key] = {"id": key, "category": RECIPE_CATEGORY, "dimension": "recipe", "title": lines[0].lstrip("#").strip(),
+                      "when": use, "mixes": [RECIPE_PREFIX + m for m in re.findall(r"`([a-z-]+)`", use)], "craft": "\n".join(lines[2:]).strip()}
+    return found
+
+
+RECIPES = _recipes()
 FIELDS = ("id", "category", "dimension", "title", "words", "when", "clashes")
-CATEGORIES = sorted({p[1] for p in PRESETS} | ({SCENE_CATEGORY} if SCENES else set()))
+CATEGORIES = sorted({p[1] for p in PRESETS} | ({SCENE_CATEGORY} if SCENES else set()) | ({RECIPE_CATEGORY} if RECIPES else set()))
 MOST_FOUND = 8
 
 
@@ -234,8 +258,10 @@ def search(query="", category=""):
         text = " ".join(str(v) for v in item.values()).lower()
         if all(w in text for w in words):
             found.append({k: v for k, v in item.items() if v})
-    if category in ("", SCENE_CATEGORY):
-        for scene in SCENES.values():
+    for kept, its_category in ((SCENES, SCENE_CATEGORY), (RECIPES, RECIPE_CATEGORY)):
+        if category not in ("", its_category):
+            continue
+        for scene in kept.values():
             text = " ".join((scene["id"], scene["title"], scene["when"], scene["category"])).lower()
             if all(w in text for w in words):
                 found.append({k: v for k, v in scene.items() if k != "craft"})
@@ -257,7 +283,29 @@ def scene_craft(query):
     return text
 
 
+def recipe_craft(query, category=""):
+    """The scene recipes the query names ("scene-chase"; in their own category "chase" is enough), whole: the first
+    named is given and the rest are listed to search next, as scene_craft does."""
+    words = re.findall(r"[a-z-]+", str(query or "").lower())
+    if category == RECIPE_CATEGORY:
+        words = [w if w in RECIPES or RECIPE_PREFIX + w not in RECIPES else RECIPE_PREFIX + w for w in words]
+    named = [w for w in words if w in RECIPES]
+    if not named or any(w not in RECIPES and w not in SCENE_FILLER and w != RECIPE_CATEGORY for w in words):
+        return ""
+    first = RECIPES[named[0]]
+    text = "Scene recipe {} ({}). {}\n\n{}".format(first["id"], first["title"], first["when"], first["craft"])
+    rest = [n for n in dict.fromkeys(named[1:]) if n != first["id"]]
+    if rest:
+        text += "\n\nAlso named: {}. Search each by its name to read it.".format(", ".join(rest))
+    return text
+
+
 def for_tool(query, category=""):
+    category = str(category or "").strip().lower()
+    if category in ("", RECIPE_CATEGORY):
+        whole = recipe_craft(query, category)
+        if whole:
+            return whole
     if category in ("", SCENE_CATEGORY):
         whole = scene_craft(query)
         if whole:
@@ -280,4 +328,6 @@ Scene presets (category scene-types: """ + ", ".join(SCENES) + """) hold the cra
 really about, the engines to pick from, staging, camera and cutting, performance, the turn, what renders cleanly and
 the traps. Before you plan a scene of one of these kinds, search its name alone ("fight") and read the whole craft;
 most scenes mix two or more ("mixes"), so read each that fits, one search per name. Take only what serves the scene's
-idea; they are options, not a checklist."""
+idea; they are options, not a checklist.
+Scene recipes (category scene-recipes: """ + ", ".join(RECIPES) + """) hold the same kinds of scene, and more, as craft for
+writing the story (no camera): the script writer reads each kind's recipe whole by searching its name ("scene-chase")."""

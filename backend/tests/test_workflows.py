@@ -251,6 +251,18 @@ def test_h3_master_form_values_reach_their_nodes():
         assert long_edge % 32 == 0 and short_edge % 32 == 0
 
 
+def test_a_workflow_on_a_coarser_grid_rounds_its_size_down():
+    """LTX-2.3's IC-LoRA guide halves the latent, so its sizes are multiples of 64: 720p is 1280×704, not 1280×736."""
+    wf = workflows.load_workflow(VIDEO / "video_v2v_ltx23_iclora.json")
+    refs = {"199:file": {"comfy_name": "scene_a.mp4"}, "200:image": {"comfy_name": "scene_a.png"}}
+    for resolution, size in ((720, (1280, 704)), (480, (832, 448)), (1080, (1920, 1088))):
+        graph, ctx = workflows.build_prompt(wf, {"values": {"900:value": "Watercolour."}, "refs": refs, "resolution": resolution,
+                                                 "orientation": "landscape"})
+        assert (ctx["width"], ctx["height"]) == size
+        assert (graph["129_113"]["inputs"]["value"], graph["129_98"]["inputs"]["value"]) == size
+    assert workflows.video_size(720, "portrait", 64) == (704, 1280)
+
+
 def test_h3_master_first_frame_mode_leaves_the_reference_slots_empty():
     refs = {"201:image": {"comfy_name": "scene_face.png"}, "207:video": {"comfy_name": "scene_move.mp4"}, "208:audio": {"comfy_name": "scene_voice.wav"},
             "209:image": {"comfy_name": "scene_first.png"}, "211:audio": {"comfy_name": "scene_track.wav"}}

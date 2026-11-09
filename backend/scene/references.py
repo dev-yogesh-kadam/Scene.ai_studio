@@ -26,9 +26,10 @@ KINDS = {
 # they come in, so every workflow can take them.
 CONVERTED = {".heic", ".heif", ".avif"}
 
-# What the user brings that is words, filed as "text": a script (.docx, .pdf, .txt, .md) or a transcript (.srt, .json).
-# A Word document or a PDF is kept as the plain text of it.
-TEXT_SUFFIXES = {".srt", ".json", ".txt", ".md", ".docx", ".pdf"}
+# What the user brings that is words, filed as "text": a script (.docx, .pdf, .txt, .md), a transcript (.srt, .json) or
+# a sheet a spreadsheet exports (.csv, .tsv: a shot tracker, an asset sheet). A Word document or a PDF is kept as the
+# plain text of it.
+TEXT_SUFFIXES = {".srt", ".json", ".txt", ".md", ".docx", ".pdf", ".csv", ".tsv"}
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 MAX_DOCX_BYTES = 25 * 1024 * 1024          # a Word file with pictures in it is larger than its words
 MAX_PDF_BYTES = 50 * 1024 * 1024

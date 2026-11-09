@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Studio Skills Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a finder table, then a step flow drawn as stacked boxes joined by arrows, then helper cards */
+:root {
+  --bg: #f4f6f9; --surface: #ffffff; --sunk: #eef1f6; --fg: #18202c; --muted: #5a6577; --line: #d9dee7;
+  --accent: #2b5cab; --accent-soft: #e3ebf8;
+  --ready: #23704a; --ready-soft: #ddf1e5; --soon: #9a5a00; --soon-soft: #fbefd9; --craft: #6b3fa0; --craft-soft: #efe6f9;
+  --display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --surface: #19202a; --sunk: #141a22; --fg: #e5e9f0; --muted: #9aa5b6; --line: #2b3340;
+    --accent: #86aef0; --accent-soft: #1d2a3f; --ready: #7fd3a2; --ready-soft: #18301f; --soon: #ecb766; --soon-soft: #352816;
+    --craft: #c3a2ee; --craft-soft: #2a2038; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --surface: #19202a; --sunk: #141a22; --fg: #e5e9f0; --muted: #9aa5b6; --line: #2b3340;
+  --accent: #86aef0; --accent-soft: #1d2a3f; --ready: #7fd3a2; --ready-soft: #18301f; --soon: #ecb766; --soon-soft: #352816;
+  --craft: #c3a2ee; --craft-soft: #2a2038; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+.wrap { max-width: 1000px; margin: 0 auto; padding-block: 40px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 52px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; line-height: 1.2; text-wrap: balance; }
+h1 { font-size: clamp(28px, 5vw, 40px); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 700; }
+h3 { font-size: 16px; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+section { display: grid; gap: 16px; min-width: 0; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 18px; color: var(--muted); }
+code { font-family: var(--mono); font-size: 13px; background: var(--sunk); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.skill { font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 2px 8px; border-radius: 5px; white-space: nowrap; }
+.skill.auto { background: var(--accent-soft); color: var(--accent); }
+.skill.craft { background: var(--craft-soft); color: var(--craft); }
+.tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.tag.ready { background: var(--ready-soft); color: var(--ready); }
+.tag.soon { background: var(--soon-soft); color: var(--soon); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 14px; color: var(--muted); align-items: center; }
+
+/* the finder */
+.finder { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.find-row { display: grid; grid-template-columns: minmax(0, 1.3fr) 28px minmax(0, 1fr); gap: 12px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line); }
+.find-row:first-child { border-top: 0; }
+.find-row .say { font-size: 15px; }
+.find-row .say q { color: var(--fg); font-weight: 600; quotes: "“" "”"; }
+.find-row .say small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.find-row .arrow { color: var(--muted); text-align: center; font-size: 18px; }
+.find-row .then { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.group-head { padding: 10px 18px; background: var(--sunk); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-top: 1px solid var(--line); }
+.group-head:first-child { border-top: 0; }
+@media (max-width: 560px) { .find-row { grid-template-columns: 1fr; gap: 6px; } .find-row .arrow { text-align: left; transform: rotate(90deg); width: 18px; } }
+
+/* the flow */
+.flow { display: grid; gap: 0; }
+.step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; }
+.rail { display: flex; flex-direction: column; align-items: center; }
+.num { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--surface); display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 15px; flex: none; }
+.stem { width: 2px; flex: 1; background: var(--line); min-height: 18px; }
+.step:last-child .stem { display: none; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; display: grid; gap: 10px; min-width: 0; }
+.card .head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+.card .uses { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.branch { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.branch div { background: var(--sunk); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.branch b { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
+
+/* helpers and continuity */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.helper { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.helper .by { font-size: 13px; color: var(--muted); }
+.choose { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.choice { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.choice .q { font-size: 14px; color: var(--muted); }
+.note { background: var(--soon-soft); border-radius: 10px; padding: 14px 16px; display: grid; gap: 6px; }
+.note h3 { color: var(--soon); }
+footer { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header style="display:grid;gap:12px">
+  <div class="eyebrow">Scene.ai studio · backend/scene/skills · 3 Nov 2026</div>
+  <h1>Studio Skills Map</h1>
+  <p class="lede">Which skill the studio's agent uses for which request, what each one hands on to, and which workflows it runs on today.</p>
+  <div class="legend">
+    <span><span class="skill auto">blue</span> picked from what you type</span>
+    <span><span class="skill craft">purple</span> helper: only runs when another skill calls it, or when you type <code>/its-name</code></span>
+    <span><span class="tag ready">works now</span></span>
+    <span><span class="tag soon">needs a Zoro workflow connected</span></span>
+  </div>
+</header>
+
+<section>
+  <div class="eyebrow">1 · The finder</div>
+  <h2>What you type, and which skill answers</h2>
+  <div class="finder">
+    <div class="group-head">Making something new</div>
+    <div class="find-row"><div class="say"><q>Turn this script into a video</q><small>also audio, an idea or a brief; into a video, pictures or a detailed script</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">script-to-video</span><span class="tag ready">works now</span></div></div>
+    <div class="find-row"><div class="say"><q>A short film where a girl finds a dog</q><small>a story, a scene, an episode, a trailer</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">short-film</span></div></div>
+    <div class="find-row"><div class="say"><q>Make an ad for my shoes</q><small>a promo, a product video, a launch</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">product-ad</span></div></div>
+    <div class="find-row"><div class="say"><q>A Reel with a strong hook</q><small>Shorts, TikTok, a vlog, UGC</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">social-video</span></div></div>
+    <div class="find-row"><div class="say"><q>Design a new character</q><small>a portrait, a mascot, one reference picture</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">character-sheet</span></div></div>
+    <div class="find-row"><div class="say"><q>A title sequence</q><small>kinetic text, an intro or outro, lower thirds</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">motion-graphics</span></div></div>
+    <div class="group-head">People speaking</div>
+    <div class="find-row"><div class="say"><q>They talk to each other</q><small>dialogue, voices, lip sync, narration, the final cut</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">dialogue</span></div></div>
+    <div class="group-head">Videos you already have</div>
+    <div class="find-row"><div class="say"><q>Cut the first 3 seconds and add music</q><small>trim, split, join, put sound on</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">edit-video</span></div></div>
+    <div class="group-head">Only by name</div>
+    <div class="find-row"><div class="say"><q>/pocket-motion-seedance-v2</q><small>or typing "pocket motion seedance v2"</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">pocket-motion-seedance-v2</span></div></div>
+    <div class="find-row"><div class="say"><q>/script-to-video-shaurav</q><small>an article into a vertical explainer; it never picks itself</small></div><div class="arrow">→</div><div class="then"><span class="skill auto">script-to-video-shaurav</span></div></div>
+  </div>
+  <p style="font-size:14px;color:var(--muted)">A message can match more than one skill, and then the agent gets all of them. "Turn this script into a video" also picks <span class="skill auto">short-film</span>, because its words ("film", "script") are broad.</p>
+</section>
+
+<section>
+  <div class="eyebrow">2 · The main flow</div>
+  <h2>What happens after "turn this script into a video"</h2>
+  <p>Each step names the skill that does the work and the workflow it runs on.</p>
+  <div class="flow">
+
+    <div class="step"><div class="rail"><div class="num">1</div><div class="stem"></div></div>
+      <div class="card">
+        <div class="head"><h3>What are you starting from?</h3><span class="skill auto">script-to-video</span></div>
+        <div class="branch">
+          <div><b>Script, idea or brief</b>The text is the script.</div>
+          <div><b>Audio</b>Transcribed with speaker labels; the lines become the script, its length the runtime.</div>
+        </div>
+        <div class="uses">Runs on: <code>Transcribe</code> <span class="tag ready">works now</span></div>
+      </div></div>
+
+    <div class="step"><div class="rail"><div class="num">2</div><div class="stem"></div></div>
+      <div class="card">
+        <div class="head"><h3>Setup: four questions at once, then the style</h3><span class="skill auto">script-to-video</span></div>
+        <div class="branch">
+          <div><b>Shape</b>16:9 · 9:16 · square</div>
+          <div><b>Make it into</b>Video · Pictures · Detailed script</div>
+          <div><b>Quality</b>Draft · Final</div>
+          <div><b>Continuity</b>Chain · Board · Recall (see 4)</div>
+        </div>
+      </div></div>
+
+    <div class="step"><div class="rail"><div class="num">3</div><div class="stem"></div></div>
+      <div class="card">
+        <div class="head"><h3>The cast's reference sheets</h3><span class="skill craft">asset-designer</span></div>
+        <p style="font-size:15px">A list of every recurring person, place and prop first, then "Do you have references?". Each sheet goes into NeuralCore under its name. Families are made oldest first. Changed looks become "Maya - torn sleeve", and night scenes "Kitchen - night".</p>
+        <div class="uses">Runs on: an image workflow that takes reference pictures <span class="tag ready">works now</span> · Skipped for a detailed script.</div>
+      </div></div>
+
+    <div class="step"><div class="rail"><div class="num">4</div><div class="stem"></div></div>
+      <div class="card">
+        <div class="head"><h3>Directing</h3><span class="skill craft">director</span><span class="skill craft">+ scene presets</span></div>
+        <p style="font-size:15px">Each scene gets its idea ("This scene is shot as…"), then the beats and the turn. Every shot gets a lens, angle and move with a reason. Fight, romance, suspense and the other scene types bring their own craft. Clips are cut to H3's 15 s.</p>
+        <div class="uses">A detailed script stops here, written as prose.</div>
+      </div></div>
+
+    <div class="step"><div class="rail"><div class="num">5</div><div class="stem"></div></div>
+      <div class="card">
+        <div class="head"><h3>Making the clips, one by one</h3><span class="skill auto">script-to-video</span><span class="skill craft">a continuity skill</span></div>
+        <div class="branch">
+          <div><b>Video</b>One H3 Chunk clip each: the place in the anchor, the people in character slots, the board in Extra Reference, the audio slice in the voice track.</div>
+          <div><b>Pictures</b>One still per shot, the cast's sheets as references.</div>
+        </div>
+        <div class="uses">Runs on: <code>H3 Chunk</code> <span class="tag ready">works now</span> · two speakers in one clip: <code>video_multitalk</code> <span class="tag soon">needs Zoro workflow</span></div>
+      </div></div>
+
+    <div class="step"><div class="rail"><div class="num">6</div><div class="stem"></div></div>
+      <div class="card">
+        <div class="head"><h3>The final cut</h3><span class="skill auto">script-to-video</span></div>
+        <p style="font-size:15px">The kept clips in order. With audio input, the original sound plays under them.</p>
+        <div class="uses">Runs on: <code>assemble</code>, <code>film</code> <span class="tag ready">works now</span> · 1080p / 4K: <code>video_upscale_seedvr2</code> <span class="tag soon">needs Zoro workflow</span></div>
+      </div></div>
+
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">3 · Helpers</div>
+  <h2>The purple skills, and who calls them</h2>
+  <div class="grid2">
+    <div class="helper"><span class="skill craft">asset-designer</span><p>Reference sheets for a whole script's cast, places and props, saved into NeuralCore.</p><div class="by">Called by script-to-video (step 3), or <code>/asset-designer</code></div></div>
+    <div class="helper"><span class="skill craft">director</span><p>Turns a script into scenes and shots, with a reason for every camera choice. Uses the 14 scene presets.</p><div class="by">Called by script-to-video (step 4), or <code>/director</code></div></div>
+    <div class="helper"><span class="skill craft">continuity-chain</span><p>Each clip starts where the last one ended.</p><div class="by">Called by script-to-video when you pick Chain</div></div>
+    <div class="helper"><span class="skill craft">continuity-board</span><p>A numbered grid of stills from the scene so far guides each new clip.</p><div class="by">Called by script-to-video when you pick Board</div></div>
+    <div class="helper"><span class="skill craft">continuity-recall</span><p>A library of labelled keyframes, so someone who comes back looks the same as before.</p><div class="by">Called by script-to-video when you pick Recall</div></div>
+    <div class="helper"><span class="skill craft">camera-coverage</span><p>One subject from several angles: a turnaround, coverage shots.</p><div class="by">Only with <code>/camera-coverage</code></div></div>
+    <div class="helper"><span class="skill craft">sound-pass</span><p>The whole sound of a finished video: music under it, a score.</p><div class="by">Only with <code>/sound-pass</code></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">4 · Continuity</div>
+  <h2>Chain, Board or Recall?</h2>
+  <div class="choose">
+    <div class="choice"><span class="skill craft">continuity-chain</span><h3>Chain (the default)</h3><div class="q">Pick it when one scene must flow without a break.</div><p style="font-size:15px">Each clip starts on the last frame of the one before. Redoing one clip means redoing every later clip in that scene.</p><div><span class="tag ready">works now, from the last frame</span></div><div><span class="tag soon">true extension: video_extend_wan_vace</span></div></div>
+    <div class="choice"><span class="skill craft">continuity-board</span><h3>Board</h3><div class="q">Pick it when you want to redo any clip on its own.</div><p style="font-size:15px">Every clip is made fresh. A grid of up to 6 numbered stills shows the scene so far, and its highest number is where the clip starts.</p><div><span class="tag ready">works now</span></div></div>
+    <div class="choice"><span class="skill craft">continuity-recall</span><h3>Recall</h3><div class="q">Pick it when people, places or props come back much later.</div><p style="font-size:15px">Every kept shot leaves a labelled keyframe. The next clip gets only the few it needs, in one grid. It can also run beside Chain or Board.</p><div><span class="tag ready">works now</span></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="note">
+    <h3>What lights up when the Zoro workflows are connected</h3>
+    <p style="font-size:15px">Zoro has 10 tested workflows, but their files are still only on Zoro. Once they're copied over and connected:</p>
+    <ul style="margin:0;padding-left:20px;font-size:15px;display:grid;gap:3px">
+      <li>Chain gets true extension (<code>video_extend_wan_vace</code>).</li>
+      <li>Two people speak in one clip (<code>video_multitalk</code>).</li>
+      <li>Voices come from text (<code>audio_tts_clone</code>).</li>
+      <li>Sound effects (<code>audio_sfx_from_text</code>).</li>
+      <li>1080p and 4K (<code>video_upscale_seedvr2</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Made from the skill files in <code>backend/scene/skills/</code> as they are on 3 Nov 2026: 17 skills, 10 picked from what you type and 7 helpers.</footer>
+</div>
+</body>
+</html>

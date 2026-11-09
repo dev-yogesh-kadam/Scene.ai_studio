@@ -16,6 +16,7 @@
     "107",
     "108"
   ],
+  "pick_when": "Restyle a video fast: the motion kept, the look from a reference picture, about a minute for a 3 s part. In tests nearly as good as Fun Control, a little more saturated.",
   "hints": [
     "The reference sets the look: a restyled first frame of the video, or a picture of the style you want.",
     "The length is in frames: 4n+1, such as 49, 81 or 121."

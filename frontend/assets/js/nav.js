@@ -49,13 +49,13 @@ export function placeIds() {
   return { project: parts[2] || '', module: parts[3] === 'module' ? parts[4] || '' : '' };
 }
 
-// The address of `to` (/canvas, /timeline, /project, /analytics) for a project, or a module of one. `p` is a project
+// The address of `to` (/canvas, /project, /analytics) for a project, or a module of one. `p` is a project
 // row ({ref, parent_ref}) or a module of a project's page with its project's ref; the project's own canvas has no
 // module part.
 export function placePath(to, p, projectRef = '') {
   if (!p || !p.ref) return to;
   const top = p.parent_ref || projectRef || p.ref;
-  const module = (to === '/canvas' || to === '/timeline') && p.ref !== top;
+  const module = to === '/canvas' && p.ref !== top;
   return to + '/' + top + (module ? '/module/' + p.ref : '');
 }
 

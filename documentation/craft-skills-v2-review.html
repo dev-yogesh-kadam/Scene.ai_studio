@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Craft Skills v2 Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column like a production report: a header slate, a contents strip, then numbered report sections; wide tables scroll in their own boxes. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --ink: #18202a; --muted: #586474; --line: #d9dfe6;
+  --accent: #1d5a86; --accent-soft: #e2edf5;
+  --new: #1d7a46; --new-soft: #e1f2e8; --changed: #9a5b00; --changed-soft: #fbefdb;
+  --same: #55606d; --same-soft: #eceff3; --gap: #b02a2a; --gap-soft: #f8e3e3;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11161c; --surface: #19212a; --ink: #e5eaf0; --muted: #9ba7b4; --line: #2a3440;
+  --accent: #82b8e0; --accent-soft: #1b2b3a;
+  --new: #6fcf97; --new-soft: #17301f; --changed: #f0b45a; --changed-soft: #33270f;
+  --same: #aab4bf; --same-soft: #232c36; --gap: #f08a8a; --gap-soft: #3a1c1c; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #19212a; --ink: #e5eaf0; --muted: #9ba7b4; --line: #2a3440;
+  --accent: #82b8e0; --accent-soft: #1b2b3a;
+  --new: #6fcf97; --new-soft: #17301f; --changed: #f0b45a; --changed-soft: #33270f;
+  --same: #aab4bf; --same-soft: #232c36; --gap: #f08a8a; --gap-soft: #3a1c1c; color-scheme: dark }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 64px; }
+.page { max-width: 1060px; margin: 0 auto; display: grid; gap: 34px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.12; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(34px, 6vw, 52px); font-weight: 700; letter-spacing: .01em; }
+h2 { font-size: 30px; font-weight: 700; display: flex; gap: 12px; align-items: baseline; }
+h2 .n { font-family: var(--mono); font-size: 15px; color: var(--accent); font-weight: 500; }
+h3 { font-size: 22px; font-weight: 600; margin-top: 6px; }
+p { margin: 0; max-width: 72ch; }
+a { color: var(--accent); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, .path { font-family: var(--mono); font-size: .86em; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.slate { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px 24px; display: grid; gap: 14px; }
+.slate .meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--display); font-size: 15px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.slate .meta b { color: var(--ink); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.toc a { font-family: var(--display); font-size: 16px; letter-spacing: .03em; text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); }
+.toc a:hover { border-color: var(--accent); color: var(--accent); }
+section { display: grid; gap: 14px; scroll-margin-top: 16px; }
+ul, ol { margin: 0; padding-left: 22px; display: grid; gap: 5px; max-width: 80ch; }
+li::marker { color: var(--muted); }
+.lead { font-size: 18px; }
+.muted { color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 10px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; }
+.chip { display: inline-block; font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.new { color: var(--new); background: var(--new-soft); }
+.changed { color: var(--changed); background: var(--changed-soft); }
+.same { color: var(--same); background: var(--same-soft); }
+.gap { color: var(--gap); background: var(--gap-soft); }
+.studio { color: var(--accent); background: var(--accent-soft); }
+.flow { font-family: var(--mono); font-size: 14px; background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: nowrap; }
+.q { border-left: 3px solid var(--accent); }
+.q h3 { display: flex; gap: 10px; align-items: baseline; }
+.q h3 .n { font-family: var(--mono); font-size: 14px; color: var(--accent); }
+.rec { background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; }
+.rec b { font-family: var(--display); letter-spacing: .04em; text-transform: uppercase; font-size: 15px; }
+.verdict { font-size: 17px; }
+.sizes { display: flex; flex-wrap: wrap; gap: 8px; }
+footer { color: var(--muted); font-size: 14px; display: grid; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="slate">
+  <div class="meta"><span>Scene.ai studio</span><span>Review of <b>craft skills v2/</b></span><span>3 November 2026</span><span>Ported 4 November: <b>D1–D16 as recommended</b></span></div>
+  <h1>Craft Skills v2 Review</h1>
+  <p class="lead">Every file in <span class="path">craft skills v2/</span> was read and compared with <span class="path">craft skills/</span> (v1) and with the studio's own skills and prompting. This page lists what improved, what helps us, what the studio is missing, how our prompting compares, and the decisions to make before anything is changed.</p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#status">Status</a><a href="#summary">Summary</a><a href="#inventory">Files</a><a href="#changes">What changed</a><a href="#helpful">What helps us</a>
+    <a href="#mapping">Craft tools → studio</a><a href="#gaps">Missing in the studio</a><a href="#prompting">Prompting compared</a>
+    <a href="#decisions">Decisions</a><a href="#plan">Build order</a>
+  </nav>
+</header>
+
+<section id="status">
+  <h2><span class="n">00</span>Status, 4 November</h2>
+  <p>You answered all sixteen decisions as recommended, and v2 is now ported. Every v2 word is kept. Only the models the studio lacks are swapped: Seedream became FLUX.2 dev, and the Seedance and Wan 3 rows were left out. The studio's own lines are marked "Studio:", and a test checks the words.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Done</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>script-to-video with v2's 8 steps, plus step 0, the Audio input and the cut; H3 Chunk at 480p/768p; Board and Recall on H3</td><td><span class="path">skills/script-to-video.md</span> (D1–D4, D8)</td></tr>
+      <tr><td>New craft skills: script-writer, anchor (FLUX.2 dev), prompter-minimax-h3</td><td><span class="path">skills/</span> (D7, D10, D14)</td></tr>
+      <tr><td>director (v2 plus our app steps), asset-designer (the dropped v2 phrases are back), the three continuity skills</td><td><span class="path">skills/</span> (D5)</td></tr>
+      <tr><td>The 23 scene recipes as presets ("scene-&lt;kind&gt;"); the 14 v1 presets kept</td><td><span class="path">scene_recipes/</span>, <span class="path">presets.py</span> (D6)</td></tr>
+      <tr><td>The H3 guide's planned-cuts line</td><td><span class="path">prompters/minimax-h3.md</span> (D10)</td></tr>
+      <tr><td>Chat: plain fenced blocks with Copy; replies up to 30,000 characters in a long run; a story kept as a NeuralCore script</td><td><span class="path">conversation.js</span>, <span class="path">agent.py</span>, <span class="path">workspace.py</span> (D12)</td></tr>
+      <tr><td>CSV tables show entries as pictures, and Copy and Download put links in their place</td><td><span class="path">conversation.js</span>, <span class="path">agent.chips_in</span> (D15)</td></tr>
+      <tr><td>A skill loaded mid-run comes whole in one read (its own 40,000-character limit) and once per conversation; after a compaction it is sent again, and so is every other part of the message</td><td><span class="path">agent.py</span>, <span class="path">claude.py</span>, <span class="path">skills.py</span>, <span class="path">workspace.py</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Still missing, to discuss later: section 06 below, kept up to date in <span class="path">docs/craft-gaps.md</span>. That includes the request to the ComfyUI agent for more voice slots (D11), previs (D9) and the style picker (D13). The prompting decisions P1–P9 on the other review page are still open, except P1, which the port does.</p>
+</section>
+
+<section id="summary">
+  <h2><span class="n">01</span>Summary</h2>
+  <ul>
+    <li><b>36 files:</b> 13 skills and 23 scene recipes.</li>
+    <li><b>3 new skills:</b> <code>craft-script-writer</code> (a story written so every line can be drawn), <code>craft-anchor</code> (one staging picture per place and moment) and <code>craft-previs</code> (a grey 3D blockout in Blender).</li>
+    <li><b>2 rewritten:</b> the header <code>script-to-video</code> (6 steps became 8) and <code>craft-director</code> (scene types, each with its own camera grammar).</li>
+    <li><b>8 almost unchanged:</b> asset-designer, the 3 continuity skills and the 4 prompters. They were renamed with a <code>craft-</code> prefix and now say they never trigger on their own. The prompters also learned to use anchors and to write a feeling only as what shows.</li>
+    <li><b>Scene recipes:</b> they moved from the director to the script writer and became writing recipes (their camera and video-model sections are gone). 9 are new.</li>
+    <li><b>Audio dropped:</b> v2 no longer takes audio as a starting point (Idea, Brief, Script, Broken script). Our studio's script-to-video does, and it works.</li>
+    <li><b>Where the studio is:</b> it runs v1-based versions. None of the 3 new skills is in. Our director is a mix of the studio's own and v1's.</li>
+    <li><b>Biggest wins for us:</b> the anchor (H3 Chunk already has an "anchor" slot), the director's scene grammar, the script writer's object and physics rules, and the clip packing rules.</li>
+    <li><b>Prompting:</b> the studio is better at how each model reads a prompt. Craft v2 is better at what goes into the prompt and how references and sound are wired. They work best together.</li>
+    <li><b>16 decisions</b> are listed at the end, each with a reason and my recommendation.</li>
+  </ul>
+</section>
+
+<section id="inventory">
+  <h2><span class="n">02</span>The files</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Skill in v2</th><th>v1 → v2</th><th>In the studio today</th></tr></thead>
+    <tbody>
+      <tr><td>script-to-video (header)</td><td><span class="chip changed">Rewritten</span> 6 steps → 8</td><td>A v1-based version on H3 Chunk, with audio input, the final cut, and the "Is this a film?" check added today</td></tr>
+      <tr><td>craft-script-writer + 23 scene recipes</td><td><span class="chip new">New</span></td><td><span class="chip gap">Missing</span></td></tr>
+      <tr><td>craft-asset-designer</td><td><span class="chip same">Renamed only</span></td><td>Yes, as <code>asset-designer</code>, adapted to NeuralCore (looks, palettes, relatives)</td></tr>
+      <tr><td>craft-director</td><td><span class="chip changed">Rewritten</span></td><td>Partly: our <code>director</code> v2 is the studio's own merged with v1's</td></tr>
+      <tr><td>craft-anchor</td><td><span class="chip new">New</span></td><td><span class="chip gap">Missing</span> (H3 Chunk's anchor slot gets the location sheet today)</td></tr>
+      <tr><td>craft-continuity-chain</td><td><span class="chip same">Renamed only</span></td><td>Yes, from the last frame (H3 can't extend a clip)</td></tr>
+      <tr><td>craft-continuity-board</td><td><span class="chip same">Renamed only</span></td><td>Yes, on the film tool's board</td></tr>
+      <tr><td>craft-continuity-recall</td><td><span class="chip same">Renamed only</span></td><td>Yes (version 2, on the film tools)</td></tr>
+      <tr><td>craft-previs</td><td><span class="chip new">New</span></td><td><span class="chip gap">Missing</span> (needs a Blender sandbox)</td></tr>
+      <tr><td>craft-prompter-minimax-h3</td><td><span class="chip changed">Small change</span></td><td>Not a skill: its rules live in our <code>minimax-h3</code> prompt guide and H3 Chunk's hints</td></tr>
+      <tr><td>craft-prompter-seedance-2-5, -seedance-2, -wan-3</td><td><span class="chip changed">Small change</span></td><td>Not used: these models are not in the studio (fine to ignore)</td></tr>
+      <tr><td>Scene recipes</td><td>14 <span class="chip changed">rewritten</span> + 9 <span class="chip new">new</span></td><td>The 14 v1 versions, as <code>scene-types</code> presets</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">The 9 new scene recipes: awakening, backstory, battle, decision, flashback, humiliation (with comeback and reversal), jealousy, status, trial. The 14 carried over: chase, comedy, confrontation, conversation, fight, grief, horror, introduction, montage, performance, reveal, romance, suspense, triumph.</p>
+</section>
+
+<section id="changes">
+  <h2><span class="n">03</span>What changed, skill by skill</h2>
+
+  <div class="card">
+    <h3>script-to-video (the header)</h3>
+    <div class="flow">v1: 1 Input → 2 Setup → 3 Models → 4 Assets → 5 Direct → 6 Generate</div>
+    <div class="flow">v2: 1 Input → 2 Setup → 3 Story → 4 Assets → 5 Plan → 6 Clips → 7 Anchors → 8 Generate</div>
+    <ol>
+      <li><b>Input:</b> Idea, Brief, Script, Broken script. Audio is gone, and with it the transcript, the runtime read from the audio, the per-line dialogue clips and the original sound under the cut. When the message already carries the material, its kind is read from it and nothing is asked.</li>
+      <li><b>Models decide more:</b> the video model now picks the prompter and which continuity methods are offered. MiniMax H3 gets <b>Board and Recall only</b>: Chain is left out because H3 can't extend a clip. (v1 said the same: "on MiniMax, Chain becomes Board".)</li>
+      <li><b>Setup questions:</b>
+        <ul>
+          <li>The four questions: Convert into (Video, Images, Detailed script); Aspect ratio (16:9 default); Resolution (the model's own list, 720p default); Continuity (Chain by default where offered, else Board).</li>
+          <li>A question with only one option is not asked.</li>
+        </ul></li>
+      <li><b>Style picker:</b> the search uses every art-style sub-category, so every style appears on the card.</li>
+      <li><b>New Story step:</b>
+        <ul>
+          <li>A full script is kept word for word.</li>
+          <li>Anything else gets one question ("How long should the story run?" 1, 3 (default), 5 or 8 min), then craft-script-writer writes the story.</li>
+          <li>"Detailed script" ends here, with the narrated story.</li>
+        </ul></li>
+      <li><b>Assets</b> are made from the finished story, so the sheets cover everyone the story added.</li>
+      <li><b>Plan:</b> the director gets the story, the sheets, the style and the shape. Every scene is planned before any clip.</li>
+      <li><b>New Clips step</b> (v1's director did this):
+        <ul>
+          <li>One clip per scene. A scene longer than the model's longest clip splits at shot cuts into the fewest near-equal clips.</li>
+          <li>A flashback beat starts its own clip. A scene under 4 s joins the next one (the last scene joins the one before).</li>
+          <li>Clips are numbered across the whole piece, and every clip has the same fields. Its length is its shots added up, rounded up.</li>
+        </ul></li>
+      <li><b>New Anchors step</b> (craft-anchor), for both video and pictures.</li>
+      <li><b>Pictures:</b> each shot is frozen at the peak of its action, with its anchors first among the references. The prompt opens "Keep the place, its light and where each figure stands from Image 1; the camera is this shot's."</li>
+      <li><b>Continuity, simplified:</b> a scene's first clip is a normal generation (under Chain and Board), and later clips use the method. Recall runs on every clip. v1's "join" types (continues, cut, new place) are gone.</li>
+      <li><b>The prompter</b> now gets the anchors. The style is the picked style word for word, then the era and world from the director's episode.</li>
+      <li>Each continuity skill runs its own after-clip step.</li>
+      <li><b>New state layout:</b> <span class="path">/script/story</span>, <span class="path">/director/episode</span>, <span class="path">/director/scenes/&lt;n&gt;/beats|shots</span>, <span class="path">/anchors/&lt;k&gt;</span>, <span class="path">/s2v/clips/&lt;n&gt;</span>.</li>
+    </ol>
+    <p class="muted">Not in v2 but in our studio version: audio input, the final cut, the "Is this a film?" step 0, H3 Chunk's slots, the draft/final quality question.</p>
+  </div>
+
+  <div class="card">
+    <h3>craft-script-writer (new) and its 23 scene recipes</h3>
+    <ul>
+      <li><b>What it makes:</b> one story, read aloud like an audio-series episode. Third person, past tense, a narrator who talks to the listener (asides, questions, teases), dialogue inline. No shots, camera, prompts or sheets.</li>
+      <li><b>Length:</b> about 140 words a minute, within 10% of the runtime. An idea becomes about 1,200 words. Past about 10 minutes it splits into episodes, each ending on a hook.</li>
+      <li><b>What it keeps:</b>
+        <ul>
+          <li>A full script keeps every event, line and name, with dialogue word for word.</li>
+          <li>A broken script keeps everything it has and repairs the rest. Nothing named is dropped or compressed.</li>
+        </ul></li>
+      <li><b>Planning:</b>
+        <ul>
+          <li>Whose eyes the story is told through, the biggest turn and the closing hook.</li>
+          <li>For each scene: who wants what, what blocks them, the flip (with the opposite feeling just before it) and one consequence beat after it.</li>
+          <li>The scene's kind, with that kind's recipe read in one round (<code>preset_search</code> "scene-&lt;kind&gt;", category <code>scene-recipes</code>).</li>
+          <li>What the listener knows that the lead doesn't, the plants (things set up early that matter later), and stakes sized to the moment.</li>
+        </ul></li>
+      <li><b>Rules written for pictures:</b>
+        <ul>
+          <li>Hands and carried objects are tracked. Before climbing, a door or a hug, the story says what happens to what they hold.</li>
+          <li>A look, once changed, holds. Every move and door is said, and each scene picks up where the last left off.</li>
+          <li>Small meaningful details get their own line.</li>
+          <li>Physics is real: weight, falls, rain, fire, glass, breathlessness, locked doors, travel time, size and fit, two hands for two things, clothes that slow you, marks that stay, light in the dark, how far sound carries.</li>
+          <li>People only know what they've seen or been told. Time and weather hold, and so does who is in the room.</li>
+          <li>Places keep their layout. Nobody uses a skill the story hasn't shown, and every surprising choice has a visible reason.</li>
+        </ul></li>
+      <li><b>Prose rules:</b>
+        <ul>
+          <li>Written for the ear.</li>
+          <li>Banned machine phrases ("a breath she didn't know she was holding"…) and stock fantasy names (Elara, Kael…).</li>
+          <li>No "not X but Y", no lists of three, no little morals.</li>
+          <li>Concrete, never abstract. Each person talks their own way, gestures and openings vary, and feelings take time.</li>
+        </ul></li>
+      <li><b>Output:</b> "Ep N - &lt;title&gt;" and plain paragraphs, posted as one fenced block and saved at <span class="path">/script/story</span>, then a final checklist.</li>
+      <li><b>Scene recipes:</b> each has the same seven parts (what it's about, the engine, staging, performance, the turn, the end, traps).</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>craft-director (rewritten)</h3>
+    <ul>
+      <li><b>Top down:</b> episode → scenes → beats → shots, each level built only from the one above, saved as it goes. The story is locked; the plan only decides what is seen.</li>
+      <li><b>Episode:</b>
+        <ul>
+          <li>The story in one line, and the arc of feelings scene by scene.</li>
+          <li>The leads, each with a tell: one small physical giveaway, shown as an insert whenever the feeling leaks.</li>
+          <li>The world: money, rank and power; the rival and the secret; the look of any power; one fixed description for everything that recurs.</li>
+          <li>The style, and one era: real light sources only, no neon unless it's a club.</li>
+          <li>An opening that hooks on the leads in motion and shows the event, never only its aftermath.</li>
+          <li>A throughline (opening image, closing image, one motif between them) and the hinge scenes.</li>
+        </ul></li>
+      <li><b>27 scene types:</b> Meet, Friction, Pull, Surrender, Heat, Rejection, Humiliation, Jealousy, Protection, Confession, Betrayal, False hope, Decision, Comeback, Awakening, Bond, Reunion, Intimacy, Longing, Threat, Trial, Revelation, Claim, Reversal, Triumph, Status, Backstory.
+        <ul>
+          <li>Each fixes a camera height, a frame, a light, a camera style and one exception shot.</li>
+          <li>Tiers: T1 is lighter, T2 as written, T3 pushed hardest.</li>
+          <li>Each scene sets a feeling in → out, its tone (palette, one saturated hue), its pace (holds of 1.5–5 s by kind) and its build (wide → medium → close).</li>
+        </ul></li>
+      <li><b>Echoes:</b> a payoff scene reuses the setups of the scene it pays off, with the outcome reversed.</li>
+      <li><b>Beats:</b> sequence, montage, flashback, insert or intercut, each with one instruction line.</li>
+      <li><b>Shots:</b>
+        <ul>
+          <li>A table turns each kind of line into a picture.</li>
+          <li>Dialogue rules: the speaker is shown mid-line, a line that lands cuts to the listener, a line over 3 s splits, two people go over the shoulder with matched eyelines.</li>
+          <li>Every shot names its picture, everyone in frame (by sheet name, where they are, which way they face), the motion, the move, the angle, the size and the length (never under 1.5 s: models merge shorter shots).</li>
+          <li>Camera limits: never more than 2 locked shots in a row, and a hold past 4 s drifts. Romantic scenes stay calm. No dutch angle in tender scenes. No descending onto a character.</li>
+          <li>Pictures: no readable text in any picture, at least 3 angles a scene, visible hard cuts, and nothing shown that the story hasn't reached.</li>
+        </ul></li>
+      <li><b>A check</b> of each scene before saving.</li>
+    </ul>
+    <p><b>v2 no longer has</b> these v1 parts. Our studio director still contains most of them:</p>
+    <ul>
+      <li>The "This scene is shot as ___" idea sentence.</li>
+      <li>Want / beats as verbs / turn / whose eyes / withheld per scene. Part of this moved to the script writer.</li>
+      <li>Lens and aperture ranges, rigs, frame rate and shutter, and sound notes.</li>
+      <li>Cut reasons and "Cut to (reason)", and held takes written in timed slots.</li>
+      <li>Clip sizes per model, timing from a transcript, and the voiceover field.</li>
+      <li>Writing it as a book, the story and image formats, and the "simplify before finishing" step.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>craft-anchor (new)</h3>
+    <ul>
+      <li>An anchor is one 16:9 still of a <b>staging state</b> (a place at one moment with everyone in it where they stand, and its light). It is never shown on screen. Every clip in that state takes it as its first reference, so nobody vanishes, swaps or drifts.</li>
+      <li><b>A new state starts when</b> someone enters, leaves or moves to a new spot, the place changes, the light changes, or a look changes and carries on into a later clip.</li>
+      <li><b>Anchored when:</b> 2 or more people or creatures are in the state, or its shots run across 2 or more clips. <b>Not anchored:</b> chases and journeys, montages and flashes, inserts, empty places (the location sheet is the anchor) and one person alone in one clip.</li>
+      <li><b>Camera:</b> one per place, at eye height, a normal lens, placed to see everyone, and kept for every later state of that place.</li>
+      <li><b>Prompt:</b>
+        <ul>
+          <li>Keep → Subject → Style, 80–150 words (200 with 4 or more figures).</li>
+          <li>Positive words only, one choice each, no digits except the image numbers.</li>
+          <li>Everyone is "the figure in Image N", and a creature's size is stated against a person.</li>
+          <li>Separate sentences for touching people, a changed look, a place with no sheet, and a style that isn't realistic.</li>
+        </ul></li>
+      <li><b>Making them:</b>
+        <ul>
+          <li>All in one go on Seedream 5 Pro at 2K, always 16:9.</li>
+          <li>References go people first, then creatures and props, the location sheet last.</li>
+          <li>A later state of a place is a new picture from the same camera, never an edit of the earlier one.</li>
+          <li>A CSV (anchor, scene and state, clips, link) is posted, and each anchor's positions are saved in set terms.</li>
+        </ul></li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>craft-previs (new)</h3>
+    <ul>
+      <li><b>What it makes:</b> a grey 3D blockout in Blender 5.2, run headless in a GPU <code>sandbox</code>. It is never shown in the film; it fixes who stands where, who moves when, and what each camera sees.</li>
+      <li><b>Step 1, build:</b>
+        <ul>
+          <li>One JSON per scene: the room or ground in metres, set pieces at real sizes, the cast with heights and colours, and keys for walking, facing, pose and entering or leaving, on the scene's clock.</li>
+          <li>It renders an overview video with names over heads, fixes the WARN lines, posts a CSV and asks "Is the blocking right?" (Approve or Change something).</li>
+        </ul></li>
+      <li><b>Step 2, cameras:</b>
+        <ul>
+          <li>One camera per planned shot (size, side, angle, lens; moves mapped from the plan).</li>
+          <li>It renders grey clips per clip and a sheet of each shot's first frame.</li>
+          <li>It fixes every CHECK line that says someone planned is MISSING or someone unplanned is in frame, then posts a CSV.</li>
+        </ul></li>
+      <li>The whole <code>previs.py</code> (about 600 lines) is inside the skill, saved word for word.</li>
+      <li><b>v2's header never calls it:</b> it is a standalone tool.</li>
+    </ul>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Continuity (3 skills)</h3>
+      <p>The bodies are the same as v1, renamed, and they now say they never trigger on their own. What changed is around them: the header now decides continuity by a scene's first clip versus its later clips, and offers no Chain on H3.</p>
+    </div>
+    <div class="card">
+      <h3>Prompters (4 skills)</h3>
+      <ul>
+        <li>A new <code>anchor</code> input, wired first among the pictures with its own line ("a reference for space and positions, not a frame to copy; faces and looks come from the sheets").</li>
+        <li>Anchors come second in the order of what to keep when there are too many references.</li>
+        <li>A feeling goes in only as its visible tell ("knuckles whiten on the glass"). A feeling with no tell is dropped.</li>
+        <li>Wan 3: a source clip is cut to its last 15 s (was 14), and the new clip is 15 s at most.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>craft-asset-designer</h3>
+      <p>Same body as v1. Our port already does all of it, with names, looks, palettes and relatives kept in NeuralCore. The only differences:</p>
+      <ul>
+        <li>The craft's final CSV has a "CDN link" column whose <code>asset_id:</code> handles become links on Download and Copy.</li>
+        <li>The craft makes sheets on Seedream; ours use any picture workflow that takes references.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="helpful">
+  <h2><span class="n">04</span>What helps us most</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Item</th><th>Why it helps</th><th>Fit with the studio</th></tr></thead>
+    <tbody>
+      <tr><td>craft-anchor</td><td>Multi-person scenes stop losing, swapping or moving people between shots and clips.</td><td>H3 Chunk's <code>205:image</code> is already "the scene anchor (&lt;Picture 1&gt;)". FLUX.2 dev takes up to 16 references, enough to make anchors.</td></tr>
+      <tr><td>craft-script-writer</td><td>An idea becomes a full story before any shot. Its object, hands and physics rules stop impossible pictures (a box that vanishes, a phone in a climbing hand), it controls the runtime, and every episode ends on a hook.</td><td>Pure text. It needs the 23 recipes as presets, and chat must show a long story (see Missing).</td></tr>
+      <tr><td>craft-director v2</td><td>One consistent film grammar per scene type, an exception shot on the biggest beat, and echoes. Clear shot rules: everyone in frame named, ≥ 1.5 s, no readable text, hard cuts.</td><td>Pure text. It conflicts with parts of our current director (decision 5).</td></tr>
+      <tr><td>Clip packing (header step 6)</td><td>Clips per scene follow fixed rules instead of the agent's guess.</td><td>Fits H3 Chunk's 4–15 s, its 6 shots, and a keyframe per shot.</td></tr>
+      <tr><td>9 new scene recipes</td><td>Status, humiliation, trial, jealousy and others: the drama and micro-drama kinds we make often.</td><td>Presets.</td></tr>
+      <tr><td>Prompter additions</td><td>An anchor line, anchors kept second when cutting references, and visible tells only.</td><td>Goes into our H3 prompting (see Prompting).</td></tr>
+      <tr><td>craft-previs</td><td>Exact positions, moves and timing a video model can follow.</td><td>Needs a Blender sandbox. Its grey clips could go into H3 Chunk's motion reference slot (<code>207:video</code>).</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="mapping">
+  <h2><span class="n">05</span>Craft tools → studio</h2>
+  <p>The craft skills are written for Frameo's tools. This is what each one becomes here.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Craft names</th><th>In the studio</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>AskUserQuestion</td><td>"question" or "questions" (up to 4 at once, 2–4 options each)</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>load_skill</td><td>read_skill</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>State paths</td><td>state_read / state_write (the module's memory tree)</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>image_create_edit (Seedream 5 Pro)</td><td>A generate step on a picture workflow; FLUX.2 dev is the closest (16 references)</td><td><span class="chip changed">Model swap</span></td></tr>
+      <tr><td>video_create_edit (minimax_h3)</td><td>A generate step on H3 Chunk (or H3 All-in-One)</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>view_image</td><td>look (op "deep")</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>video_audio_analysis with detect_shots</td><td>film "shots"</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>extract_key_frames</td><td>film "keyframes" (labels, captioned copies)</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>ffmpeg_job (numbering, tiling, captions)</td><td>film "board", "keyframes"</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>"Available video models for this conversation"</td><td>The chat's pinned workflows</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>video-guide-minimax (H3's limits)</td><td>H3 Chunk's hints and our <code>minimax-h3</code> prompt guide</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td>Motion clip (H3 Max only)</td><td>H3 Chunk's "Motion / camera reference video" slot</td><td><span class="chip studio">Studio has more</span></td></tr>
+      <tr><td>Keyframes: first and last only on H3</td><td>H3 Chunk takes a keyframe for each of 6 shots</td><td><span class="chip studio">Studio has more</span></td></tr>
+      <tr><td>CSV in chat with Download / Copy</td><td>A ```csv block shows as a table with Copy and Download</td><td><span class="chip same">Have</span></td></tr>
+      <tr><td><code>asset_id:&lt;id&gt;</code> handles turned into links on Download / Copy</td><td>Copy and Download send the raw text</td><td><span class="chip gap">Missing</span></td></tr>
+      <tr><td>preset_search with present_to_user (style picker card)</td><td>preset_search without a picture card; 6 short art styles</td><td><span class="chip gap">Missing</span></td></tr>
+      <tr><td>Scene recipes "scene-&lt;kind&gt;" in scene-recipes</td><td>14 v1 scenes in scene-types; scene-recipes holds 5 short tips</td><td><span class="chip gap">Missing</span></td></tr>
+      <tr><td>sandbox (Blender, GPU)</td><td>Nothing</td><td><span class="chip gap">Missing</span></td></tr>
+      <tr><td>Resolutions up to 4K, 720p default</td><td>H3 Chunk: 480p or 768p; 1080p/4K only through the SeedVR2 upscale (a canvas action)</td><td><span class="chip changed">Partly</span></td></tr>
+      <tr><td>A voice sample for each speaker</td><td>H3 Chunk has one voice sample slot (character 1)</td><td><span class="chip changed">Partly</span></td></tr>
+      <tr><td>Recorded dialogue clips, one per line</td><td>One voice track per clip (its slice of the master)</td><td><span class="chip changed">Different</span></td></tr>
+      <tr><td>hindi_mode (prelock / recorded)</td><td>"phonetic" respelling of Hindi words</td><td><span class="chip changed">Different</span></td></tr>
+      <tr><td>copyright_map (original → substitute names)</td><td>Nothing</td><td><span class="chip gap">Missing</span></td></tr>
+      <tr><td>creative_direction_guide (the director must not call it)</td><td>Not in the studio; the line can stay as it is</td><td><span class="chip same">No effect</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="gaps">
+  <h2><span class="n">06</span>Missing in the studio, to discuss</h2>
+  <div class="tw"><table>
+    <thead><tr><th>What</th><th>Needed by</th><th>What it takes</th><th>Size</th></tr></thead>
+    <tbody>
+      <tr><td>Blender previs runner</td><td>craft-previs</td><td>Headless Blender 5.2, ffmpeg and a GPU (Zoro has the GPU), a way to send files and get clips back, and a tool for the agent</td><td><span class="chip gap">Large</span></td></tr>
+      <tr><td>Style picker with pictures, more art styles</td><td>script-to-video setup</td><td>Many art styles with sub-categories and full prompt text, a sample picture of each made on Zoro, and a picker card in chat</td><td><span class="chip changed">Medium</span></td></tr>
+      <tr><td>The 23 scene recipes as presets</td><td>craft-script-writer</td><td>23 files, category <code>scene-recipes</code>, found by "scene-&lt;kind&gt;", without clashing with the 5 short tips already in that category</td><td><span class="chip new">Small</span></td></tr>
+      <tr><td>Long stories in chat</td><td>craft-script-writer</td><td>Chat shows only ```csv fences; a plain fenced block shows its ``` marks as text. A reply is cut at 8,000 characters (<code>REPLY_CHARS</code>), and a 1,200-word episode is about 7,000, so two episodes won't fit. Render code blocks, and raise the cap or keep the story as a text item.</td><td><span class="chip new">Small</span></td></tr>
+      <tr><td>Video above 768p in the plan</td><td>Setup question "Resolution"</td><td>Make the SeedVR2 upscale a step the plan can include, or offer 480p/768p and say 1080p/4K is an upscale after the cut</td><td><span class="chip changed">Medium</span></td></tr>
+      <tr><td>A voice sample per speaker</td><td>Prompter (voice_sample per character)</td><td>More voice-sample slots in H3 Chunk, made by the ComfyUI agent on Zoro</td><td><span class="chip changed">Medium</span></td></tr>
+      <tr><td>A true clip extension (Chain)</td><td>craft-continuity-chain</td><td>Wire <code>video_extend_wan_vace</code> from Zoro (tested 1 November, files still there). Only needed if Chain stays.</td><td><span class="chip changed">Medium</span></td></tr>
+      <tr><td>A voiced narrator</td><td>A narrated story told over the pictures</td><td>v2 writes a narrated story but never voices the narrator; dialogue comes from H3's own sound. Hearing the narrator needs text to speech (<code>audio_tts_clone</code> on Zoro is not wired).</td><td><span class="chip changed">Medium</span></td></tr>
+      <tr><td>CSV handles → links</td><td>craft-asset-designer, craft-anchor</td><td>Copy and Download swap <code>asset_id:</code> or <code>[[asset:id]]</code> for the file's link</td><td><span class="chip new">Small</span></td></tr>
+      <tr><td>copyright_map</td><td>Prompters</td><td>A rule in the prompting: a named film, brand or character becomes its substitute, and the original never reaches the prompt</td><td><span class="chip new">Small</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Already fine as is: questions, per-chat model choice, state, film tools for boards and keyframes, CSV tables, H3 Chunk's anchor and keyframe slots, and plans of up to 12 steps (the craft's "all in one response" becomes waves of 12, each approved).</p>
+</section>
+
+<section id="prompting">
+  <h2><span class="n">07</span>Our prompting compared with craft v2</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>The studio today</h3>
+      <ul>
+        <li><b>System rules:</b>
+          <ul>
+            <li>One shot is one action, and prompts are in English while spoken words keep the user's language.</li>
+            <li>No settings or @tags inside a prompt. Every prompt is a concrete, complete shot, and a person's description is repeated word for word across shots.</li>
+            <li>Lengths come from the action and the speech rate (2.5 words a second).</li>
+          </ul></li>
+        <li><b>A general structure</b> for workflows with no guide: SCENE CONTEXT, REFERENCES, ACTION, CAMERA, LIGHT AND LOOK, AUDIO.</li>
+        <li><b>8 prompt guides</b> (added today): MiniMax H3, LTX, Wan, FLUX.2, FLUX.3 Klein, HunyuanImage, Krea 2, Qwen Image. Each has a target length and a word limit, and a prompt over the limit is sent back.</li>
+        <li><b>Each workflow's hints:</b> H3 Chunk has 10.</li>
+        <li><b>Structured camera fields:</b> shot size, angle, move and end state are written into words. The "place" field chains shots and checks continuity.</li>
+        <li><b>Other helpers:</b>
+          <ul>
+            <li>A preset library with clashes.</li>
+            <li>"look deep" gives lists of what to keep and what to avoid.</li>
+            <li>Hindi respelling, cleaning the voice before lip-sync, and a "check" note for each review.</li>
+          </ul></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Craft v2</h3>
+      <ul>
+        <li>The director decides what happens; the prompter only places it. "With no written scene, write only what the user said: do not add camera, light or acting they did not ask for."</li>
+        <li><b>Blocks per model:</b> GOAL, ASSETS, SCENE, OPENING, SHOTS, STYLE, END STATE, LOCKS (Wan has its own five sections).</li>
+        <li><b>Wiring:</b> one role line per reference, with one subject and one job each. Never cite a tag that isn't wired, and never tag someone in a shot they're not in.</li>
+        <li><b>Too many references:</b> keep them in a fixed order (named ones, anchors, speakers, the place, others, props) and say what was dropped.</li>
+        <li><b>Sound:</b> each character's voice sample is bound on their line. Recorded lines are bound twice, plus an "as-is" lock, and clips are all or nothing.</li>
+        <li><b>Continuity in the prompt:</b> text, staging grid, reference grid, first frame, anchor and fresh start, which can be stacked.</li>
+        <li><b>A report after each call:</b> what was made, what was dropped, the settings locked, and any gaps.</li>
+        <li><b>Templates</b> for sheets and anchors. A feeling goes in only as its visible tell.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Point</th><th>Better</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Covers our models</td><td><span class="chip studio">Studio</span></td><td>8 guides, pictures included. Craft has 4 video prompters, 3 of which we can't use, and no picture guide outside its sheet and anchor templates.</td></tr>
+      <tr><td>Knows how H3 behaves here</td><td><span class="chip studio">Studio</span></td><td>From our own renders: one action needs 1–2 beats (splitting it loses the action), a new framing in a beat is a hard cut, keep hands, feet and the ball in frame, and first-frame mode keeps the picture's framing. Craft writes a framing and lens on every beat.</td></tr>
+      <tr><td>Length control</td><td><span class="chip studio">Studio</span></td><td>A target and a hard limit per model, enforced by sending the prompt back. Craft only says "kept short".</td></tr>
+      <tr><td>Pictures</td><td><span class="chip studio">Studio</span></td><td>Words in pictures (quoted, with lettering), garbled shop signs kept far off, exact hex colours, describing only what is there, and notes on distilled models.</td></tr>
+      <tr><td>Hindi</td><td><span class="chip studio">Studio</span></td><td>Respelling by ear. Craft only has a field for it.</td></tr>
+      <tr><td>Staying faithful to the plan</td><td><span class="chip changed">Craft</span></td><td>Craft adds nothing that wasn't decided. The studio asks for a "complete shot" and fills in camera, light and sound itself: good for a quick one-off, risky inside a planned film.</td></tr>
+      <tr><td>Reference discipline</td><td><span class="chip changed">Craft</span></td><td>Stricter rules, anchors in the keep order, and dropped references reported. Our H3 guide has most of it, but not the anchors or the report.</td></tr>
+      <tr><td>Where people stand</td><td><span class="chip changed">Craft</span></td><td>Anchor pictures. The studio has none.</td></tr>
+      <tr><td>Voices and lip-sync</td><td><span class="chip changed">Craft</span></td><td>Each speaker's voice is bound to them, with an "as-is" lock. We have one voice sample per clip and a "who speaks when" line.</td></tr>
+      <tr><td>Shot design before the prompt</td><td><span class="chip changed">Craft</span></td><td>The director's scene grammar and shot fields feed every prompt.</td></tr>
+      <tr><td>Feelings as what shows</td><td><span class="chip same">Same</span></td><td>Both. Craft also drops a feeling that has no tell.</td></tr>
+      <tr><td>Same camera words every shot</td><td><span class="chip same">Same</span></td><td>Our fields versus the director's fields: both keep it consistent.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="card">
+    <h3>Where they clash</h3>
+    <ul>
+      <li><b>Several shots in one clip:</b>
+        <ul>
+          <li>Craft packs a whole scene into one clip, every shot with its own framing and lens, locked to "N cuts exactly, only where stated".</li>
+          <li>Our H3 guide says a new framing in a beat is a hard cut: write one only when a cut was asked for, then say "Cut to".</li>
+          <li>They agree if the planned cuts count as asked for: each planned shot after the first starts "Cut to", with a keyframe per shot (H3 Chunk 311–316) and shot cut frames for exact timing. One line in our guide would settle it.</li>
+        </ul></li>
+      <li><b>Tag names:</b> craft writes <code>@Image1</code> and <code>@Audio1</code> (Frameo's names). In H3 Chunk, pictures are &lt;Picture 1&gt; (the anchor), &lt;Picture 2&gt; and on, and people are "character 1". This is a name swap only, and the rules stay the same.</li>
+      <li><b>Filling in versus fidelity:</b> inside a skill run, follow craft (write only what the plan says). Outside a run, keep our complete-shot rule.</li>
+    </ul>
+    <p class="verdict"><b>Verdict:</b> neither replaces the other. The studio is better at how each model reads a prompt. Craft v2 is better at what goes into it and how references and sound are wired. Best: keep our guides, port the craft H3 prompter as a studio craft skill used inside script-to-video (all its text kept, with the tag names swapped), and add the one-line fix for cuts.</p>
+  </div>
+</section>
+
+<section id="decisions">
+  <h2><span class="n">08</span>Decisions before changing anything</h2>
+  <p>Each needs your answer because it either adds to v2 or changes what our studio does today. <b>Answered on 4 November: all sixteen as recommended.</b></p>
+
+  <div class="card q"><h3><span class="n">D1</span>Audio as a starting point</h3>
+    <p>v2 removed it. Ours works (transcribe with speakers, slices for each clip, the original sound under the cut), and you asked about script plus audio.</p>
+    <p class="rec"><b>Recommend</b> keep it as a fifth Input option and leave the rest of v2 as written. Dropping it removes a working feature.</p></div>
+
+  <div class="card q"><h3><span class="n">D2</span>The final cut</h3>
+    <p>v2 stops after the clips. Our last step puts them together.</p>
+    <p class="rec"><b>Recommend</b> keep it as the last step. Without it there is no finished film.</p></div>
+
+  <div class="card q"><h3><span class="n">D3</span>Step 0 "Is this a film?"</h3>
+    <p>Added today so one-off clips and statements don't start the whole skill. It isn't in v2.</p>
+    <p class="rec"><b>Recommend</b> keep it. It belongs to our default-skill rule, not to the craft.</p></div>
+
+  <div class="card q"><h3><span class="n">D4</span>Chain on H3</h3>
+    <p>v2 (and v1) give H3 only Board and Recall. Today ours offers Chain from the last frame, as the default.</p>
+    <p class="rec"><b>Recommend</b> follow v2: Board by default, with Recall offered. Bring Chain back when a true extension is wired. Starting on a last frame drops the sheets, so faces drift.</p></div>
+
+  <div class="card q"><h3><span class="n">D5</span>The director: replace or merge</h3>
+    <p>v2's director is a different method. Ours mixes the studio's own steps with v1's craft, and the two grammars conflict: v1 says never move the camera by default and about 6 shots per 30 s, while v2 says no more than 2 locked shots in a row and 1.5–2.5 s holds for action.</p>
+    <p class="rec"><b>Recommend</b> v2's text whole as the base, plus only our app steps: show the plan as a table and ask, waves of 12 steps with save_to and check, reviews and retakes, then the cut. Drop v1's extras (idea sentence, lens ranges, cut reasons, book writing) unless you want them kept.</p></div>
+
+  <div class="card q"><h3><span class="n">D6</span>Scene files: v1 camera versions and v2 writing versions</h3>
+    <p>v2 needs its 23 writing recipes. The v2 director no longer reads scene presets, but our 14 v1 versions still carry the camera and video-model notes v2 removed.</p>
+    <p class="rec"><b>Recommend</b> keep both: add the 23 as <code>scene-recipes</code> and keep the 14 as <code>scene-types</code>. Nothing in v2 replaces "For the video model".</p></div>
+
+  <div class="card q"><h3><span class="n">D7</span>The anchor's picture model</h3>
+    <p>Seedream 5 Pro is not here.</p>
+    <p class="rec"><b>Recommend</b> FLUX.2 dev: first in our test, up to 16 references, about a minute a picture. Keep the anchor prompt word for word, including the Seedream advice, and add one line naming the model ("Image N" is FLUX.2's "image N").</p></div>
+
+  <div class="card q"><h3><span class="n">D8</span>The resolution question</h3>
+    <p>H3 Chunk makes 480p or 768p. v2 asks for the model's resolutions, with 720p as the default.</p>
+    <p class="rec"><b>Recommend</b> offer 480p and 768p (768p default) and say 1080p or 4K is an upscale after the cut. Later, make the SeedVR2 upscale a step the plan can include.</p></div>
+
+  <div class="card q"><h3><span class="n">D9</span>Previs</h3>
+    <p>It needs Blender and a GPU sandbox, which the studio doesn't have.</p>
+    <p class="rec"><b>Recommend</b> a later phase, on Zoro. Its grey clips would feed H3 Chunk's motion reference slot.</p></div>
+
+  <div class="card q"><h3><span class="n">D10</span>The H3 prompter</h3>
+    <p>Port <code>craft-prompter-minimax-h3</code> as a studio craft skill, or merge its rules into our <code>minimax-h3</code> guide.</p>
+    <p class="rec"><b>Recommend</b> port it as a skill with all its text, swap the tag names, and keep our guide for every H3 prompt. Add the one line about planned cuts to the guide.</p></div>
+
+  <div class="card q"><h3><span class="n">D11</span>One voice per clip</h3>
+    <p>H3 Chunk takes one voice sample (character 1). v2 gives every speaker their own.</p>
+    <p class="rec"><b>Recommend</b> ask the ComfyUI agent on Zoro for more voice slots. Until then, the voice sample goes to character 1 only, and the reply says so.</p></div>
+
+  <div class="card q"><h3><span class="n">D12</span>Long stories in chat</h3>
+    <p>The story is posted as one fenced block. Chat doesn't render those, and it cuts replies at 8,000 characters.</p>
+    <p class="rec"><b>Recommend</b> render fenced blocks, raise the cap for skill runs, and also keep the story as a text item the user can open.</p></div>
+
+  <div class="card q"><h3><span class="n">D13</span>Style picker</h3>
+    <p>v2's setup shows a card of every art style. We have 6 short styles and no card.</p>
+    <p class="rec"><b>Recommend</b> do it after the skills: it needs a sample picture per style made on Zoro.</p></div>
+
+  <div class="card q"><h3><span class="n">D14</span>Skill ids</h3>
+    <p>v2 renames them (<code>craft-director</code>, <code>craft-asset-designer</code>…). Ours are <code>director</code>, <code>asset-designer</code>….</p>
+    <p class="rec"><b>Recommend</b> keep our ids, because runs in progress and the <code>next:</code> lists use them. Take v2's labels as the titles.</p></div>
+
+  <div class="card q"><h3><span class="n">D15</span>CSV links</h3>
+    <p>The craft's CSV cells hold asset handles that turn into links on Download and Copy. Ours copy the raw text.</p>
+    <p class="rec"><b>Recommend</b> a small change to the table's Copy and Download.</p></div>
+
+  <div class="card q"><h3><span class="n">D16</span>Seedance and Wan 3 prompters</h3>
+    <p>Their models aren't here.</p>
+    <p class="rec"><b>Recommend</b> don't port them; they stay in the craft folder, as you said. The general rules they share with the H3 prompter come in through D10.</p></div>
+</section>
+
+<section id="plan">
+  <h2><span class="n">09</span>Build order once decided</h2>
+  <ol>
+    <li>craft-script-writer and the 23 scene recipes as presets, then long stories in chat (D12).</li>
+    <li>craft-director v2 (D5), then script-to-video updated to v2's 8 steps, plus what we keep (D1–D3, D8).</li>
+    <li>craft-anchor on FLUX.2 dev (D7), with anchors in H3 Chunk's anchor slot ahead of the sheets.</li>
+    <li>The H3 prompter as a craft skill, plus the guide line for planned cuts (D10).</li>
+    <li>Continuity on H3: Board by default, with Recall (D4).</li>
+    <li>Gaps after that: CSV links, voice slots, upscale step, style picker, previs.</li>
+  </ol>
+  <p class="muted">Each step gets its tests, nothing is committed, and every skill text keeps v2's words. Only model names and studio tool names change.</p>
+</section>
+
+<footer>
+  <div><b>Read for this review:</b> all 36 files in <span class="path">craft skills v2/craft skills/</span>; their v1 copies in <span class="path">craft skills/</span> (compared line by line); the studio's <span class="path">backend/scene/skills/</span>, <span class="path">prompters/</span> and <span class="path">scene_presets/</span>, the prompt rules in <span class="path">agent.py</span>, the workflow sidecars in <span class="path">workflows/</span>, and the chat's table rendering.</div>
+  <div>The skill files themselves are the truth: when they change, this page goes out of date.</div>
+</footer>
+</div>
+</body>
+</html>

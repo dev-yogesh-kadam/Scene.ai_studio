@@ -42,6 +42,11 @@ WEB_TOOLS = ("WebSearch",)
 WEB_TURNS = 6  # more turns for a call that may search first
 WINDOW = 1_000_000   # tokens of context the models have (Sonnet 5, Opus 4.7, Haiku 5.5 and later); claude_context in config.json
 COMPACT = 0.9        # a session is compacted when its context is this full (sessions.COMPACT)
+# How hard Claude thinks before it answers, as the user picked it in the agent panel (Claude Code's --effort, the API's
+# output_config.effort). Set for one message of a conversation (workspace._planning); the agent's small jobs of their
+# own (captions, checks) keep each model's default. Empty: the model's default.
+EFFORT = contextvars.ContextVar("claude_effort", default="")
+LEVELS = ("low", "medium", "high", "xhigh", "max")
 NO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}   # the owner's own notes of the folder never reach a studio session
 LIMITED = re.compile(r"usage limit|rate.?limit|limit reached|out of (extra )?usage|overloaded|try again later|429|529", re.IGNORECASE)
 SIGNED_OUT = re.compile(r"log ?in|logged out|not signed|authenticat|oauth|invalid api key|401", re.IGNORECASE)
@@ -95,6 +100,30 @@ def service(models, path="", timeout=600, fast="", home="", window=WINDOW):
             "home": str(home or Path(tempfile.gettempdir()) / "scene-claude"), "window": int(window or WINDOW)}
 
 
+def efforts(model):
+    """The effort levels `model` takes, and the one it uses when none is chosen: (levels, default). No levels: it has
+    no effort setting. The names Claude Code takes stand for the newest of their family: "opus" is Opus 5.5, "sonnet"
+    Sonnet 5.5, "haiku" Haiku 5.5."""
+    name = str(model or "").lower().rsplit("/", 1)[-1]
+    if re.search(r"haiku-(3|4)|claude-3|sonnet-(3|4-[0-5])|opus-(3|4-[0-4]|4$)", name):
+        return [], None                                     # Haiku 4.5, Sonnet 4.5 and older: none
+    if re.search(r"opus-4-5", name):
+        return ["low", "medium", "high"], "high"
+    if re.search(r"4-6", name):
+        return ["low", "medium", "high", "max"], "high"     # xhigh came with Opus 4.7
+    if name in ("opus", "haiku") or re.search(r"opus-5-5|haiku-5", name):
+        return list(LEVELS), "medium"                       # Opus 5.5 and Haiku 5.5 default to medium
+    if re.search(r"opus|sonnet|fable|mythos", name):
+        return list(LEVELS), "high"
+    return list(LEVELS), None
+
+
+def chosen_effort(model, wanted):
+    """The effort to ask `model` for: `wanted` when the model takes it, else nothing (its default)."""
+    wanted = str(wanted or "").strip().lower()
+    return wanted if wanted in efforts(model)[0] else ""
+
+
 def session_settings(s):
     """The settings of Claude Code for the studio's sessions, as JSON: the owner's memory off, and compacted on its own
     when the context is COMPACT full."""
@@ -140,6 +169,8 @@ async def ask(s, model, messages, schema, images=(), thread=None, web=False):
             "--max-turns", str(MAX_TURNS + (WEB_TURNS if web else 0)), "--settings", session_settings(s)]
     if web:
         args += ["--allowedTools", " ".join(WEB_TOOLS)]
+    if thread is not None and EFFORT.get():
+        args += ["--effort", EFFORT.get()]   # a conversation's message: the effort the user picked
     if going_on:
         args += ["--resume", thread["id"]]
     elif thread is None:
@@ -266,7 +297,8 @@ def _handlers(entry, names):
                     text = str(await asyncio.get_running_loop().create_task(tool(dict(args or {})), context=entry.context))
                 except (KeyError, ValueError, TypeError):
                     text = "That call could not be run. Check its fields."
-            return {"content": [{"type": "text", "text": text[:entry.result_chars]}]}
+            chars = entry.result_chars(name) if callable(entry.result_chars) else entry.result_chars
+            return {"content": [{"type": "text", "text": text[:chars]}]}
         return run
     return {name: one(name) for name in names}
 
@@ -286,7 +318,8 @@ def prompt_file(system):
 
 async def _open(s, settings):
     """A connected client for one conversation. settings: {"model", "system", "schema", "tools": {name: (about, input
-    schema)}, "handlers", "resume", "max_turns", "web"}. With "web", Claude Code's web search (WEB_TOOLS) is on too."""
+    schema)}, "handlers", "resume", "max_turns", "web", "effort"}. With "web", Claude Code's web search (WEB_TOOLS) is on
+    too; "effort", how hard it thinks (EFFORT), or empty for the model's default."""
     tools = [sdk.tool(name, about, shape)(settings["handlers"][name]) for name, (about, shape) in settings["tools"].items()]
     Path(s["home"]).mkdir(parents=True, exist_ok=True)
     web = list(WEB_TOOLS) if settings.get("web") else []
@@ -296,7 +329,7 @@ async def _open(s, settings):
         mcp_servers={TOOLS_SERVER: sdk.create_sdk_mcp_server(TOOLS_SERVER, tools=tools)} if tools else {},
         strict_mcp_config=True, setting_sources=[], cwd=s["home"], resume=settings["resume"] or None,
         max_turns=settings["max_turns"], output_format={"type": "json_schema", "schema": settings["schema"]},
-        settings=session_settings(s), env=dict(NO_MEMORY))
+        settings=session_settings(s), env=dict(NO_MEMORY), effort=settings.get("effort") or None)
     client = sdk.ClaudeSDKClient(options)
     await asyncio.wait_for(client.connect(), 60)
     return client
@@ -389,12 +422,15 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
     "answer"} tokens, the usage limits or None, the names of the tools it called in order). Raises Busy, Lost or Failed.
     thread: the conversation's {"key", "id", ...}; its id (the session) and size are kept up to date here.
     tools: {name: async function(call) -> str}, the studio's tools for this message; about: {name: (what it does,
-    its input schema)}, every tool the session offers. A turn that runs out of max_turns is asked finish_now. web: Claude
-    Code's web search is on in the session (WEB_TOOLS)."""
+    its input schema)}, every tool the session offers. A turn that runs out of max_turns is asked finish_now.
+    result_chars: how much of a tool's result Claude is given, in characters: a number, or a function of the tool's name
+    (agent.result_chars). web: Claude Code's web search is on in the session (WEB_TOOLS)."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
     key = thread.get("key") or thread.get("id") or "default"
-    signature = json.dumps([model, system, schema, sorted(about), max_turns, bool(web)], sort_keys=True)
+    effort = EFFORT.get()
+    # A session opened with another effort is opened again (going on with the same conversation): it is set as it starts.
+    signature = json.dumps([model, system, schema, sorted(about), max_turns, bool(web), effort], sort_keys=True)
     if text.lstrip().startswith("/"):   # a message is never taken for a command of Claude Code's (/compact): command() runs those
         text = "Message:\n" + text
     await _tidy()
@@ -411,7 +447,7 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
             if entry.client is None:
                 entry.client = await _open(s, {"model": model, "system": system, "schema": schema, "tools": about,
                                                "handlers": _handlers(entry, about), "resume": thread.get("id"), "max_turns": max_turns,
-                                               "web": web})
+                                               "web": web, "effort": effort})
             result, limits = await _turn(entry, text)
             tokens = None
             if (result or {}).get("subtype") == "error_max_turns":   # still working when its turns ran out: it answers now

@@ -1,6 +1,7 @@
 {
   "title": "Text to Image: Qwen Image 2.1",
   "description": "Qwen Image 2.1 text-to-image (Qwen Research License (no monetized use)). Native 2K. Research license: not for monetized content.",
+  "pick_when": "Posters and pictures with words, and scenes with many things placed exactly (first on a poster, second on a portrait and a street scene in the studio's test), with references (up to 16). Research licence: never for an ad, a client or anything sold.",
   "output_name": "9.filename_prefix",
   "labels": {},
   "required_refs": [],

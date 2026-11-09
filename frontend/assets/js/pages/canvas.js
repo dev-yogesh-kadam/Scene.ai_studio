@@ -32,12 +32,12 @@ const PANEL_MAX = 960;
 const TABS = [{ id: 'quick', label: 'Quick actions', icon: 'bolt' }, { id: 'agent', label: 'Agent', icon: 'chat' },
   { id: 'kit', label: KIT, icon: 'memory' }, { id: 'bulk', label: 'Bulk generation', icon: 'grid', admin: true }];
 
-// The boards left of the shots, left to right: the finished cut, then the project's NeuralCore by type. A picture that is a
-// NeuralCore entry, or a finished cut, sits on its board and not in a shot row.
-const BOARDS = [['outputs', 'Outputs'], ['character', 'Characters'], ['background', 'Locations'], ['prop', 'Props'], ['outfit', 'Outfits'],
+// The boards left of the shots, left to right: the final video (every clip patched into one), the outputs, then the
+// module's NeuralCore by type. A picture that is a NeuralCore entry, or a finished cut, sits on its board and not in a shot row.
+const BOARDS = [['final', 'Final video'], ['outputs', 'Outputs'], ['character', 'Characters'], ['background', 'Locations'], ['prop', 'Props'], ['outfit', 'Outfits'],
   ['style', 'Styles'], ['voice', 'Voices'], ['script', 'Scripts'], ['other', 'Other']];
 const BOARD_LABEL = Object.fromEntries(BOARDS);
-const FINAL_CUT = 'edit/assemble';
+const FINAL_CUTS = ['edit/assemble', 'edit/film'];   // the whole film (backend/scene/placement.py FINISHED)
 const BOARD_PAD = 20;     // inside a board, around its frames
 const BOARD_HEAD = 64;    // the board's title, with room for it to grow as the canvas zooms out
 const ENTRY_NAME = 22;    // the name of an entry, above its frame
@@ -84,17 +84,18 @@ export function render(view) {
   const labelLayer = el('div');
   const fileLayer = el('div');    // NeuralCore entries that are files, not library items: shown on their board
   const world = el('div', { class: 'canvas-world' }, labelLayer, fileLayer, itemLayer, jobLayer);
-  let kitEntries = [];            // the project's NeuralCore
+  let kitEntries = [];            // this module's NeuralCore
   const onBoard = new Map();      // library item id -> {board, name}: it sits on a board, not in a shot row
   let boardCards = [];            // the boards as drawn: {label, x, y, w, h, names: [{text, x, y}]}
   const stage = el('div', { class: 'canvas-stage' }, world);
   // The canvas shows one project, the one opened from All projects; its name is shown, and it does not switch.
   const picker = el('b', { class: 'canvas-project', title: 'This project. Open another from All projects.' });
   const count = el('span', { class: 'slate-text' });
-  const timelineLink = el('a', { class: 'btn small quiet', href: '/timeline', title: 'Put this project\'s videos in order' }, 'Timeline');
   const context = el('div', { class: 'float canvas-context hidden' });
   const zoomLabel = el('button', { class: 'btn small quiet canvas-zoom', title: 'Zoom to 100% (0)', onclick: () => zoomTo(1) });
   const map = el('div', { class: 'minimap hidden', 'aria-hidden': 'true' });
+  const lost = el('div', { class: 'float canvas-lost hidden' },
+    el('button', { type: 'button', class: 'btn small quiet', title: 'Show all your work (1)', onclick: () => fit(true) }, icon('target'), 'Back to your work'));
   const hint = el('p', { class: 'canvas-hint muted' }, 'Use the panel on the right to make a shot. Everything you make lands here.');
   // The balance, at the top right like on every page; here it leads the tool bar that is already there.
   const balance = el('span', { class: 'canvas-credits', title: 'Credits pay for generations. An admin can add more.' });
@@ -194,7 +195,7 @@ export function render(view) {
     toolNote.classList.toggle('hidden', !text);
     if (!stay) noteTimer = setTimeout(() => toolNote.classList.add('hidden'), error ? 6000 : 2500);
   };
-  const filePicker = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.docx,.pdf,.txt,.md,.srt,.json', multiple: true, hidden: true,
+  const filePicker = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.docx,.pdf,.txt,.md,.srt,.json,.csv,.tsv', multiple: true, hidden: true,
     onchange: (e) => { uploadFiles([...e.target.files]); e.target.value = ''; } });
   // Each file joins the library and this project, and lands on the canvas as a shot of its own.
   async function uploadFiles(files) {
@@ -278,14 +279,14 @@ export function render(view) {
     libraryButton, filePicker);
 
   view.replaceChildren(stage,
-    el('div', { class: 'float canvas-bar' }, picker, count, shareButton, timelineLink),
+    el('div', { class: 'float canvas-bar' }, picker, count, shareButton),
     tools, drawer, toolNote,
     context,
     el('div', { class: 'float canvas-view' },
       balance,
       el('button', { class: 'btn small quiet canvas-zoom', title: 'Fit everything (1)', onclick: () => fit(true) }, 'Fit'),
       zoomLabel, panelButton),
-    map, hint, panel);
+    map, hint, lost, panel);
 
   // ------------------------------------------------------------ layout
 
@@ -347,7 +348,7 @@ export function render(view) {
     const live = new Set([...jobs, ...landing].map((j) => 'job:' + j.id));
     onBoard.clear();
     for (const e of kitEntries) if (e.item && known.has(e.item)) onBoard.set(e.item, { board: e.tag in BOARD_LABEL ? e.tag : 'other', name: e.name });
-    for (const item of items) if (item.workflow === FINAL_CUT && !onBoard.has(item.id)) onBoard.set(item.id, { board: 'outputs', name: item.name });
+    for (const item of items) if (FINAL_CUTS.includes(item.workflow) && !onBoard.has(item.id)) onBoard.set(item.id, { board: 'final', name: item.name });
     // A result its job put on a named board ("Characters", "Outputs") sits there, on the stack of what it is a version of.
     const named = new Map(items.map((i) => [i.id, i]));
     for (const board of placed.boards) {
@@ -355,7 +356,9 @@ export function render(view) {
         const members = (s.items || []).filter((id) => known.has(id));
         if (!members.length) continue;
         const stack = { key: `board:${board.name}:${s.group}`, members };
-        for (const id of members) onBoard.set(id, { board: boardOf(board.name), name: named.get(id).name, stack });
+        // A finished cut placed on Outputs before Final video was a board of its own moves there.
+        const home = FINAL_CUTS.includes(named.get(members[0]).workflow) ? 'final' : boardOf(board.name);
+        for (const id of members) onBoard.set(id, { board: home, name: named.get(id).name, stack });
       }
     }
     for (const item of [...items].reverse()) {   // oldest first, so shots are numbered in the order they were made
@@ -964,18 +967,16 @@ export function render(view) {
   }
 
   const download = (item) => el('a', { href: `/api/library/${item.id}/file?download=true`, download: item.filename }).click();
-  const open = (item) => openViewer(item, { actions: /^(edit|upload)\//.test(item.workflow) ? []
+  // A frame on a stack opens with all its takes under it: the one in use (on top) marked, the others a click away.
+  const open = (item) => openViewer(item, { takes: takesOf(item), actions: /^(edit|upload)\//.test(item.workflow) ? []
     : [{ label: 'Re-run', run: (dialog) => { dialog.close(); store.rerun = item; store.from = '/canvas'; go('/create'); } },
       seedOf(item) != null && { label: 'Reuse seed', run: (dialog) => { dialog.close(); reuseSeed(item, '/canvas'); } }].filter(Boolean) });
-
-  async function addToTimeline(videos, button) {
-    button.disabled = true;
-    try {
-      const board = (await api('/api/boards/timeline?project=' + project)).data;
-      const clips = (board.clips || []).concat(videos.map((v) => ({ id: v.id, start: 0, end: 0 })));   // end 0 = the whole clip
-      await api('/api/boards/timeline', { method: 'PUT', json: { project: project || null, data: { ...board, clips } } });
-      button.textContent = 'Added';
-    } catch (e) { alert(e.message); button.disabled = false; }
+  function takesOf(item) {
+    const stack = (spots.get(item.id) || {}).stack;
+    if (!stack || stack.members.length < 2) return null;
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const list = [...stack.members].reverse().map((id) => byId.get(id)).filter(Boolean);   // members are newest first
+    return { items: list, chosen: stacked(stack.key, stack.members)[0], choose: (take) => pickTake(stack, take.id) };
   }
 
   // ------------------------------------------------------------ what floats over the canvas
@@ -984,7 +985,7 @@ export function render(view) {
   function drawOverlay() {
     if (overlayQueued) return;
     overlayQueued = true;
-    requestAnimationFrame(() => { overlayQueued = false; drawContext(); drawMap(); });
+    requestAnimationFrame(() => { overlayQueued = false; drawContext(); drawMap(); drawLost(); });
   }
 
   // The bar over the selection. It is built again only when the selection changes; while the board moves (every frame
@@ -1000,7 +1001,6 @@ export function render(view) {
     const key = chosen.map((i) => i.id).join(',') + '|' + project;
     if (key === contextKey) return;
     contextKey = key;
-    const videos = chosen.filter((i) => i.kind === 'video');
     const one = chosen.length === 1 ? chosen[0] : null;
     context.replaceChildren(...[
       !one && el('span', { class: 'slate-text' }, `${chosen.length} selected`),
@@ -1011,12 +1011,19 @@ export function render(view) {
         title: `Seed ${seedOf(one)}: open Create with the same settings and this seed, to make the same picture with a change (Draft to Final, a word of the prompt)`,
         onclick: () => reuseSeed(one, '/canvas') }, 'Reuse seed'),
       one && seedOf(one) != null && el('span', { class: 'slate-text small' }, `Seed ${seedOf(one)}`),
-      videos.length > 0 && el('button', { class: 'btn small quiet', onclick: (e) => addToTimeline(videos, e.currentTarget) },
-        one ? 'Add to timeline' : `Add ${videos.length} to timeline`),
       el('button', { class: 'btn small quiet', title: 'Download (D)', onclick: () => chosen.forEach(download) }, one ? 'Download' : `Download ${chosen.length}`),
       one && project && el('button', { class: 'btn small quiet', title: `Keep it in this project's ${KIT} under a name`,
         onclick: async () => { if (await addToKitDialog({ project, item: one })) { shared.load(); dock.recast(); } } }, `Add to ${KIT}`),
     ].filter(Boolean));
+  }
+
+  // The way back, shown only while none of the work is in sight. The board can be scrolled away from it without end.
+  function drawLost() {
+    const rect = stage.getBoundingClientRect();
+    const covered = isOpen() ? panelWidth + 12 : 0;
+    const inSight = (b) => cam.x + b.x * cam.k < rect.width - covered - 40 && cam.x + (b.x + FRAME) * cam.k > 40
+      && cam.y + b.y * cam.k < rect.height - 40 && cam.y + (b.y + b.h + SLATE) * cam.k > 70;   // not under the bars or the panel
+    lost.classList.toggle('hidden', !boxes.size || [...boxes.values()].some(inSight));
   }
 
   // The minimap: a mark for each frame, in canvas units inside one layer that is scaled to fit, and the box of what is
@@ -1060,7 +1067,7 @@ export function render(view) {
       api('/api/library/placement?project=' + project).catch(() => ({ boards: [] }))]);
     items = library.items;
     placed = { boards: Array.isArray(boards.boards) ? boards.boards : [] };
-    kitEntries = (core.entries || []).filter((e) => !e.hidden);
+    kitEntries = core.entries || [];
     for (const id of [...selected]) if (!items.some((i) => i.id === id)) selected.delete(id);
   }
 
@@ -1077,7 +1084,6 @@ export function render(view) {
         picker.onclick = here ? () => go(placePath('/project', here)) : null;
         picker.classList.toggle('linked', !!here);
         showAddress(placePath('/canvas', here));   // the address names this project and module, to keep or send
-        timelineLink.href = placePath('/timeline', here);
         shareButton.classList.toggle('hidden', !project);   // a NeuralCore belongs to a project: none for all work
         picker.title = here ? 'Open the project: its NeuralCore and its modules' : 'Everything you have made';
       }

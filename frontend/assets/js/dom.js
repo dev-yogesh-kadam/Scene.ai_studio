@@ -37,6 +37,7 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   image: '<path d="M4 5h16v14H4z"/><path d="M4 16l4.5-4.5 4 4 2.5-2.5 5 5"/><circle cx="15.5" cy="9.5" r="1.5"/>',
   video: '<path d="M3.5 6h12v12h-12z"/><path d="M15.5 10.5 20.5 8v8l-5-2.5"/>',
+  music: '<path d="M9 17.5V5.5l10-2v12"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/>',
   audio: '<path d="M5 10v4M9 6v12M13 9v6M17 4v16M21 10v4"/>',
   title: '<path d="M5 7V5h14v2M12 5v14M9 19h6"/>',
   upscale: '<path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/>',
@@ -186,13 +187,14 @@ export function still(url, kind, name = '') {
   return el('img', { src: HAS_POSTER.test(url) ? url.replace(/\/file$/, '/poster') : url, alt: name, loading: 'lazy', decoding: 'async', draggable: 'false' });
 }
 
-// The spill: a made item, far out of focus, lighting the top of a page. show() takes a library item id and kind,
-// or nothing for the studio's own faint light. The picture is loaded first, so the light fades in instead of popping.
+// The spill: a made item, far out of focus, lighting the top of a page. show() takes a library item id and kind
+// (and the address its files are under, when not the library), or nothing for the studio's own faint light. The
+// picture is loaded first, so the light fades in instead of popping.
 export function spill() {
   const node = el('div', { class: 'spill wait', 'aria-hidden': 'true' });
   let shown = null;
-  const show = (id, kind) => {
-    const url = id && kind !== 'audio' ? `/api/library/${id}/${kind === 'video' ? 'poster' : 'file'}` : '';
+  const show = (id, kind, base = '/api/library') => {
+    const url = id && kind !== 'audio' ? `${base}/${id}/${kind === 'video' ? 'poster' : 'file'}` : '';
     if (url === shown) return;
     shown = url;
     node.classList.add('wait');
@@ -212,13 +214,6 @@ export function spill() {
 // up and jumped at the corners).
 export function runningGate() {
   return el('span', { class: 'run', 'aria-hidden': 'true' });
-}
-
-// Seconds as HH:MM:SS:FF at 24 frames a second.
-export function timecode(seconds) {
-  const frames = Math.round(seconds * 24);
-  const two = (n) => String(n).padStart(2, '0');
-  return [Math.floor(frames / 86400), Math.floor(frames / 1440) % 60, Math.floor(frames / 24) % 60, frames % 24].map(two).join(':');
 }
 
 export function duration(seconds) {

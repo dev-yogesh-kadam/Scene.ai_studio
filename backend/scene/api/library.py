@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import audit, fetch, media, kit, placement, refs, sharing
+from .. import audit, fetch, media, kit, placement, refs, sharing, showcase
 from ..db import as_everyone
 from ..catalog import KINDS
 from ..outputs import MAIN_CANVAS
@@ -55,8 +55,8 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
                      all: int = 0, user: dict = Depends(current_user)):
     """`project` is a project id, "none" for items in no project, or empty for everything; with `modules=1` a project's
     modules count as part of it. `run`: the working files of that run (slices, trims, references of a long skill), which
-    are otherwise left out. `all=1`: every item, not the newest 500. The canvas and the timeline ask for it: they drop
-    from their saved layout whatever the list leaves out, so a cut-off list would lose the places of older work."""
+    are otherwise left out. `all=1`: every item, not the newest 500. The canvas asks for it: it drops
+    from its saved layout whatever the list leaves out, so a cut-off list would lose the places of older work."""
     # Each item comes with what its details panel shows: the job's cost and the project's name.
     # In a project: what everyone in it made (a shared project's members too), read once the user is found to be in it.
     # Anywhere else: the user's own items.
@@ -108,7 +108,7 @@ async def upload_item(request: Request, user: dict = Depends(current_user)):
     """Multipart form with "file" (an image, a video, a sound, a script: .docx, .pdf, .txt, or a transcript: .srt,
     .json) and "project_id".
     The file joins the library and the project's canvas like a finished generation, so it can be a frame to start on, a
-    reference or a clip on the timeline. Nothing is charged."""
+    reference or part of a cut. Nothing is charged."""
     form = await request.form(max_files=1, max_fields=10)
     upload = form.get("file")
     if not hasattr(upload, "filename"):
@@ -140,7 +140,7 @@ async def import_link(body: dict, request: Request, user: dict = Depends(current
     except fetch.FetchError as error:
         raise HTTPException(400, str(error))
     name = " ".join(str(body.get("name") or "").split())[:80]
-    return await _file_in(request, user, data, fetch.filename_for(final, kind), kind, project_id, "Brought in from a link",
+    return await _file_in(request, user, data, fetch.filename_for(final, kind, data), kind, project_id, "Brought in from a link",
                           workflow=IMPORTED, name=name, source=url)
 
 
@@ -496,9 +496,10 @@ async def duplicate_project(project_id: int, request: Request, user: dict = Depe
     ref = refs.of_project(None)
     copy = db.run("INSERT INTO projects (user_id, name, created, canvas_name, ref) VALUES (?, ?, ?, ?, ?)",
                   (user["id"], (root["name"] + " copy")[:60], time.time(), root["canvas_name"], ref))
-    for m in db.all("SELECT name FROM projects WHERE parent_id = ? ORDER BY id", (root["id"],)):
-        db.run("INSERT INTO projects (user_id, name, created, parent_id, ref) VALUES (?, ?, ?, ?, ?)",
-               (user["id"], m["name"], time.time(), copy, refs.of_project(copy)))
+    for m in db.all("SELECT id, name FROM projects WHERE parent_id = ? ORDER BY id", (root["id"],)):
+        module = db.run("INSERT INTO projects (user_id, name, created, parent_id, ref) VALUES (?, ?, ?, ?, ?)",
+                        (user["id"], m["name"], time.time(), copy, refs.of_project(copy)))
+        kit.copy_entries(db, user["id"], m["id"], module)   # each module's NeuralCore is its own
     kit.copy_entries(db, user["id"], root["id"], copy)
     return {"id": copy, "ref": ref, "name": (root["name"] + " copy")[:60]}
 
@@ -558,7 +559,7 @@ async def rename_canvas(project_id: int, body: dict, request: Request, user: dic
 async def delete_project(project_id: int, request: Request, user: dict = Depends(current_user)):
     """Delete a project, or a module, and everything in it, so nothing that can no longer be used stays in storage: what
     was made in it (the files, their posters and keyframes), its jobs still waiting or running (their credits given
-    back), and its canvases, timelines and agent tabs. A project takes its modules and its NeuralCore with it. The jobs'
+    back), and its canvases and agent tabs. A project takes its modules and its NeuralCore with it. The jobs'
     records stay, in no project, for the credit history."""
     probe = _own_project(request, user, project_id, "viewer")
     here = _own_project(request, user, project_id, "manager" if probe["parent_id"] else "owner")   # a module: a manager; a project: its owner
@@ -577,11 +578,10 @@ async def delete_project(project_id: int, request: Request, user: dict = Depends
         db.run("DELETE FROM generations WHERE project_id IN ({})".format(marks), gone)
         for one in gone:
             db.run("UPDATE jobs SET project_id = NULL WHERE project_id = ?", (one,))
-            # Its canvas, timeline and agent tabs go with it: a project made later must not open with them.
+            # Its canvas and agent tabs go with it: a project made later must not open with them.
             db.run("DELETE FROM boards WHERE project_id = ?", (one,))
-            if not here["parent_id"]:   # NeuralCore is the project's: its modules share it, so it goes only with the project
-                for row in db.all("SELECT id FROM assets WHERE project_id = ? AND user_id = ?", (one, owner)):
-                    kit.remove(db, state.assets_dir / str(owner), owner, row["id"])   # files too
+            for row in db.all("SELECT id FROM assets WHERE project_id = ? AND user_id = ?", (one, owner)):   # its NeuralCore
+                kit.remove(db, state.assets_dir / str(owner), owner, row["id"])   # files too
             db.run("DELETE FROM projects WHERE id = ?", (one,))
     for person in people:
         state.outputs.remove_folder(person, its_folder)   # whatever is left in their folder of it; never the backup's copy
@@ -632,3 +632,31 @@ async def remove_member(project_id: int, member_id: int, request: Request, user:
     sharing.change(request.app.state.db, dict(here, role="owner") if member_id == user["id"] else here, member_id, None)
     request.app.state.notify(member_id, library_changed=True)
     return {"members": sharing.members(request.app.state.db, here["top_id"])}
+
+
+# ---------------------------------------------------------------- the showcase on the Home page
+
+def _showcase_file(request, key):
+    item = showcase.find(request.app.state.db, key)
+    path = item and showcase.path_of(request.app.state.showcase_dir, item)
+    if not path or not path.is_file():
+        raise HTTPException(404, "No such item on the Home page.")
+    return item, path
+
+
+@router.get("/showcase")
+async def get_showcase(request: Request, user: dict = Depends(current_user)):
+    """What an admin picked for every user's Home page: its sections, and the items in the order they are shown."""
+    data = showcase.load(request.app.state.db)
+    return {"sections": data["sections"], "items": [showcase.public(i) for i in data["items"]]}
+
+
+@router.get("/showcase/{key}/file")
+async def showcase_file(key: str, request: Request, download: bool = False, user: dict = Depends(current_user)):
+    item, path = _showcase_file(request, key)
+    return FileResponse(path, filename=safe_name(item["name"]) + path.suffix if download else None)
+
+
+@router.get("/showcase/{key}/poster")
+async def showcase_poster(key: str, request: Request, user: dict = Depends(current_user)):
+    return await poster_response(request, _showcase_file(request, key)[1])

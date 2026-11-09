@@ -13,9 +13,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import aftercare, backup, claude, endpoints, health, langfuse_trace, media, motion, roles, sequence, staff, traces, vault, versions
+from . import aftercare, backup, claude, endpoints, health, langfuse_trace, media, motion, phone_site, roles, sequence, staff, traces, vault, versions
 from .agent import Agent, AgentError
-from .api import admin, auth, bulk, console as console_api, film, kit as kit_api, library, runs, studio, workspace
+from .api import admin, auth, bulk, console as console_api, film, kit as kit_api, library, mobile, runs, shares, studio, workspace
 from .catalog import Catalog
 from .comfy import workflows
 from .comfy.client import ComfyError
@@ -133,6 +133,22 @@ class Hub:
                 self.discard(user_id, ws)
 
 
+def quiet_resets(loop):
+    """Leave out of the console a browser closing a connection (Windows: "ConnectionResetError: [WinError 10054]" with a
+    traceback from asyncio's proactor). A video player does it all the time, dropping a download it no longer needs; it
+    is no error of the studio. Anything else is reported as before."""
+    before = loop.get_exception_handler()
+
+    def handle(loop, context):
+        if isinstance(context.get("exception"), (ConnectionResetError, ConnectionAbortedError)):
+            return
+        if before:
+            before(loop, context)
+        else:
+            loop.default_exception_handler(context)
+    loop.set_exception_handler(handle)
+
+
 def create_app(settings=None):
     settings = settings or load_settings()
     storage = settings.path("storage_dir")
@@ -193,6 +209,7 @@ def create_app(settings=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        quiet_resets(asyncio.get_running_loop())
         app.state.jobs = JobManager(db, comfy, catalog, credits, app.state.outputs, notify, storage / "tmp", settings.node_path,
                                     storage / "assets")
         app.state.jobs.pool = comfy_pool
@@ -227,6 +244,7 @@ def create_app(settings=None):
     app.state.notify = notify
     app.state.live_message = live_message
     app.state.assets_dir = storage / "assets"
+    app.state.showcase_dir = storage / "showcase"   # the work an admin picked for the Home page (showcase.py)
     app.state.throttle = LoginThrottle()
     app.state.limits = RateLimit()
     app.state.view_codes = {}   # one-time codes to view the studio as a user (api/admin.start_view), by their hash
@@ -242,7 +260,7 @@ def create_app(settings=None):
         versions.look(app.state)   # what arrived while the app was stopped
     app.state.backup_dir = settings.path("backup_dir") if settings.backup_dir else storage / "backups"
     # The files a lost disk would take with it: the finished work and the kit's uploads. Copied into files/ beside the backups.
-    app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir}
+    app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir, "showcase": app.state.showcase_dir}
     # Whether the render server answered the last time anyone asked, and since when that has been so.
     app.state.server_seen = {"online": None, "since": time.time()}
     app.state.model_seen = {"online": None, "since": time.time()}   # the same for the agent's model, Claude (health.py)
@@ -264,7 +282,7 @@ def create_app(settings=None):
     _answer_errors(app)
     _guard(app)   # after the one above, so its answers get the headers too
     # The admin routes are not here: they are the admin console's, a site of its own (create_console).
-    for module in (auth, studio, library, workspace, film, runs, kit_api, bulk):
+    for module in (auth, studio, library, workspace, film, runs, kit_api, bulk, mobile, shares):
         app.include_router(module.router)
 
     frontend = settings.path("frontend_dir").resolve()
@@ -283,9 +301,10 @@ def create_app(settings=None):
     # The studio's pages have addresses of their own (/library, /canvas), all answered by the one page, which routes them.
     # /admin, where the console used to be, sends an admin on to it.
     PAGE_PATHS = ("/", "/index.html", "/signin", "/signup", "/home", "/projects", "/library", "/skills", "/create", "/canvas",
-                  "/timeline", "/settings", "/admin", "/project", "/analytics", "/guide",
+                  "/settings", "/admin", "/project", "/analytics", "/guide",
                   # a project's pages by its id and its module's: /project/PRJ..., /canvas/PRJ.../module/MOD...
-                  "/project/{place:path}", "/canvas/{place:path}", "/timeline/{place:path}", "/analytics/{place:path}")
+                  "/project/{place:path}", "/canvas/{place:path}", "/analytics/{place:path}")
+    phone_site.install(app, settings)   # phones get the studio's phone site (/m/), before the studio's pages answer
     _pages(app, frontend, "index.html", "main.js", PAGE_PATHS)
     app.mount("/", StaticFiles(directory=settings.path("frontend_dir"), html=True), name="frontend")
     app.state.console = create_console(app) if settings.console_port else None
@@ -326,7 +345,7 @@ def _guard(app):
         if request.url.path.startswith("/v/") and response.status_code == 200:
             # A versioned address changes whenever any page file does, so what it serves never changes: kept a year.
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif not request.url.path.startswith("/api/"):
+        elif not request.url.path.startswith(("/api/", "/m/_expo/")):   # the phone site's scripts are named by their content
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -334,7 +353,8 @@ def _guard(app):
     async def guarded(request, call_next):
         """Refuse a change sent from another site's page (cross-site request forgery), and send every answer with the
         headers that tell the browser what the page may do."""
-        if request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS") and not same_origin(request):
+        if (request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS")
+                and not same_origin(request)):
             return JSONResponse({"detail": "This request came from another site and was refused."}, status_code=403)
         traces.new_run()   # the agent's calls made for this request are one run (traces.py)
         response = await call_next(request)

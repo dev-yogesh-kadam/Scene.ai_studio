@@ -65,7 +65,7 @@ async def _bands(path, start=0.0, seconds=None):
     process = await asyncio.create_subprocess_exec(
         ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-ss", "{:.3f}".format(start), *span, "-i", str(path),
         "-filter_complex", graph, "-map", "[out]", "-ar", str(RATE), "-f", "s16le", "-",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         raw, err = await process.communicate()
     except asyncio.CancelledError:

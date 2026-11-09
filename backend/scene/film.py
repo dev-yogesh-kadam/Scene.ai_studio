@@ -518,6 +518,9 @@ async def burn_subtitles(video, cues, target, style=None):
             **({"font": style["font"], "karaoke": style["karaoke"]} if style else {})}
 
 
+JOIN_LIMIT = 600   # seconds a join may take: it only copies the pictures, and five minutes of film takes five seconds
+
+
 async def join_on_master(clips, master, target):
     """The trimmed clips in order, their pictures copied as they are (they share one encoding), with the master
     audio as the only sound. Refuses when the pictures and the master differ by more than one frame."""
@@ -526,16 +529,16 @@ async def join_on_master(clips, master, target):
     total = 0
     for clip in clips:
         total += await frames_of(clip)
+    sound = (await probe(master))["seconds"]
+    if abs(sound - total / FPS) > 1 / FPS + 0.01:
+        raise MediaError("The clips last {:.3f} s and the master {:.3f} s: they must match within a frame.".format(total / FPS, sound))
     with tempfile.TemporaryDirectory() as work:
         listing = Path(work) / "clips.txt"
         listing.write_text("ffconcat version 1.0\n" + "".join(
             "file '{}'\n".format(Path(c).resolve().as_posix().replace("'", r"'\''")) for c in clips), encoding="utf-8")
         await _ffmpeg("-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing, "-i", master,
                       "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                      "-t", _secs(total / FPS), "-movflags", "+faststart", target)
-    sound = (await probe(master))["seconds"]
-    if abs(sound - total / FPS) > 1 / FPS + 0.01:
-        raise MediaError("The clips last {:.3f} s and the master {:.3f} s: they must match within a frame.".format(total / FPS, sound))
+                      "-t", _secs(total / FPS), "-movflags", "+faststart", target, limit=JOIN_LIMIT)
     found = await probe(target)
     return {"seconds": total / FPS, "width": found["width"], "height": found["height"], "frames": total}
 
@@ -547,7 +550,7 @@ async def _envelope(path):
     episode takes about two seconds, which is nothing beside the run it is part of."""
     process = await asyncio.create_subprocess_exec(
         ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000",
-        "-f", "s16le", "-", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        "-f", "s16le", "-", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         raw, err = await process.communicate()
     except asyncio.CancelledError:

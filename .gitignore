@@ -6,6 +6,8 @@ __pycache__/
 
 # HyperFrames and its packages, installed by `npm install` in motion/
 motion/node_modules/
+# Google Fonts the motion pages name, fetched by HyperFrames once and kept
+motion/.fonts/
 
 # Local settings and data (users, sessions, generated media)
 config.json

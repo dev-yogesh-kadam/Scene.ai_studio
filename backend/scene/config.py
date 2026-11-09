@@ -32,6 +32,8 @@ class Settings:
     console_port: int = 8090
     console_url: str = ""         # the console's address as an admin's browser reaches it, for the studio's link; empty = this host, console_port
     console_hours: int = 12       # how long a sign-in to the console lasts
+    mobile_site_dir: str = "mobile/dist"   # the phone site, built from mobile/ (npm run build), served at /m/
+    share_days: int = 30          # how long a share link opens its item without signing in; 0 turns share links off
     workflows_dir: str = "workflows"
     storage_dir: str = "storage"
     # PostgreSQL, as postgresql://<account>:<password>@localhost:5432/scene; empty = SQLite in storage_dir. The owner

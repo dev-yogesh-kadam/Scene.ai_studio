@@ -135,7 +135,7 @@ def test_a_long_run_keeps_pictures_nobody_named_and_the_agent_is_told_to_ask(cli
     monkeypatch.setattr(client.app.state.agent, "preflight", lambda *a, **k: asyncio.sleep(0, ready))
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "Who is the second picture?", "steps": [],
                                         "question": {"text": "Who is this?", "options": ["A friend", "A stranger"]}})
-    plan = client.post("/api/agent/plan", json={"instruction": "@1 @2 /pocket-motion-seedance-v2\nMaya - @1", "selection": [named, unnamed],
+    plan = client.post("/api/agent/plan", json={"instruction": "@1 @2 /script-to-video\nMaya - @1", "selection": [named, unnamed],
                                                 "run": "pm-k", "project_id": project}).json()
     entries = {e["name"]: e for e in kit.entries(client.app.state.db, me["id"], project)}
     assert entries["Maya"]["named"] == 1 and entries["stranger"]["named"] == 0
@@ -155,7 +155,7 @@ def test_assets_of_no_project_are_not_used_anywhere(client):
                                 "VALUES (?, 'Meera', 'character', 'image', 'meera.png', 1, 1, ?)", (me["id"], origin))
     listed = client.get("/api/kit?project=%d" % project).json()
     assert listed["entries"] == [] and "earlier" not in listed
-    assert client.get("/api/kit").json() == {"entries": [], "project": False, "module": False, "types": listed["types"]}
+    assert client.get("/api/kit").json() == {"entries": [], "project": False, "types": listed["types"]}
     assert memory.book(client.app.state.db, me["id"], project) == [] and memory.book(client.app.state.db, me["id"], 0) == []
     assert client.post("/api/kit/import", json={"project_id": project, "ids": [1]}).status_code in (404, 405)
 

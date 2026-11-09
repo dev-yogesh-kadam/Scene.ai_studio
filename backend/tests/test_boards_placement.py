@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from scene import placement
+from scene import db as database, placement
 from scene.api import studio
 from scene.comfy import workflows
 from test_api import JOB, console, post_job, register
@@ -74,18 +74,35 @@ def test_a_board_is_made_on_first_use_and_a_re_render_stacks_on_it(client, tmp_p
     assert boards["Outputs"][0]["items"] == [final] and boards["Mood board"] == []
 
 
-def test_the_whole_film_goes_on_outputs_and_a_new_cut_stacks_on_it(client, tmp_path):
+def test_the_whole_film_goes_on_final_video_and_a_new_cut_stacks_on_it(client, tmp_path):
     me = register(client)
     film = project(client)
     first = finish(client, tmp_path, me["id"], film, "film1", workflow="edit/film", run="abcdefghijkl")
-    again = finish(client, tmp_path, me["id"], film, "film2", workflow="edit/assemble")
+    again = finish(client, tmp_path, me["id"], film, "film2", workflow="edit/assemble", board="Outputs")   # Outputs: still its own board
     finish(client, tmp_path, me["id"], film, "trim1", workflow="edit/trim")   # a working file: on no board
     boards = client.get("/api/library/placement?project=%d" % film).json()["boards"]
-    assert [b["name"] for b in boards] == ["Outputs"]
+    assert [b["name"] for b in boards] == ["Final video"]
     assert boards[0]["stacks"] == [{"group": "final", "items": [again, first]}]
     named = finish(client, tmp_path, me["id"], film, "film3", workflow="edit/film", board="Cuts")   # a board it names wins
-    assert [b["name"] for b in client.get("/api/library/placement?project=%d" % film).json()["boards"]] == ["Outputs", "Cuts"]
+    assert [b["name"] for b in client.get("/api/library/placement?project=%d" % film).json()["boards"]] == ["Final video", "Cuts"]
     assert named
+
+
+def test_a_runs_film_is_listed_and_its_working_files_are_not(client, tmp_path):
+    me = register(client)
+    film = project(client)
+    run = "abcdefghijkl"
+    whole = finish(client, tmp_path, me["id"], film, "film1", workflow="edit/film", run=run)
+    placed = finish(client, tmp_path, me["id"], film, "subs1", workflow="edit/subtitles", run=run, board="Outputs")
+    trim = finish(client, tmp_path, me["id"], film, "trim1", workflow="edit/trim", run=run)
+    listed = lambda **params: [i["id"] for i in client.get("/api/library", params=params).json()["items"]]
+    assert set(listed(project=film)) == {whole, placed}
+    assert listed(run=run) == [trim]
+    # a film made before this was filed under its run, and comes back when the studio starts
+    client.app.state.db.run("UPDATE generations SET run = ? WHERE id = ?", (run, whole))
+    assert whole not in listed(project=film)
+    database._films_shown(client.app.state.db)
+    assert whole in listed(project=film)
 
 
 def test_placement_is_the_project_owners_and_goes_with_the_project(client, tmp_path):

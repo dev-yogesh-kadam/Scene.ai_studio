@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Craft Skills Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; the connection map first (an SVG in its own scrolling box), then what passes along each link, then each skill's links, then the detail graphs */
+:root {
+  --bg: #f4f6f9; --surface: #ffffff; --sunk: #eef1f6; --fg: #18202c; --muted: #5a6577; --line: #d9dee7; --edge: #8a95a8;
+  --accent: #2b5cab; --accent-soft: #e3ebf8;
+  --ready: #23704a; --ready-soft: #ddf1e5; --soon: #9a5a00; --soon-soft: #fbefd9; --craft: #6b3fa0; --craft-soft: #efe6f9;
+  --display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --surface: #19202a; --sunk: #141a22; --fg: #e5e9f0; --muted: #9aa5b6; --line: #2b3340; --edge: #6f7b8f;
+    --accent: #86aef0; --accent-soft: #1d2a3f; --ready: #7fd3a2; --ready-soft: #18301f; --soon: #ecb766; --soon-soft: #352816;
+    --craft: #c3a2ee; --craft-soft: #2a2038; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --surface: #19202a; --sunk: #141a22; --fg: #e5e9f0; --muted: #9aa5b6; --line: #2b3340; --edge: #6f7b8f;
+  --accent: #86aef0; --accent-soft: #1d2a3f; --ready: #7fd3a2; --ready-soft: #18301f; --soon: #ecb766; --soon-soft: #352816;
+  --craft: #c3a2ee; --craft-soft: #2a2038; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.55; margin: 0; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 40px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 52px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; line-height: 1.2; text-wrap: balance; }
+h1 { font-size: clamp(28px, 5vw, 40px); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 22px; font-weight: 700; }
+h3 { font-size: 16px; font-weight: 700; }
+p { margin: 0; max-width: 70ch; }
+section { display: grid; gap: 16px; min-width: 0; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 18px; color: var(--muted); }
+code { font-family: var(--mono); font-size: 13px; background: var(--sunk); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.skill { font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 2px 8px; border-radius: 5px; white-space: nowrap; display: inline-block; }
+.skill.cmd { background: var(--accent-soft); color: var(--accent); }
+.skill.craft { background: var(--craft-soft); color: var(--craft); }
+.skill.preset { background: var(--ready-soft); color: var(--ready); }
+.skill.gone { background: var(--soon-soft); color: var(--soon); }
+.tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.tag.ready { background: var(--ready-soft); color: var(--ready); }
+.tag.soon { background: var(--soon-soft); color: var(--soon); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 14px; color: var(--muted); align-items: center; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.stat { background: var(--surface); padding: 12px 16px; display: grid; gap: 2px; }
+.stat b { font-family: var(--display); font-size: 26px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13px; color: var(--muted); }
+
+/* the connection map */
+.mapbox { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.mapbox svg { display: block; min-width: 900px; width: 100%; height: auto; font-family: var(--body); }
+.n-cmd { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.n-craft { fill: var(--craft-soft); stroke: var(--craft); stroke-width: 1.5; }
+.n-preset { fill: var(--ready-soft); stroke: var(--ready); stroke-width: 1.5; }
+.n-group { fill: var(--sunk); stroke: var(--line); stroke-width: 1.5; }
+.n-gone { fill: var(--soon-soft); stroke: var(--soon); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.t-title { fill: var(--fg); font-family: var(--display); font-weight: 700; font-size: 15px; }
+.t-chip { fill: var(--fg); font-family: var(--mono); font-size: 12.5px; }
+.t-small { fill: var(--muted); font-size: 12.5px; }
+.t-edge { fill: var(--fg); font-size: 12.5px; font-weight: 600; }
+.t-edge-sub { fill: var(--muted); font-size: 12px; }
+.t-gone { fill: var(--soon); font-family: var(--mono); font-size: 12.5px; }
+.e { fill: none; stroke: var(--edge); stroke-width: 1.6; }
+.e-data { fill: none; stroke: var(--accent); stroke-width: 1.8; }
+.e-dash { fill: none; stroke: var(--soon); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.head-e { fill: var(--edge); } .head-d { fill: var(--accent); } .head-g { fill: var(--soon); }
+
+/* tables */
+.box { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 500; white-space: nowrap; }
+tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+.wide { min-width: 760px; }
+td.from, td.to { white-space: nowrap; width: 1%; }
+td.arrow { color: var(--muted); width: 1%; padding-inline: 4px; }
+
+/* per-skill cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.sk { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.sk dl { margin: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px 10px; font-size: 14px; }
+.sk dt { color: var(--muted); font-size: 13px; padding-top: 1px; }
+.sk dd { margin: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+
+/* the flow */
+.flow { display: grid; }
+.step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; }
+.rail { display: flex; flex-direction: column; align-items: center; }
+.num { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--surface); display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 15px; flex: none; }
+.stem { width: 2px; flex: 1; background: var(--line); min-height: 18px; }
+.step:last-child .stem { display: none; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; display: grid; gap: 8px; min-width: 0; }
+.card .head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+
+/* the mix grid */
+.matrix { border-collapse: collapse; font-size: 13px; }
+.matrix th, .matrix td { border: 0; padding: 5px 4px; text-align: center; }
+.matrix th.row { text-align: right; padding-right: 10px; font-family: var(--body); text-transform: none; letter-spacing: 0; color: var(--fg); font-size: 13px; }
+.matrix th.col { writing-mode: vertical-rl; transform: rotate(180deg); height: 100px; vertical-align: bottom; font-family: var(--body); text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--fg); }
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.self { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: var(--line); }
+.issues { display: grid; gap: 10px; }
+.issue { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--soon); border-radius: 8px; padding: 12px 14px; font-size: 15px; }
+.issue b { display: block; margin-bottom: 2px; }
+footer { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header style="display:grid;gap:12px">
+  <div class="eyebrow">C:\Scene\Scene.ai\craft skills · all 24 files read again on 3 Nov 2026</div>
+  <h1>Craft Skills Map</h1>
+  <p class="lede">The skills in the craft skills folder all work as one system. script-to-video calls the others, and each one passes its result on to the next. This page shows every one of those links.</p>
+  <div class="stats">
+    <div class="stat"><b>24</b><span>skill files</span></div>
+    <div class="stat"><b>1</b><span>command</span></div>
+    <div class="stat"><b>9</b><span>craft skills</span></div>
+    <div class="stat"><b>14</b><span>scene presets</span></div>
+    <div class="stat"><b>3</b><span>guides named but missing</span></div>
+  </div>
+</header>
+
+<section>
+  <div class="eyebrow">Graph 1</div>
+  <h2>How they connect</h2>
+  <div class="legend">
+    <span><span class="skill cmd">blue</span> the command</span>
+    <span><span class="skill craft">purple</span> craft skills</span>
+    <span><span class="skill preset">green</span> scene presets</span>
+    <span><span class="skill gone">dashed amber</span> named but not in the folder</span>
+    <span>grey arrow: loads it · blue arrow: hands it data</span>
+  </div>
+  <div class="mapbox">
+    <svg viewBox="0 0 1000 650" role="img" aria-label="Connection map of the craft skills">
+      <defs>
+        <marker id="ae" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-e" d="M0 0L10 5L0 10z"/></marker>
+        <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-d" d="M0 0L10 5L0 10z"/></marker>
+        <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-g" d="M0 0L10 5L0 10z"/></marker>
+      </defs>
+
+      <!-- missing guide, top right -->
+      <rect class="n-gone" x="760" y="22" width="210" height="44" rx="8"/>
+      <text class="t-gone" x="865" y="49" text-anchor="middle">ffmpeg-recipes</text>
+
+      <!-- the command -->
+      <rect class="n-cmd" x="370" y="18" width="260" height="62" rx="10"/>
+      <text class="t-title" x="500" y="44" text-anchor="middle">script-to-video</text>
+      <text class="t-small" x="500" y="64" text-anchor="middle">asks, picks models, loads the rest</text>
+
+      <!-- loads: command to asset-designer, director, continuity -->
+      <path class="e" d="M410 80 L200 168" marker-end="url(#ae)"/>
+      <text class="t-edge" x="236" y="112">loads at step 4</text>
+      <path class="e" d="M500 80 L500 168" marker-end="url(#ae)"/>
+      <text class="t-edge" x="510" y="118">loads twice</text>
+      <text class="t-edge-sub" x="510" y="134">story first, then directing</text>
+      <path class="e" d="M590 80 L800 158" marker-end="url(#ae)"/>
+      <text class="t-edge" x="700" y="104">loads per clip</text>
+      <text class="t-edge-sub" x="700" y="120">by join × method</text>
+
+      <!-- command to prompters, down the left side -->
+      <path class="e" d="M370 49 L30 49 L30 470 L58 470" marker-end="url(#ae)"/>
+      <text class="t-edge" x="22" y="280" text-anchor="middle" transform="rotate(-90 22 280)">picks one by video model</text>
+
+      <!-- asset-designer -->
+      <rect class="n-craft" x="60" y="170" width="230" height="66" rx="10"/>
+      <text class="t-title" x="175" y="198" text-anchor="middle">asset-designer</text>
+      <text class="t-small" x="175" y="218" text-anchor="middle">one look, one sheet each</text>
+
+      <!-- director -->
+      <rect class="n-craft" x="385" y="170" width="230" height="66" rx="10"/>
+      <text class="t-title" x="500" y="198" text-anchor="middle">director</text>
+      <text class="t-small" x="500" y="218" text-anchor="middle">scenes, beats, every shot</text>
+
+      <!-- asset-designer and director, both ways -->
+      <path class="e-data" d="M290 192 L383 192" marker-end="url(#ad)"/>
+      <text class="t-edge" x="336" y="185" text-anchor="middle">sheets → bible</text>
+      <path class="e-data" d="M385 216 L292 216" marker-end="url(#ad)"/>
+      <text class="t-edge-sub" x="338" y="234" text-anchor="middle">an idea's story</text>
+
+      <!-- continuity group -->
+      <rect class="n-group" x="700" y="160" width="270" height="150" rx="12"/>
+      <text class="t-title" x="716" y="184">continuity</text>
+      <rect class="n-craft" x="716" y="196" width="168" height="28" rx="6"/><text class="t-chip" x="800" y="215" text-anchor="middle">continuity-chain</text>
+      <rect class="n-craft" x="716" y="232" width="168" height="28" rx="6"/><text class="t-chip" x="800" y="251" text-anchor="middle">continuity-board</text>
+      <rect class="n-craft" x="716" y="268" width="168" height="28" rx="6"/><text class="t-chip" x="800" y="287" text-anchor="middle">continuity-recall</text>
+      <path class="e" d="M884 282 L912 282 L912 212 L886 212" marker-end="url(#ae)"/>
+      <path class="e" d="M912 246 L886 246" marker-end="url(#ae)"/>
+      <text class="t-edge-sub" x="918" y="242">beside</text>
+      <text class="t-edge-sub" x="918" y="257">either</text>
+      <path class="e-dash" d="M860 160 L862 68" marker-end="url(#ag)"/>
+      <text class="t-edge-sub" x="872" y="130">board, recall:</text>
+      <text class="t-edge-sub" x="872" y="145">tiling recipes</text>
+
+      <!-- scene presets -->
+      <path class="e" d="M500 236 L500 296" marker-end="url(#ae)"/>
+      <text class="t-edge-sub" x="492" y="262" text-anchor="end">preset_search</text>
+      <text class="t-edge-sub" x="492" y="277" text-anchor="end">by scene type</text>
+      <rect class="n-preset" x="390" y="298" width="220" height="62" rx="10"/>
+      <text class="t-title" x="500" y="323" text-anchor="middle">14 scene presets</text>
+      <text class="t-small" x="500" y="343" text-anchor="middle">each names 2–4 it mixes with</text>
+
+      <!-- data into the prompters -->
+      <path class="e-data" d="M175 236 L175 418" marker-end="url(#ad)"/>
+      <text class="t-edge" x="185" y="320">the clip's sheets</text>
+      <text class="t-edge-sub" x="185" y="336">in the look it names</text>
+      <path class="e-data" d="M600 236 C 640 280, 640 370, 600 418" marker-end="url(#ad)"/>
+      <text class="t-edge" x="584" y="384" text-anchor="end">goal · opening · shots</text>
+      <text class="t-edge-sub" x="584" y="400" text-anchor="end">end state · locks · length</text>
+      <path class="e-data" d="M835 310 L835 418" marker-end="url(#ad)"/>
+      <text class="t-edge" x="845" y="356">mode · source video</text>
+      <text class="t-edge-sub" x="845" y="372">grid · opening · locks</text>
+      <path class="e-data" d="M760 420 L760 314" marker-end="url(#ad)"/>
+      <text class="t-edge" x="750" y="356" text-anchor="end">the clip made</text>
+      <text class="t-edge-sub" x="750" y="372" text-anchor="end">for the next clip</text>
+
+      <!-- prompters group -->
+      <rect class="n-group" x="60" y="420" width="910" height="104" rx="12"/>
+      <text class="t-title" x="78" y="446">prompters: each builds the one video call for its model</text>
+      <rect class="n-craft" x="78" y="462" width="200" height="40" rx="8"/><text class="t-chip" x="178" y="487" text-anchor="middle">prompter-seedance-2-5</text>
+      <rect class="n-craft" x="298" y="462" width="200" height="40" rx="8"/><text class="t-chip" x="398" y="487" text-anchor="middle">prompter-seedance-2</text>
+      <rect class="n-craft" x="518" y="462" width="200" height="40" rx="8"/><text class="t-chip" x="618" y="487" text-anchor="middle">prompter-wan-3</text>
+      <rect class="n-craft" x="738" y="462" width="214" height="40" rx="8"/><text class="t-chip" x="845" y="487" text-anchor="middle">prompter-minimax-h3</text>
+
+      <!-- missing model guides -->
+      <path class="e-dash" d="M618 524 L618 574" marker-end="url(#ag)"/>
+      <path class="e-dash" d="M845 524 L845 574" marker-end="url(#ag)"/>
+      <text class="t-edge-sub" x="500" y="560" text-anchor="end">"load it first"</text>
+      <rect class="n-gone" x="518" y="576" width="200" height="44" rx="8"/><text class="t-gone" x="618" y="603" text-anchor="middle">video-guide-wan</text>
+      <rect class="n-gone" x="738" y="576" width="214" height="44" rx="8"/><text class="t-gone" x="845" y="603" text-anchor="middle">video-guide-minimax</text>
+    </svg>
+  </div>
+  <p style="font-size:15px;color:var(--muted)">Grey arrows mean "loads it". Blue arrows carry data from one skill to another. The amber boxes are guides the skills tell you to read first, but they aren't in the folder.</p>
+</section>
+
+<section>
+  <div class="eyebrow">Graph 2</div>
+  <h2>What passes along each link</h2>
+  <div class="box"><table class="wide">
+    <thead><tr><th>From</th><th></th><th>What it hands over</th><th></th><th>To</th></tr></thead>
+    <tbody>
+      <tr><td class="from"><span class="skill cmd">script-to-video</span></td><td class="arrow">→</td><td>the script, the style word for word, the user's own pictures</td><td class="arrow">→</td><td class="to"><span class="skill craft">asset-designer</span></td></tr>
+      <tr><td class="from"><span class="skill cmd">script-to-video</span></td><td class="arrow">→</td><td>the script, runtime, style, what it's for (video, image or story), the target model, the shape, the sheets' paths</td><td class="arrow">→</td><td class="to"><span class="skill craft">director</span></td></tr>
+      <tr><td class="from"><span class="skill craft">director</span></td><td class="arrow">→</td><td>an idea or brief written as a story first, which becomes the script the sheets are made from</td><td class="arrow">→</td><td class="to"><span class="skill craft">asset-designer</span></td></tr>
+      <tr><td class="from"><span class="skill craft">asset-designer</span></td><td class="arrow">→</td><td>every sheet and its look, each location's layout and palette; the director builds its bible from them word for word</td><td class="arrow">→</td><td class="to"><span class="skill craft">director</span></td></tr>
+      <tr><td class="from"><span class="skill craft">director</span></td><td class="arrow">→</td><td>reads the preset of each scene type that fits, usually two or more</td><td class="arrow">→</td><td class="to"><span class="skill preset">scene presets</span></td></tr>
+      <tr><td class="from"><span class="skill craft">director</span></td><td class="arrow">→</td><td>each clip's join (continues, cut or new place), its opening and end state</td><td class="arrow">→</td><td class="to"><span class="skill craft">continuity</span></td></tr>
+      <tr><td class="from"><span class="skill craft">director</span></td><td class="arrow">→</td><td>each clip's goal, cast, scene, opening, voiceover, shots, end state, locks, and time range (which becomes its length)</td><td class="arrow">→</td><td class="to"><span class="skill craft">prompter</span></td></tr>
+      <tr><td class="from"><span class="skill craft">asset-designer</span></td><td class="arrow">→</td><td>only the sheets the clip's cast names, in the look named: "Maya - torn sleeve" becomes <code>/characters/maya/looks/torn_sleeve</code></td><td class="arrow">→</td><td class="to"><span class="skill craft">prompter</span></td></tr>
+      <tr><td class="from"><span class="skill craft">continuity-chain</span></td><td class="arrow">→</td><td>mode extend, direction forward, the clip before as source video, opening, locks, end state</td><td class="arrow">→</td><td class="to"><span class="skill craft">prompter</span></td></tr>
+      <tr><td class="from"><span class="skill craft">continuity-board</span></td><td class="arrow">→</td><td>the scene's numbered grid and its highest panel, the opening read off that panel, the end state</td><td class="arrow">→</td><td class="to"><span class="skill craft">prompter</span></td></tr>
+      <tr><td class="from"><span class="skill craft">continuity-recall</span></td><td class="arrow">→</td><td>a reference grid of the picked keyframes, and one line per panel saying what to take from it</td><td class="arrow">→</td><td class="to"><span class="skill craft">prompter</span></td></tr>
+      <tr><td class="from"><span class="skill craft">prompter</span></td><td class="arrow">→</td><td>the clip it made: the next clip's source video (chain), new stills on the grid (board), new keyframes in the library (recall)</td><td class="arrow">→</td><td class="to"><span class="skill craft">continuity</span></td></tr>
+      <tr><td class="from">the chosen video model</td><td class="arrow">→</td><td>which prompter runs; how long the director's clips are (30 s or 15 s); whether Chain is possible (on Seedance 2.0 and H3 it becomes Board)</td><td class="arrow">→</td><td class="to"><span class="skill craft">prompter</span> <span class="skill craft">director</span> <span class="skill craft">continuity</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="eyebrow">Graph 3</div>
+  <h2>Each skill's links, in and out</h2>
+  <div class="cards">
+    <div class="sk"><span class="skill cmd">script-to-video</span>
+      <dl><dt>Called by</dt><dd>the user</dd>
+      <dt>Calls</dt><dd><span class="skill craft">asset-designer</span><span class="skill craft">director</span><span class="skill craft">continuity ×3</span><span class="skill craft">prompters ×4</span></dd>
+      <dt>Writes</dt><dd><code>/s2v/input</code> <code>/s2v/setup</code> <code>/s2v/clips/n</code></dd>
+      <dt>Reads</dt><dd>every other skill's paths, to pass on</dd></dl></div>
+    <div class="sk"><span class="skill craft">asset-designer</span>
+      <dl><dt>Called by</dt><dd><span class="skill cmd">script-to-video</span> (step 4)</dd>
+      <dt>Feeds</dt><dd><span class="skill craft">director</span><span class="skill craft">prompters</span></dd>
+      <dt>Writes</dt><dd><code>/characters</code> <code>/locations</code> <code>/props</code>: sheets, looks, relatives, layout, palette</dd>
+      <dt>Reads</dt><dd>the script (or the director's story)</dd></dl></div>
+    <div class="sk"><span class="skill craft">director</span>
+      <dl><dt>Called by</dt><dd><span class="skill cmd">script-to-video</span> twice (story, then directing)</dd>
+      <dt>Calls</dt><dd><span class="skill preset">scene presets</span></dd>
+      <dt>Feeds</dt><dd><span class="skill craft">asset-designer</span> (story) <span class="skill craft">continuity</span><span class="skill craft">prompters</span></dd>
+      <dt>Writes</dt><dd><code>/director/plan</code> <code>/scenes</code> <code>/clips/n</code> <code>/frames/n</code> <code>/story</code></dd>
+      <dt>Reads</dt><dd>the sheets, to build its bible</dd></dl></div>
+    <div class="sk"><span class="skill craft">continuity-chain</span>
+      <dl><dt>Called by</dt><dd><span class="skill cmd">script-to-video</span> for a clip that "continues"</dd>
+      <dt>Feeds</dt><dd><span class="skill craft">prompter</span> (extend mode)</dd>
+      <dt>Writes</dt><dd><code>/continuity/clips/n</code></dd>
+      <dt>Reads</dt><dd>the last seconds of the clip before</dd></dl></div>
+    <div class="sk"><span class="skill craft">continuity-board</span>
+      <dl><dt>Called by</dt><dd><span class="skill cmd">script-to-video</span> for clips after a scene's first</dd>
+      <dt>Feeds</dt><dd><span class="skill craft">prompter</span> (staging grid)</dd>
+      <dt>Writes</dt><dd><code>/continuity/clips/n</code> <code>/continuity/board/scene</code></dd>
+      <dt>Needs</dt><dd><span class="skill gone">ffmpeg-recipes</span> (missing)</dd></dl></div>
+    <div class="sk"><span class="skill craft">continuity-recall</span>
+      <dl><dt>Called by</dt><dd><span class="skill cmd">script-to-video</span> for every clip</dd>
+      <dt>Runs beside</dt><dd><span class="skill craft">chain</span><span class="skill craft">board</span></dd>
+      <dt>Feeds</dt><dd><span class="skill craft">prompter</span> (reference grid and panel lines)</dd>
+      <dt>Writes</dt><dd><code>/continuity/recall/keyframes/k</code></dd>
+      <dt>Needs</dt><dd><span class="skill gone">ffmpeg-recipes</span> (missing)</dd></dl></div>
+    <div class="sk"><span class="skill craft">the 4 prompters</span>
+      <dl><dt>Called by</dt><dd><span class="skill cmd">script-to-video</span>, one per clip, chosen by the video model</dd>
+      <dt>Take from</dt><dd><span class="skill craft">director</span><span class="skill craft">asset-designer</span><span class="skill craft">continuity</span></dd>
+      <dt>Feeds</dt><dd><span class="skill craft">continuity</span> (the clip made)</dd>
+      <dt>Needs</dt><dd><span class="skill gone">video-guide-wan</span> (Wan 3) <span class="skill gone">video-guide-minimax</span> (H3)</dd></dl></div>
+    <div class="sk"><span class="skill preset">the 14 scene presets</span>
+      <dl><dt>Called by</dt><dd><span class="skill craft">director</span>, every type the scene fits</dd>
+      <dt>Link to</dt><dd>each other, 2–4 each (Graph 6)</dd>
+      <dt>Feed</dt><dd>the director's camera and staging notes</dd></dl></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Graph 4</div>
+  <h2>The order script-to-video runs them in</h2>
+  <div class="flow">
+    <div class="step"><div class="rail"><div class="num">1</div><div class="stem"></div></div><div class="card"><div class="head"><h3>Input</h3><span class="skill cmd">script-to-video</span></div><p style="font-size:15px">Script, idea or brief as text, or audio analysed into a timed transcript with speakers.</p></div></div>
+    <div class="step"><div class="rail"><div class="num">2</div><div class="stem"></div></div><div class="card"><div class="head"><h3>Setup</h3><span class="skill cmd">script-to-video</span></div><p style="font-size:15px">Shape, resolution, video / images / detailed script, continuity method, then a style.</p></div></div>
+    <div class="step"><div class="rail"><div class="num">3</div><div class="stem"></div></div><div class="card"><div class="head"><h3>Models</h3><span class="skill cmd">script-to-video</span></div><p style="font-size:15px">The chat's video model picks the prompter. With none chosen: Seedance 2.5 and Seedream 5 Pro.</p></div></div>
+    <div class="step"><div class="rail"><div class="num">4</div><div class="stem"></div></div><div class="card"><div class="head"><h3>Assets</h3><span class="skill craft">director (story)</span><span class="skill craft">asset-designer</span></div><p style="font-size:15px">An idea or brief becomes a story first; then the sheets.</p></div></div>
+    <div class="step"><div class="rail"><div class="num">5</div><div class="stem"></div></div><div class="card"><div class="head"><h3>Direct</h3><span class="skill craft">director</span><span class="skill preset">scene presets</span></div><p style="font-size:15px">Scenes, beats and shots; clips sized to the model. A detailed script ends here.</p></div></div>
+    <div class="step"><div class="rail"><div class="num">6</div><div class="stem"></div></div><div class="card"><div class="head"><h3>Generate, clip by clip</h3><span class="skill craft">continuity</span><span class="skill craft">prompter</span></div><p style="font-size:15px">Continuity for the clip's join, then the prompter's call, then the clip's stills or keyframes kept for the next one.</p></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Graph 5</div>
+  <h2>Which continuity skill, and which prompter</h2>
+  <div class="box"><table class="wide">
+    <thead><tr><th>Method</th><th>Join: continues</th><th>Join: cut</th><th>Join: new place</th></tr></thead>
+    <tbody>
+      <tr><th><span class="skill craft">Chain</span></th><td>continuity-chain</td><td>a normal generation</td><td>a normal generation</td></tr>
+      <tr><th><span class="skill craft">Board</span></th><td>continuity-board</td><td>continuity-board</td><td>a normal generation and a new grid</td></tr>
+      <tr><th><span class="skill craft">Recall</span></th><td>continuity-recall</td><td>continuity-recall</td><td>continuity-recall</td></tr>
+    </tbody>
+  </table></div>
+  <div class="box"><table class="wide">
+    <thead><tr><th>Video model</th><th>Prompter</th><th>Longest clip</th><th>Lines a clip</th><th>Chain?</th><th>Reads first</th></tr></thead>
+    <tbody>
+      <tr><td><code>seedance_2_5</code></td><td><span class="skill craft">prompter-seedance-2-5</span></td><td>30 s</td><td>10</td><td>yes</td><td>the tool's limits</td></tr>
+      <tr><td><code>seedance_2_0</code>, fast, mini</td><td><span class="skill craft">prompter-seedance-2</span></td><td>15 s</td><td>3</td><td>becomes Board</td><td>the tool's limits</td></tr>
+      <tr><td><code>wan_3_0</code>, prime</td><td><span class="skill craft">prompter-wan-3</span></td><td>source + new ≤ 30 s</td><td>5</td><td>yes</td><td><span class="skill gone">video-guide-wan</span></td></tr>
+      <tr><td><code>minimax_h3</code>, max</td><td><span class="skill craft">prompter-minimax-h3</span></td><td>15 s</td><td>3 (15 s in all)</td><td>becomes Board</td><td><span class="skill gone">video-guide-minimax</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="eyebrow">Graph 6</div>
+  <h2>Which scene presets mix with which</h2>
+  <p>A dot means the preset in the row names the one in the column in its "Mix with" line. Those lines are the only places the presets name each other. Romance is named most (8 times), then confrontation and suspense (5 each).</p>
+  <div class="box" style="padding:12px"><table class="matrix">
+    <thead><tr><th></th><th class="col">chase</th><th class="col">comedy</th><th class="col">confrontation</th><th class="col">conversation</th><th class="col">fight</th><th class="col">grief</th><th class="col">horror</th><th class="col">introduction</th><th class="col">montage</th><th class="col">performance</th><th class="col">reveal</th><th class="col">romance</th><th class="col">suspense</th><th class="col">triumph</th></tr></thead>
+    <tbody>
+      <tr><th class="row">chase</th><td><span class="self"></span></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td></tr>
+      <tr><th class="row">comedy</th><td></td><td><span class="self"></span></td><td><span class="dot"></span></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td></tr>
+      <tr><th class="row">confrontation</th><td></td><td></td><td><span class="self"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td></tr>
+      <tr><th class="row">conversation</th><td></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="self"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td></tr>
+      <tr><th class="row">fight</th><td><span class="dot"></span></td><td></td><td><span class="dot"></span></td><td></td><td><span class="self"></span></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><th class="row">grief</th><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td><span class="self"></span></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td></td><td></td></tr>
+      <tr><th class="row">horror</th><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td><span class="self"></span></td><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td></tr>
+      <tr><th class="row">introduction</th><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td><span class="self"></span></td><td></td><td></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td></td></tr>
+      <tr><th class="row">montage</th><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td><td><span class="self"></span></td><td></td><td></td><td><span class="dot"></span></td><td></td><td><span class="dot"></span></td></tr>
+      <tr><th class="row">performance</th><td></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="self"></span></td><td></td><td><span class="dot"></span></td><td></td><td><span class="dot"></span></td></tr>
+      <tr><th class="row">reveal</th><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td><span class="self"></span></td><td><span class="dot"></span></td><td><span class="dot"></span></td><td></td></tr>
+      <tr><th class="row">romance</th><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td><span class="self"></span></td><td></td><td></td></tr>
+      <tr><th class="row">suspense</th><td></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td><span class="self"></span></td><td></td></tr>
+      <tr><th class="row">triumph</th><td><span class="dot"></span></td><td><span class="dot"></span></td><td></td><td></td><td><span class="dot"></span></td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="dot"></span></td><td></td><td><span class="self"></span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="eyebrow">Found while reading</div>
+  <h2>Loose ends in the links</h2>
+  <div class="issues">
+    <div class="issue"><b>Three guides are named but not in the folder.</b>The Wan 3 and H3 prompters say to load <code>video-guide-wan</code> and <code>video-guide-minimax</code> first. Board and recall point to <code>ffmpeg-recipes</code> for numbering and tiling.</div>
+    <div class="issue"><b>Names hold the links together.</b>The director's cast line ("Maya - torn sleeve · Kitchen - night") is turned into asset-designer's paths by script-to-video. If a name is spelt differently, the prompter gets no sheet.</div>
+    <div class="issue"><b>Chain says it works anywhere, but script-to-video allows it on two models only.</b>continuity-chain says "works inside any workflow". script-to-video runs it only on Seedance 2.5 and Wan 3, and turns it into Board elsewhere.</div>
+    <div class="issue"><b>Some prompter inputs have no skill that fills them.</b><code>retake</code> and <code>copyright_map</code> come only from the user. The director's <code>voiceover</code> reaches the prompters inside the shots, since no prompter has a voiceover field.</div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">In the folder</div>
+  <h2>Where each file lives, and where it is in the studio now</h2>
+  <div class="box"><table class="wide">
+    <thead><tr><th>Folder</th><th>Skills</th><th>In the studio now</th></tr></thead>
+    <tbody>
+      <tr><td><code>Header skills/</code></td><td><span class="skill cmd">script-to-video</span></td><td><span class="tag ready">studio skill</span> on H3 Chunk</td></tr>
+      <tr><td><code>asset creation/</code></td><td><span class="skill craft">asset-designer</span></td><td><span class="tag ready">studio skill</span> into NeuralCore</td></tr>
+      <tr><td><code>director/</code></td><td><span class="skill craft">director</span></td><td><span class="tag ready">merged</span> into the studio's director</td></tr>
+      <tr><td><code>director/scenes/</code></td><td>14 <span class="skill preset">scene presets</span></td><td><span class="tag ready">preset search</span> category scene-types</td></tr>
+      <tr><td><code>continuity/</code></td><td><span class="skill craft">chain</span> <span class="skill craft">board</span> <span class="skill craft">recall</span></td><td><span class="tag ready">studio skills</span> (true extension for chain waits on a Zoro workflow)</td></tr>
+      <tr><td><code>prompters/</code></td><td>4 <span class="skill craft">prompters</span></td><td><span class="tag ready">H3's rules</span> in H3's workflow hints · <span class="tag soon">Seedance and Wan 3 not in the studio</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>Made from the 24 files in <code>craft skills/</code>, all read again on 3 Nov 2026. Every link above was found in the files themselves: a skill named in another, a field written by one and read by another, or a "Mix with" line.</footer>
+</div>
+</body>
+</html>

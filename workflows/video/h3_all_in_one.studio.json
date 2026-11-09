@@ -5,6 +5,7 @@
     "video/h3_director"
   ],
   "description": "Every MiniMax H3 job in one workflow: reference mode, first and last frame, keyframes built by Qwen Image Edit, a voice track, and an optional SeedVR2 upscale.",
+  "pick_when": "Most video shots: a new scene from words or references, with sound and dialogue, 4-15 s; a shot that starts on a picture; lips that follow a voice track.",
   "output_name": "16.filename_prefix",
   "labels": {
     "100:value": "Describe the action, camera and sound. Say \"the main character\", \"the background\" for the references.",
@@ -63,17 +64,17 @@
         {
           "id": "low",
           "label": "Low",
-          "hint": "a fast turbo draft"
+          "hint": "a fast turbo draft, about 30 s for 6 s at 480p"
         },
         {
           "id": "medium",
           "label": "Medium",
-          "hint": "the full model, 20 steps"
+          "hint": "the full model, 20 steps, about 1.5 min for 6 s at 480p"
         },
         {
           "id": "high",
           "label": "High",
-          "hint": "the full model, 40 steps"
+          "hint": "the full model, 40 steps, about 3 min for 6 s at 480p and 10 min at 720p"
         }
       ]
     },
@@ -304,8 +305,9 @@
   "hints": [
     "Reference mode builds a new scene from your references; first-frame mode keeps the first frame exactly and takes no other references: then describe only motion and camera.",
     "Best results come from 5-6 s clips, one action each. Durations from 3 to 15 s work.",
+    "Quality: medium at 480p looks close to high at about half the time, for drafts and look tests; low can add people or effects nobody asked for. A final take where hands pass things or a ball is in play: high at 720p.",
     "Prompt blocks, short: GOAL · SCENE · OPENING · SHOTS timed '[0-2s] size, lens, angle → one action → dialogue → move' · STYLE · END STATE · LOCKS. No shape or length words.",
-    "For speech put the words in quotes after \"Audio:\", tied to the speaker. With a VOICE TRACK the lips follow your own audio. A silent clip says 'No dialogue. No music.'",
+    "For speech write who says what, in quotes, in the beat it is said: the old man says: \"Sign here.\" With a VOICE TRACK the lips follow your own audio. A silent clip says 'No dialogue. No music.'",
     "Identity in words: age, build, the features that tell them apart; the same words every clip. No negative prompt: put short 'No ...' lines in LOCKS."
   ]
 }

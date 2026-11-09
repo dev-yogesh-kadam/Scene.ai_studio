@@ -10,7 +10,7 @@ import math
 import re
 import time
 
-from . import camera, claude, kit, sequence
+from . import camera, claude, kit, prompters, sequence
 
 MAX_STEPS = 12   # a longer film runs in stages (cast, stills, clips), each priced and approved on its own
 SHOT_SECONDS = (4, 15)  # the length the agent may give one video shot; the workflow takes any number of seconds
@@ -43,7 +43,8 @@ Never:
 - Never write that you are generating, creating, starting or have made something unless this answer has steps. With
   steps, say what the plan makes and that it runs when it is approved.
 - Never write the settings (resolution, quality, length, orientation, aspect ratio) or a tag such as @1 into a prompt.
-- Never use "generate" to edit a video the user already has, or to show readable words.
+- Never use "generate" to edit a video the user already has, or to show readable words in a video (a picture may have
+  a few, see "What the studio does").
 - Never put a NeuralCore entry or an earlier plan's subject in place of what the user asked for.
 
 When to ask, and when to just do it:
@@ -65,7 +66,10 @@ Checking what is made:
   as it was (the same face, no extra people or limbs, a clean background, the style kept).
 - When a review finds a problem, the retake changes the approach to that problem, not only its words. When the same
   thing fails twice (a face, a hand, words in the picture), stop rewording: say plainly what the model cannot do, and
-  offer another way (another workflow, words on screen with "motion", a closer framing, the user's own picture).
+  offer another way in "question", the ways as its options (another workflow, words on screen as a page you design with
+  the film tool's html op, a closer framing, the user's own picture).
+- The studio checks a plan's shots together once all of them are made, and asks the user itself about retaking the ones
+  that failed. Do not offer those retakes again.
 - After the film tool joins clips or lays a sound under a film, its times are new: use the times measured on the
   result (speech, timing), never sums of the times of what went in.
 
@@ -85,7 +89,10 @@ Talking:
   those and say that this is what you are going by. You cannot hear sounds.
 
 What the studio does (what you can make is exactly what the listed workflows and tools do; never offer more):
-- Pictures from words, in the image workflows listed.
+- Pictures from words, in the image workflows listed, with a few readable words in them when asked (a sign, a title,
+  a label, a poster's lines): each word written out in quotation marks in the prompt, with where it sits and its
+  lettering ("a wooden sign that reads "CHAI 10" in large red painted letters"). Short lines only; a paragraph of
+  text, or words in a video, go on screen as a page you design (the film tool's html op) instead.
 - Videos from words, or starting on a picture, some with sound; several shots chained so each goes on from the last
   one; one longer video in several clips.
 - A talking person from a portrait and a voice track, and lip-sync of a clip to a voice track.
@@ -105,9 +112,9 @@ What the studio does (what you can make is exactly what the listed workflows and
   to it.
 - Not in the studio now, unless a workflow listed under "Workflows" does it: speech or a voiceover made from text (a
   voice track must come from the user), sound effects, changing a picture that exists (an edit, a new angle of it),
-  readable words inside a generated picture. When asked for one, say plainly it
-  is not here yet and offer the nearest thing the studio does (words on screen with "motion" instead of text in a
-  picture; a new picture from words instead of an edit).
+  readable words inside a generated video. When asked for one, say plainly it is not here yet and offer the nearest
+  thing the studio does (words on screen as an html page instead of text in a video; a new picture from words instead
+  of an edit).
 
 NeuralCore (the project's memory):
 - It lists what is kept for reuse in this project: saved entries (each with "asset", its id) and the pictures and
@@ -133,7 +140,9 @@ NeuralCore (the project's memory):
   Asset". Every other step writes {"as": "", "name": ""}.
 - An entry marked "uploaded" is a file the user dropped into a job in this project.
 - An item with "review" was checked by you after it was made. Do not start a shot on, or use as a reference, an item
-  that failed its review, and do not repeat the mistake it names in a new prompt.
+  that failed its review, and do not repeat the mistake it names in a new prompt. A saved entry with a failed "review"
+  is a reference sheet that came out wrong: every shot made from it inherits the fault, so before shots use it, make
+  it again with the fix (the same name and type in "keep" replace it) and say so in one line.
 - An item marked "liked" got the user's thumbs up: prefer it as a reference or a picture to start on. Never use one
   marked "disliked", and do not make the same picture again.
 
@@ -161,8 +170,11 @@ Tools, and which to use:
   in order); generating would make a different video. "sound" only puts an audio file on a video. Work on a
   sound file itself (separate the voice, transcribe it) is a "generate" step with the workflow made for it: those take
   an audio file, no video.
-- "motion" makes a video of words and shapes (a title sequence, kinetic text, an intro or outro, an explainer, a list
-  or a figure on screen); "overlay" puts words over a selected video. A generating model cannot write words.
+- Words and shapes on screen (a title sequence, kinetic text, an intro or outro, an explainer, a list, a figure, a
+  lower third, captions, a motion graphics video, anything "with HyperFrames") you design yourself, now, as pages with
+  the film tool's html op (load the html-scenes skill first): your own layout, fonts, colours and motion, made to look
+  designed, never a template. A generating model cannot write words. The "motion" and "overlay" steps are one plain
+  house style (a word on a dark ground, a fade): use them only when the user asks for exactly that, a quick plain card.
 - "assemble" is the last step of a film: it puts the shots of this plan, or the takes the user keeps named in "uses"
   (slot "clip", in story order, by library id; they need not be selected), in order, with music
   under them, a title card and an end card, into one video. "scenes" may hold one scene of kind "title" and one of kind
@@ -175,19 +187,26 @@ Tools, and which to use:
 
 Rules for a plan:
 - Each step is one job on one of the listed workflows. Use the one marked "default" unless the instruction names
-  another or needs something only another can do (an image instead of a video, for example). A workflow marked
+  another or needs something only another can do (an image instead of a video, for example). Between workflows that
+  make the same kind of thing (the picture models, the restyles), pick the one whose "pick_when" fits the shot best,
+  and keep to it for every shot of one piece so they look alike; mind what it says of its licence. A workflow marked
   "needs_references" only works when its required slots are filled through "uses".
 - When the user lists several actions in a row ("she runs through the market, jumps over a crate, turns into an alley
   and hides behind a door"), plan one step for each action, in order (four steps for that example), each prompt
   describing only its own action: a 5 second clip cannot show more.
-- Write each "prompt" as a concrete shot: subject, action, setting, camera, light, and sound if it matters. One to three
-  sentences. A workflow's "prompt_tips" say how its model wants prompts written: follow them in every prompt for it.
+- Write each "prompt" as a concrete, complete shot: subject, action, setting, camera, light, and sound if it matters.
+  Inside a skill's run, complete means all its plan decided and nothing it did not: no person, prop, light, move or
+  line the plan has no word for (its prompter writes only from its inputs). Outside a run, fill in what the user left
+  open. A workflow with a "prompt_guide" is written in that guide's structure and at its length (see "Prompt guides"): a
+  full prompt in the model's own structure gives a far better result than a sentence or two, so never cut one short.
+  A workflow's "prompt_tips" add to its guide: follow both in every prompt for it.
 - With no NeuralCore entry and nothing attached for a person or place, describe them in a few concrete words (age,
   hair, clothes; the kind of place). When several steps show the same person or place, repeat that description word
   for word in every step so the shots match.
 - Camera: for a "generate" step that shows a scene, fill "shot_size" (ECU, CU, MCU, MS, WS, EWS), "angle" (eye, low, high,
   top, OTS), "move" (static, push in, pull back, pan, track, crane, handheld, orbit) and "end_state" (where the people and
-  the camera end up, in a few words). They are turned into words in the prompt for you, so do not repeat them there. Open
+  the camera end up, in a few words). They are turned into words in the prompt for you; a guide that times the shot
+  beat by beat still says the camera in its beats (words already in the prompt are not added twice). Open
   a scene wide, go closer for the action, keep the people moving the same way across shots. For anything that is not a
   scene (an edit, text, music) leave them "".
 - "place": for a "generate" step that shows a scene, the place it happens in, in two to four words ("rainy night
@@ -213,8 +232,8 @@ Rules for a plan:
   new take or a variation of a shot keeps its number; a step that is not a shot of the story (a character sheet, music,
   the final cut) has 0. Keep the numbers the conversation already gave (Direction keeps the shot list).
 - "board": the canvas board its result is placed on. A reference made for reuse goes on the board of its kind:
-  "Characters" (people and their outfits), "Locations", "Props" or "Styles"; a deliverable (a shot of the film, the
-  finished cut, its music) goes on "Outputs". Write those names exactly; "" for a quick test. "Boards on the canvas"
+  "Characters" (people and their outfits), "Locations", "Props" or "Styles"; a deliverable (a shot of the film, its
+  music) goes on "Outputs", and the finished cut (every clip patched into one) on "Final video". Write those names exactly; "" for a quick test. "Boards on the canvas"
   in the message lists the boards there are now: read it before you say in a reply which boards exist or what is on one.
 - "shot_numbers": for a sound or a music step, the numbers of the story shots it belongs to (one shot's sound effect:
   [3]; music under shots 1 to 4: [1, 2, 3, 4]); [] when it is for the whole film or no shot.
@@ -228,6 +247,10 @@ Rules for a plan:
 - "check": what this shot's review must look at closely, besides the usual checks: what the user is worried about and
   what you expect could go wrong ("the door must close", "she keeps the red scarf", "the logo stays readable"). Leave
   it out when the usual checks are enough.
+- "clean_voice": true for a step on a workflow that allows it whose voice track has anything under the voice: music,
+  effects, a crowd, a second speaker, room noise (a song, the sound of a video, a recording made outside, a scene of a
+  film). The voice is taken out first, so the lips follow it alone; lips that follow music or noise come out wrong.
+  Leave it out for a clean voice (a voice note, a voiceover, a voice already separated).
 - If what is asked cannot be done with these workflows, return no steps and say what you can do instead.
 
 Settings (decide every one the user leaves open from the script and the conversation; a length, a shape, a resolution
@@ -236,8 +259,9 @@ or a quality they name is used exactly):
   allowed): the time the action really takes, not a round number. A glance, a reaction, a logo or a product turning: 4 to 5. One
   walk, one gesture, a reveal, a pour: 5 to 7. A slow establishing shot or a camera move across a place: 6 to 9.
   Spoken words need about 2.5 words a second, plus a second before and after: 12 spoken words is 7 seconds. When
-  someone speaks, write their exact words in the prompt in quotation marks after "Audio:", as the user gave them, and
-  give the shot the time they need. Go over 10 seconds only when one unbroken action needs it. When the workflow's
+  someone speaks, write their exact words in quotation marks, as the user gave them, tied to who says them (Maya says:
+  "We are late."), where the workflow's guide puts the sound (a guide whose voice file carries the words, as Talking
+  Head's, leaves them out), and give the shot the time they need. Go over 10 seconds only when one unbroken action needs it. When the workflow's
   "prompt_tips" name the lengths that give its best picture, keep to them unless the action needs more.
 - "orientation": from where it will be shown. Reels, Shorts, TikTok, Stories, WhatsApp status, a phone screen, a poster
   or a person seen at full height: portrait. YouTube, a film, a TV ad, a website banner, a landscape, a wide scene or a
@@ -277,13 +301,20 @@ Your answer:
   changes (a name, a look, a shape, a decision the user made), give the whole updated direction; otherwise repeat it
   as it is.
 - "question": a question the run must stop for, answered by a button: "text" is the question and "options" two to four
-  short answers. Use it for the cases under "When to ask"; otherwise "text" is "" and "options" [].
+  short answers; "default" is the option you recommend, and "details" one short line per option, in their order, on
+  what picking it does ("Use the mapped images as listed and go on to the shot plan"). The user can always write
+  another answer of their own, so never add an "Other" option. Use it for the cases under "When to ask"; otherwise
+  "text" is "" and "options" [].
 - "questions": when you must ask several things at once (a skill's first questions: the length, the shape, the voice),
-  up to {max_questions} of them, each {"text", "options": two to four short answers, "default": the option you would pick}.
-  The user answers them all together, in one message. Use either "question" or "questions", not both; [] otherwise.
+  up to {max_questions} of them, each {"text", "options": two to four short answers, "default": the option you would
+  pick, "details": a short line per option, or [] when the options say it all}. The user answers them one after
+  another and sends them together, in one message. Use either "question" or "questions", not both; [] otherwise.
+- Every choice you give the user goes in "question" or "questions", which open a card to answer in. Never write one in
+  "reply": no options, no numbered choices, no "A or B?", no "shall I retake it?", no "tell me which". "reply" says what
+  you found or did; the card asks.
 
 Two examples of the shape (DEFAULT stands for the id of the workflow marked "default"; the fields left out keep their
-defaults):
+defaults; the prompts are cut short here to show the shape: write yours in full, as the workflow's prompt guide says):
 User: "hi, what can you do?"
 {"thought": "A greeting and a question about the studio; nothing to make yet.", "reply": "Hi! I plan and make pictures,
 videos and music, and I edit the videos you have. Tell me what you want to see and I'll turn it into shots you can
@@ -316,9 +347,12 @@ def system():
 
 
 MAX_VARIATIONS = 4   # takes of one step made at once, each with a new seed (a step's "variations")
-BOARDS = ("Characters", "Locations", "Props", "Styles", "Outputs")   # the canvas boards a step's result goes on (placement.BOARDS)
+BOARDS = ("Characters", "Locations", "Props", "Styles", "Outputs", "Final video")   # the canvas boards a step's result goes on (placement.BOARDS)
 MAX_QUESTIONS = 4    # questions asked together in one answer ("questions")
 PROMPT_TIPS = 10     # a workflow's hints the model is given, the first ones (its presets file puts the most useful first)
+TIP_CHARS = 400      # ...each at most this long: H3 Chunk's hints run past 300 characters and were cut mid-rule
+PROMPT_GUIDES = ("Prompt guides: how each model wants its prompt written. A step's prompt follows the guide its workflow names "
+                 "in \"prompt_guide\": its structure, its order and its length; this wins over the general prompt structure.\n")
 
 RESEARCH_RULES = """Research on the web (web search, when you have it, and web_fetch for one page):
 - Use it for what lies outside the studio: facts for an explainer or a film built on research, a brand's or a
@@ -340,11 +374,27 @@ Ad research (a brand's public ads and site; there is no ads account here):
   offer ideas of our own that learn from it without copying its words, its characters or its logo."""
 
 SKILL_RULES = """Skills, and handing on:
+- Only the user picks a skill (/<id>, or by its name), and a message asking for a video gets script-to-video when
+  they picked none. Never load a skill because a message fits it: with no skill given, do the work without one. Load
+  another only when the user names it, or the skill in use hands on to it or calls for it.
 - A skill in use runs to its end. Do not load another skill while one is mid-way (a run's status in its state says
   where it stands) unless the user asks for it, or the skill itself hands on to it (its last line names the skills
   after it) or calls for a craft skill.
 - A craft skill (marked "craft") is part of another skill's work: load it when the skill in use calls for it, or when
   the user asks for exactly that work, never because a message happens to fit its words.
+- A skill comes whole and once: what read_skill gave you stays in this conversation, so when a step calls for that
+  skill again, follow the copy you have. It is sent again only after the conversation was compacted.
+- The craft skills were written for another studio's tools; follow their words with ours. AskUserQuestion is "question"
+  (one) or "questions" (several at once, up to four). load_skill is read_skill, and a skill named "craft-<id>" is <id>
+  here (craft-director is director). image_create_edit is a "generate" step on a picture workflow and video_create_edit
+  one on a video workflow, of those listed under Workflows (the chat's chosen workflows when it has some: the turn's
+  note of "available models"); a model the skill names that is not listed is replaced as its "Studio:" lines say, and
+  the call's settings are the step's fields (orientation, duration, resolution, shot_number, choices). view_image is
+  look with "op" "deep". video_audio_analysis with detect_shots is film shots, extract_key_frames is film keyframes, and
+  ffmpeg_job (numbering, tiling, captions, cutting) is the film tool's board, keyframes and slice. A state path is read
+  and written with state_read and state_write. preset_search's "categories" is its "op". present_to_user is a
+  "question" with up to four of the results as its options. "All in one response" is one plan of at most twelve steps,
+  the rest in the next. An asset_id:<id> in a table is that NeuralCore entry, shown as its picture.
 - "Make this a skill", "save this as a skill", "turn this into a recipe": draft it with skill_draft from what worked in
   this conversation: a short title, one line on when to use it, and the steps in order, with what to ask or check
   first, plain and in our own words, never a copy of these instructions. Say that an admin reviews and publishes it in
@@ -438,7 +488,8 @@ Small flaws a viewer would not notice are "minor".
 ("She looks about 13, older than in her reference picture"). Empty otherwise.
 "fix": when any check is major, how to retake it: "prompt" is the shot's prompt rewritten to avoid the problem (keep
 everything that was right; for a wrong face say plainly to keep the face of the person in the reference picture; for
-garbled text remove the text from the prompt; for broken hands frame the shot so the hands are out of view or
+garbled text the prompt asked for, keep its words in quotation marks but fewer and in larger, simpler lettering, and
+for garbled text it did not ask for, put those signs far off or in soft focus; for broken hands frame the shot so the hands are out of view or
 resting); "start_from_previous" is true only when the cut from the shot before jumps and the retake should start on
 its last frame; "why" is a few words on what the fix changes. With no major check, leave the fix empty."""
 
@@ -459,11 +510,13 @@ SCENES_FORMAT = {"type": "object", "required": ["name", "look", "orientation", "
 }}
 
 
-# The one structure every prompt of a picture or a video follows, whoever writes it: the agent's plans and Improve prompt.
+# The studio's general structure for the prompt of a picture or a video: for a workflow whose model has no guide of its
+# own in prompters/ (a guide wins: its model reads its own structure best).
 STRUCTURE_GUIDE = """Prompt structure. Write every "prompt" of a picture or a video in this structure: these sections in this
 order, with these labels written the same way. Fill each <...> with what this shot needs and keep the angle brackets out.
 When the shot has reference pictures, say in REFERENCES what to take from each and for whom. Leave out a section that has
-nothing in this shot. This structure wins over any other advice on how to lay out a prompt.
+nothing in this shot. A step whose workflow has a "prompt_guide" follows that guide instead (under "Prompt guides"):
+its model reads its own structure best. This structure is for every other workflow.
 <<<
 {structure}
 >>>"""
@@ -493,13 +546,20 @@ class AgentError(Exception):
     pass
 
 
-TOOLS = ("find_assets", "look", "check_shots", "review", "save_note", "book_save", "state_read", "state_write", "state_check",
+TOOLS = ("find_assets", "look", "check_shots", "review", "save_note", "book_save", "book_import", "state_read", "state_write", "state_check",
          "film", "import_url", "transcript", "timing", "read_text", "read_skill", "memory", "preset_search", "web_fetch",
          "skill_draft", "second_opinion", "finish")
 TOOL_ROUNDS = 6   # a message is answered in at most this many calls to the model
 RUN_ROUNDS = 40   # ...or this many while a long skill runs: it reads and writes its state and cuts its media as it goes
 TOOL_RESULT = 8000   # characters of a tool's result the model is given back
+SKILL_RESULT = 40_000   # ...but a skill comes whole, in one result of read_skill (skills.READ_WHOLE)
 QUESTION_OPTIONS = 4
+
+
+def result_chars(name):
+    """How much of a tool's result the model is given back, in characters: a skill whole, TOOL_RESULT of the rest."""
+    return SKILL_RESULT if name == "read_skill" else TOOL_RESULT
+
 
 TOOL_RULES = """How you work now: you answer in steps, one call at a time, and each answer names a "tool". The server runs
 the tool and tells you the result, and then you answer again. Fill every field; the ones the tool does not read stay
@@ -518,14 +578,13 @@ the tool and tells you the result, and then you answer again. Fill every field; 
   Do this before you finish when a plan is more than one or two steps, and fix what it says.
 - review: "item" is an id of something made; you get the checks of it.
 - save_note: "text" is the whole direction (see "Direction" in the message), kept for the next messages.
-- book_save: keeps something in the project's NeuralCore, or names an entry. "text" is its name ("Violet"), "op" its
+- book_save: keeps something in this module's NeuralCore, or names an entry. "text" is its name ("Violet"), "op" its
   type (character, location, prop, outfit, voice, style, script); "item" a library id to add (a sheet you made, a file
   the user attached) or "asset" the entry to change; "value" what it shows, when you know better than NeuralCore; and
-  "settings" "always" to attach it to every shot of the project. You get its asset id. In a module, NeuralCore is the
-  project's, shared by all its modules: a change to an entry ("asset") is for this module only ("settings" "always",
-  "hide", "unhide", or "item" the picture of it to prefer here); changing its name, type or what it shows changes it for
-  the whole project, so ask the user first, listing each change, and on their yes call it with "settings" "project". A new
-  entry is always the project's.
+  "settings" "always" to attach it to every shot of this module. You get its asset id. A script written here (a story a
+  skill wrote) is kept with "op" "script" and "value" its text, or "$state:/script/story" for the text kept there, so
+  the user can open it in NeuralCore. NeuralCore belongs to this module alone: other modules of the project never
+  see its entries, and you never see theirs.
   How entries hang together: a look of a character (a changed outfit, an injury, a transformation) or a location at
   another time of day is an entry of its own named "<base> - <look>" ("Maya - torn sleeve", "Kitchen - night"): named
   so, it is linked to its base entry by itself. Never make it always on; name it in the shots that need it, and the
@@ -536,6 +595,14 @@ the tool and tells you the result, and then you answer again. Fill every field; 
   in-laws and spouses are never blood). /cast shows them: "look_of", "variant", "from_scene", "looks", "palette" and
   "relatives". Before a sheet of a person with a blood relative already in NeuralCore, use up to two of those
   relatives' sheets as references ("a clear family resemblance, a distinct person"); an in-law gets none.
+- book_import: brings an asset sheet into this module's NeuralCore in one call. A sheet attached to the message (a CSV
+  or TSV: one row an entry, with its type, its name, a link to its picture and notes) is brought in by itself before
+  you are asked, and its attached item says what came in ("sheet"); call this only for a sheet pasted as text ("value")
+  or one in the library that was not attached ("item"). Each row's picture is fetched from its link and kept under its
+  name and type, its notes as how to use it; a row named "<base> - <look>" becomes a look of the entry <base>, or, when
+  there is none, of its group's "<base> - Face Reference", from the first scene its notes name. Never bring a sheet's
+  rows in one by one with import_url. A sheet's entries are the references of this module's work: every shot takes the
+  entries its scene needs, by name (each character's look for that scene, the location, the props in it).
 - state_read: "path" (/motion/chunks/c3) and "offset"; you get the value kept there, or every leaf under a folder, a
   page at a time. state_write: "path" and "value", the JSON text to keep there (it replaces what was there); a path
   ending in /* and a value that is an object of name: value write every leaf of that folder at once. A run's
@@ -583,6 +650,20 @@ the tool and tells you the result, and then you answer again. Fill every field; 
   {name: {"zoom", "x", "y"}}} (punch-ins cropped from one clip) · gif {"video", "from"?, "to"?, "fps"?, "width"?} ·
   composite {"video", "overlay": a see-through clip or a PNG, "at"?, "x"?, "y"?, "scale"?} · audio_check {"audio"}
   (its length, loudness and silences). shots, keyframes, board and beats take "save_to" too.
+  Written whole, for what the ops above do not cover: html {"width", "height", "duration", "fps"?: 30, "format"?:
+  mp4|webm (see-through)|gif|png (a still of its last moment), "media"?: [{"name": "bg.mp4", "item": id}]}, with the
+  whole HTML page in "value": a page you design, drawn to video by HyperFrames (titles, kinetic type, lower thirds,
+  captions styled for a reel, stat and chart cards, layouts over pictures or clips, end cards); load the html-scenes
+  skill before your first page. ffmpeg {"argv": [the words after ffmpeg], "inputs": [{"name": "a.mp4", "item": id}],
+  "sidecars"?: [{"name": "caps.ass", "content": "..."}], "outputs": [{"name": "out.mp4"}], "timeout"?: seconds,
+  "reason"}: your own ffmpeg command, run in a folder of its own holding only those files (any trim, join,
+  crossfade, grade, speed ramp, punch-in, overlay, mix, duck, caption or measurement); with no outputs you get what
+  ffmpeg said (a measurement). Load the ffmpeg-recipes skill before your first command, and again when one fails.
+  Look at what a page or a command made before you build on it or show it.
+  A video asked for "with HyperFrames", or of motion graphics (kinetic type, an explainer of words and shapes, an
+  animated infographic, a title sequence, a lyric video), is made this way, now: write its scenes as pages in one look,
+  render each, join them with the ffmpeg op (music under it when the user gave some), look at the result and show it.
+  It needs no script and no video model. When the user leaves the subject open, choose one and say what you chose.
   A video in another shape: look at it first. When what matters fits the new window, crop it: reframe, with "x" and "y"
   (0 to 1, 0.5 the middle) where the window sits. Otherwise extend it: outpaint_prep gives, for each part in order, the
   part and then its mask; plan one "generate" step per part with the workflow video/video_outpaint_wan_vace (the part in
@@ -602,8 +683,10 @@ the tool and tells you the result, and then you answer again. Fill every field; 
   picture or clip made, whose frames are shown. A stronger model gives a short critique back. Use it when the user asks
   for a second opinion or a critique, or before a long or costly plan (a film of many shots) when you are unsure of the
   approach; not for every message. Weigh what it says; you decide.
-- read_skill: "op" is a skill's id (one given with the message, or one of "Other skills you can load") and "query" one of its parts (its number or heading), "offset" where to start; you get
-  that part, a page at a time. A skill too long to give you whole lists its parts: read each before you act on it.
+- read_skill: "op" is a skill's id (one given with the message, or one of "Other skills you can load") and "query" 0;
+  you get the whole skill, in one result. A skill you loaded stays in this conversation: follow that copy and never
+  load it again (asked again, you are told it is loaded). Only a skill too long to give you whole comes as its opening
+  and its parts: read each ("query" its number or heading, "offset" where to start) before you act on it.
 - read_text: "item" is a text in the library (a script or a document the user attached, a transcript), or "asset" a
   script in NeuralCore, and "offset" where to start; you get its words, a page at a time. With "path" as well, the whole text is kept in the run's state
   there (the script: /motion/inputs/script), word for word, so you need not copy it.
@@ -664,10 +747,11 @@ TOOL_ARGS = {
     "review": ({"item": I}, {}),
     "save_note": ({"text": S}, {}),
     "book_save": ({"text": S, "op": S}, {"item": I, "asset": I, "value": S, "settings": S}),
+    "book_import": ({}, {"item": I, "value": S}),
     "state_read": ({"path": S}, {"offset": I}),
     "state_write": ({"path": S, "value": S}, {}),
     "state_check": ({"path": S, "against": S}, {}),
-    "film": ({"op": S, "settings": S}, {}),
+    "film": ({"op": S, "settings": S}, {"value": S}),
     "import_url": ({"text": S}, {"query": S}),
     "transcript": ({"path": S}, {"item": I, "value": S}),
     "timing": ({"settings": S}, {}),
@@ -692,27 +776,37 @@ def tool_format(workflow_ids):
 
 
 REPLY_CHARS = 8000   # a reply may carry a table a skill posts for review: an asset, anchor or clips table
+RUN_REPLY_CHARS = 30_000   # ...and in a long skill's run, a story posted whole (an episode is about 7,000 characters)
+
+
+OTHER = re.compile(r"^(other|something else|none of these|anything else)\b", re.IGNORECASE)   # the card has its own
 
 
 def clean_question(question):
-    """A question the user answers with a button: {"text", "options"} with two to four short options, or None."""
+    """A question the user answers with a button: {"text", "options", "details", "default"} with two to four short
+    options, or None. "details" holds one line per option ("" where none was given); "default" is the option the model
+    recommends, or "" when it named none of them. An "Other" option is left out: the card always offers one."""
     if not isinstance(question, dict):
         return None
     text = " ".join(str(question.get("text") or "").split())[:300]
-    options = []
-    for option in question.get("options") if isinstance(question.get("options"), list) else []:
+    said = question.get("details") if isinstance(question.get("details"), list) else []
+    options, details = [], []
+    for n, option in enumerate(question.get("options") if isinstance(question.get("options"), list) else []):
         option = " ".join(str(option or "").split())[:80]
-        if option and option.lower() not in (o.lower() for o in options):
+        if option and not OTHER.match(option) and option.lower() not in (o.lower() for o in options):
             options.append(option)
-    return {"text": text, "options": options[:QUESTION_OPTIONS]} if text and len(options) >= 2 else None
+            details.append(" ".join(str(said[n] if n < len(said) else "").split())[:160])
+    if not text or len(options) < 2:
+        return None
+    wanted = " ".join(str(question.get("default") or "").split()).lower()
+    return {"text": text, "options": options[:QUESTION_OPTIONS], "details": details[:QUESTION_OPTIONS],
+            "default": next((o for o in options[:QUESTION_OPTIONS] if o.lower() == wanted), "")}
 
 
-def shaped(answer):
+def shaped(answer, reply_chars=REPLY_CHARS):
     """A model's answer as the agent returns it: {"thought", "reply", "steps", "model", "direction", "question"}."""
     steps = answer.get("steps")
-    reply = str(answer.get("reply") or "").strip()[:REPLY_CHARS]
-    if answer.get("_stood_in"):   # say so when another model answered than the one that was picked
-        reply = "{} ({})".format(reply, answer["_stood_in"]).strip()
+    reply = str(answer.get("reply") or "").strip()[:reply_chars]
     thought = str(answer.get("thought") or "").strip()[:800]   # shown folded above the reply
     return {"thought": thought, "reply": reply, "steps": steps if isinstance(steps, list) else [], "model": answer.get("_model"),
             "direction": clean_direction(answer.get("direction")), "question": clean_question(answer.get("question")),
@@ -726,8 +820,7 @@ def clean_questions(questions):
     for question in questions if isinstance(questions, list) else []:
         kept = clean_question(question)
         if kept and kept["text"].lower() not in (q["text"].lower() for q in found):
-            said = " ".join(str(question.get("default") or "").split()).lower()
-            kept["default"] = next((o for o in kept["options"] if o.lower() == said), kept["options"][0])
+            kept["default"] = kept["default"] or kept["options"][0]
             found.append(kept)
     return found[:MAX_QUESTIONS]
 
@@ -833,6 +926,7 @@ def reply_format(workflow_ids):
         "leave_out": {"type": "array", "items": {"type": "integer"}},
         "save_to": {"type": "string"},
         "check": {"type": "string"},
+        "clean_voice": {"type": "boolean"},
         "keep": {"type": "object", "required": ["as", "name"], "properties": {
             "as": {"type": "string", "enum": ["", "character", "outfit", "location", "prop", "voice", "style"]}, "name": {"type": "string"}}},
         "shot_size": {"type": "string", "enum": camera.choices("shot_size")},
@@ -850,12 +944,14 @@ def reply_format(workflow_ids):
     }}
     # "question": one the run must stop for, answered by a button (two to four short options); "" and [] otherwise
     question = {"type": "object", "required": ["text", "options"], "properties": {
-        "text": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}}}
+        "text": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}},
+        "default": {"type": "string"}, "details": {"type": "array", "items": {"type": "string"}}}}
     return {"type": "object", "required": ["thought", "reply", "steps", "direction", "question"], "properties": {
         "thought": {"type": "string"}, "reply": {"type": "string"}, "steps": {"type": "array", "items": step},
         "direction": {"type": "string"}, "question": question,
         "questions": {"type": "array", "items": {"type": "object", "required": ["text", "options", "default"], "properties": {
-            "text": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}, "default": {"type": "string"}}}}}}
+            "text": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}, "default": {"type": "string"},
+            "details": {"type": "array", "items": {"type": "string"}}}}}}}
 
 
 def _unfenced(text):
@@ -1079,18 +1175,19 @@ class Agent:
         return dict(shaped(answer), tokens=add_tokens({}, answer.get("_usage")))
 
     async def ask_with_tools(self, system, message, workflow_ids, tools, finishing=None, model=None, rounds=TOOL_ROUNDS, thread=None,
-                             web=False):
+                             web=False, reply_chars=REPLY_CHARS):
         """The same question as ask(), answered in a loop of tool calls: the model looks things up, checks its shots and
         only then finishes. tools: {name: async function(call) -> str}, called with the model's answer; what it returns
         goes back to the model. finishing: async function(answer) -> a hint, when the finishing answer is wrong; the
         model is then asked to put it right. Nothing is made in the loop: the steps it ends with still wait for Approve.
-        Returns what ask() returns, and "tools": the names of the tools it used.
+        Returns what ask() returns, and "tools": the names of the tools it used. reply_chars: the most of the reply kept.
 
         Claude, in a conversation that keeps a thread, works in its live session instead (_ask_claude_live). web: Claude
         may also search the web (claude.WEB_TOOLS)."""
         s, name = self._service_of(model) if model else (None, None)
         if thread is not None and claude.live_ok(s):
-            return await self._ask_claude_live(s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web)
+            return await self._ask_claude_live(s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web,
+                                               reply_chars)
         messages = [{"role": "system", "content": system + "\n\n" + TOOL_RULES}, {"role": "user", "content": message}]
         shape, used, tokens = tool_format(workflow_ids), [], {}
         if thread is not None:
@@ -1131,16 +1228,17 @@ class Agent:
                 answer = asked   # every call carries a whole answer: the last one stands if the rounds run out
             used.append(name)
             messages += [{"role": "assistant", "content": json.dumps(dict(call, tool=name), ensure_ascii=False)[:6000]},
-                         {"role": "user", "content": "Result of {}:\n{}".format(name, str(result)[:TOOL_RESULT])}]
+                         {"role": "user", "content": "Result of {}:\n{}".format(name, str(result)[:result_chars(name)])}]
         if not answer.get("reply") and not answer.get("steps") and name != "finish":
             # the rounds ran out while it was still working: it gives its answer now, from what it has (its last call was
             # a tool's, with an empty reply)
             answer = await self.chat(messages + [{"role": "user", "content": FINISH_NOW}], reply_format(workflow_ids), model=model,
                                      thread=thread)
             add_tokens(tokens, answer.get("_usage"))
-        return dict(shaped(answer), tools=used, tokens=tokens, empty_sent_back=len(noticed))
+        return dict(shaped(answer, reply_chars), tools=used, tokens=tokens, empty_sent_back=len(noticed))
 
-    async def _ask_claude_live(self, s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web=False):
+    async def _ask_claude_live(self, s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web=False,
+                               reply_chars=REPLY_CHARS):
         """ask_with_tools() for Claude in its live session (claude.converse): it calls the studio's tools as its own,
         in one turn, and answers in the plan's shape. A plan with steps that cannot run, or an empty answer, goes back
         to it as a message of the same session, at most FIX_ROUNDS times."""
@@ -1151,7 +1249,7 @@ class Agent:
             started = time.time()
             try:
                 content, usage, limits, called = await claude.converse(
-                    s, name, system, text, shape, thread, tools, about, FINISH_NOW, rounds + 2, TOOL_RESULT, **({"web": True} if web else {}))
+                    s, name, system, text, shape, thread, tools, about, FINISH_NOW, rounds + 2, result_chars, **({"web": True} if web else {}))
             except claude.Busy as error:
                 raise AgentBusy(str(error))
             except claude.Lost as error:
@@ -1183,7 +1281,7 @@ class Agent:
                 text = await finishing(answer) if finishing else None
             if not text:
                 break
-        return dict(shaped(answer), tools=used, tokens=tokens, empty_sent_back=len(noticed))
+        return dict(shaped(answer, reply_chars), tools=used, tokens=tokens, empty_sent_back=len(noticed))
 
     async def preflight(self, skill, instruction, attached, available, turns=(), model=None):
         """Whether a skill can be started: {"ready", "missing", "unsupported", "adaptation", "message"}. skill: the skill as
@@ -1268,6 +1366,8 @@ def offer(schema, attached=True):
         return None   # a workflow with no prompt works on a file it is given: without one it makes nothing
     needs_start = any(not r["optional"] and r["id"] == first_frame for r in schema["refs"])
     info = {"id": schema["id"], "title": schema["title"], "makes": schema["id"].split("/", 1)[0], "about": schema["description"][:200]}
+    if schema.get("pick_when"):   # what its model is best at, to choose between workflows that make the same kind of thing
+        info["pick_when"] = schema["pick_when"][:300]
     if "prompt" not in roles:
         info["prompt"] = "none: it works on the files it is given; leave the step's prompt empty"
     elif schema.get("prompt_optional"):
@@ -1288,8 +1388,13 @@ def offer(schema, attached=True):
         info["clips"] = "1 to 6, for a longer continuous video"
     if first_frame:
         info["start_from"] = "required" if needs_start else "allowed"
+    if (schema.get("slots") or {}).get("voice_track"):   # lips follow a sound: see "clean_voice"
+        info["clean_voice"] = "allowed: its voice track slot is {}".format(schema["slots"]["voice_track"])
+    guide = prompters.for_workflow(schema["id"])
+    if guide and "prompt" in roles:   # how this model wants its prompt laid out: the guide itself goes once, under "Prompt guides"
+        info["prompt_guide"] = guide["id"]
     if schema.get("hints"):   # how this model likes its prompts written
-        info["prompt_tips"] = [str(tip)[:220] for tip in schema["hints"][:PROMPT_TIPS]]
+        info["prompt_tips"] = [str(tip)[:TIP_CHARS] for tip in schema["hints"][:PROMPT_TIPS]]
     slots = [{"slot": r["id"], "for": r["label"], "takes": r["kind"], **({} if r["optional"] else {"required": True})}
              for r in schema["refs"] if not r.get("order")]
     listed = [r for r in schema["refs"] if r.get("order")]   # a list of references: said once, not slot by slot
@@ -1323,6 +1428,23 @@ def choosable_settings(schema):
 
 FREE_TYPES = ("bool", "string", "text")   # the kinds of a workflow's setting the model may set to its own value
 FREE_CHARS = 4000
+PROMPT_CHARS = 4000   # the most of a prompt a job is given (settings_for); a longer one goes back to the model (too_long)
+
+
+def too_long(schema, written, sent):
+    """Why a step's prompt must be shortened, or None. written: the prompt as the model wrote it, measured against its
+    model's guide's limit (prompters/); sent: the prompt with what the studio adds (camera words, the always-on cast in
+    words), which must fit PROMPT_CHARS. A step that fails goes back to the model with this reason, so nothing a model
+    was meant to read is cut off unseen."""
+    guide = prompters.for_workflow(schema["id"])
+    said = prompters.words(written)
+    if guide and guide["limit"] and said > guide["limit"]:
+        return ("its prompt is {} words, more than the {} words {} reads well: write it again at the guide's length ({}), "
+                "the most important first").format(said, guide["limit"], guide["title"], guide["length"] or "shorter")
+    if len(str(sent or "")) > PROMPT_CHARS:
+        return "its prompt is {} characters, more than the {} a job takes: write it again shorter, the most important first".format(
+            len(sent), PROMPT_CHARS)
+    return None
 
 
 # Words in quotation marks: "double", curly, ‘single curly’ or 'single'. A single quote must not touch a letter on its
@@ -1453,6 +1575,7 @@ MAKE = re.compile(r"\b(generate|make|create|render|produce|start|go|approve|proc
 
 
 CHIP = re.compile(r"\[\[(?:show:)?(item|asset):(\d+)\]\]")
+HANDLE = re.compile(r"(?<![\w:\[])asset_id:(\d+)\b")   # a craft skill's name for an entry in a table ("CDN link"): [[asset:<id>]]
 MISSING = "(I couldn't find that file in this project, so it isn't shown here.)"
 
 
@@ -1476,7 +1599,7 @@ def chips_in(reply, items, assets):
             return ""
         found["{}:{}".format(table, number)] = {"name": known["name"], "kind": known["kind"]}
         return match.group(0)
-    said = re.sub(r"[ \t]{2,}", " ", CHIP.sub(keep, str(reply or ""))).strip()
+    said = re.sub(r"[ \t]{2,}", " ", CHIP.sub(keep, HANDLE.sub(r"[[asset:\1]]", str(reply or "")))).strip()
     if lost:
         said = (said + "\n\n" + MISSING).strip()
     return found, said
@@ -1554,13 +1677,15 @@ def question_parts(instruction, offers, selection, default="", history=(), proje
     if offers[0]["id"] == default:
         offers[0] = dict(offers[0], default=True)
     said = ["{}: {}".format("User" if turn["role"] == "user" else "You", turn["content"]) for turn in history]
+    guides_of_models = prompters.part([o["id"] for o in offers if o.get("prompt_guide")])
     parts = [("always", "Always on:\n" + (kit.described(project_cast or []) or "(none)")),
              ("book", "NeuralCore, the project's memory (its characters, locations, props, voices and scripts by name, and its items):\n" + ("\n".join(json.dumps(entry, ensure_ascii=False) for entry in book)
                                                        or "(empty: nothing is saved for reuse yet)")),
              *([("skills", skills_part(guides))] if guides else []),
-             *([("catalogue", "Other skills you can load (when the message fits one, call read_skill with \"op\" its id and "
-                 "\"query\" 0 before you do anything else, then follow it):\n" + catalogue)] if catalogue else []),
+             *([("catalogue", "Other skills (load one with read_skill, \"op\" its id and \"query\" 0, only when the user names it "
+                 "or the skill in use calls for it; never because the message fits it):\n" + catalogue)] if catalogue else []),
              ("workflows", "Workflows:\n" + "\n".join(json.dumps(o) for o in offers)),
+             *([("prompting", PROMPT_GUIDES + guides_of_models)] if guides_of_models else []),
              ("direction", "Direction, the notes of this conversation that you keep (they stand in for turns no longer shown; when "
              "something durable changes, answer with the whole updated direction in \"direction\", else repeat it as it is):\n"
              + (clean_direction(direction) or "(empty)")),
@@ -1840,7 +1965,7 @@ def settings_for(schema, step, selection_ids, project_id, filled=(), used_items=
         return None
     values = {c["id"]: c["default"] for c in schema["controls"]}
     if "prompt" in roles:
-        values[roles["prompt"]["id"]] = prompt[:4000]
+        values[roles["prompt"]["id"]] = prompt[:PROMPT_CHARS]
     if "duration" in roles:
         given = step.get("duration")
         asked = given if isinstance(given, (int, float)) and not isinstance(given, bool) and given > 0 else roles["duration"]["default"]

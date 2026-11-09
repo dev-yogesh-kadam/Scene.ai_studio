@@ -43,7 +43,7 @@ def test_a_plan_comes_with_what_the_agent_did_and_thought(client, monkeypatch):
     model(monkeypatch, client, {"thought": "A pet shop ad: one 6 s portrait shot of a dog.",
                                 "reply": "One shot of **the dog** [[item:%d]] and [[item:99999]] [[asset:77]]." % dog,
                                 "steps": [STEP, dict(STEP, name="Bad", workflow="video/nope")]}, looked=2)
-    plan = client.post("/api/agent/plan", json={"instruction": "a short ad for a pet shop"}).json()
+    plan = client.post("/api/agent/plan", json={"instruction": "/product-ad a short ad for a pet shop"}).json()
     assert plan["thought"] == "A pet shop ad: one 6 s portrait shot of a dog." and plan["seconds"] >= 0
     said = [(e["type"], e.get("icon"), e.get("text")) for e in plan["activity"]]
     assert ("activity", "book", "Opened NeuralCore: 1 entry") in said
@@ -106,9 +106,9 @@ def test_the_plan_streams_as_the_agent_works(client, monkeypatch):
     plan = events[-1]
     assert plan["steps"][0]["name"] == "Dog in the park" and [e["type"] for e in plan["activity"]][-1] == "activity"
     # what goes wrong once the stream has started arrives as its last line
-    model(monkeypatch, client, agent.AgentError("The agent's model server (Ollama) can't be reached."))
+    model(monkeypatch, client, agent.AgentError("Claude can't be reached."))
     response, events = stream(client, {"instruction": "a dog in a park"})
-    assert response.status_code == 200 and events[-1] == {"type": "error", "message": "The agent's model server (Ollama) can't be reached."}
+    assert response.status_code == 200 and events[-1] == {"type": "error", "message": "Claude can't be reached."}
     # and a message that can't be planned at all is refused before the stream starts
     assert client.post("/api/agent/plan", json={"instruction": " "}, headers={"Accept": "application/x-ndjson"}).status_code == 400
 

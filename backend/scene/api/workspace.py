@@ -1,4 +1,4 @@
-"""The canvas, the timeline and the agent: arranging finished work, queueing edits and motion graphics, and planning new work."""
+"""The canvas and the agent: arranging finished work, queueing edits and motion graphics, and planning new work."""
 
 import asyncio
 import contextlib
@@ -13,8 +13,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import aftercare, agent, camera, claude, core, credits, presets, phonetic, recall, edits, kit, media, memory, motion, review, runs, sequence, \
-    placement, sessions, sharing, skills, traces, web
+from .. import aftercare, agent, camera, claude, core, credits, internals, presets, phonetic, recall, edits, kit, media, memory, motion, review, \
+    runs, sequence, placement, sessions, sharing, skills, traces, web
 from ..db import as_everyone
 from ..comfy import workflows
 from .deps import current_user
@@ -22,8 +22,8 @@ from .studio import fit_resolution, price
 
 router = APIRouter(prefix="/api", tags=["workspace"])
 
-# canvas: where frames sit. timeline: the cut. agent: its tabs. cast: the project's pinned references.
-KINDS = ("canvas", "timeline", "agent", "cast")
+# canvas: where frames sit. agent: its tabs. cast: the project's pinned references.
+KINDS = ("canvas", "agent", "cast")
 SHOT_LENGTHS = list(range(4, 16))
 # agent-<id>: the conversation of one agent tab. The "agent" board lists the tabs: their names, ids and credits.
 AGENT_TAB = re.compile(r"^agent-[a-z0-9]{1,16}$")
@@ -63,7 +63,12 @@ STUDIO_ABILITY = (
     "their text). Questions to the user with two to four buttons; tables of pictures in a reply. A run goes on "
     "by itself when its steps are made. A permission under the Agent box lets plans run "
     "without waiting for Approve. Looking at pictures and "
-    "clips, reviewing results, remembering assets. Not here: running other programs or scripts, other models than the workflows listed.")
+    "clips, reviewing results, remembering assets. HyperFrames: motion graphics pages the agent designs itself (the film "
+    "tool's html op: titles, kinetic type, explainers, captions, stat and chart cards, lower thirds, end cards, layouts over "
+    "pictures and clips, see-through overlays), drawn to video on this machine, free, a whole motion graphics video with no "
+    "script needed. ffmpeg commands the agent writes itself (the film tool's ffmpeg op: any cut, join, transition, grade, "
+    "speed, punch-in, overlay, mix, duck, caption or measurement). An asset sheet (CSV of names and image links) attached is "
+    "brought into NeuralCore by itself. Not here: other programs or scripts than these, other models than the workflows listed.")
 
 
 def _project_id(request, user, project, need="creator"):
@@ -75,7 +80,7 @@ def _project_id(request, user, project, need="creator"):
 
 
 def _board_owner(request, user, project, kind, need):
-    """(project id, whose board it is). A project's canvas, timeline and cast are its owner's, which everyone in a shared
+    """(project id, whose board it is). A project's canvas and cast are its owner's, which everyone in a shared
     project opens; an agent tab is the user's own."""
     project_id = _project_id(request, user, project, need)
     if not project_id or AGENT_TAB.match(kind) or kind == "agent":
@@ -85,7 +90,7 @@ def _board_owner(request, user, project, kind, need):
 
 @router.get("/boards/{kind}")
 async def get_board(kind: str, request: Request, project: int = 0, user: dict = Depends(current_user)):
-    """The saved canvas layout or timeline of one project (or of the items in no project)."""
+    """The saved canvas layout of one project (or of the items in no project)."""
     _board_kind(kind)
     project_id, owner = _board_owner(request, user, project, kind, "viewer")
     with as_everyone():   # the owner's board of a shared project, now that the user is found to be in it
@@ -391,7 +396,9 @@ async def agent_status(request: Request, user: dict = Depends(current_user)):
         prices = credits.llm_prices()
         return {"online": True, "model": await brain.pick_model(), "models": models, "hosted": [{"id": s["id"], "name": s["name"]} for s in brain.services.values()],
                 "prices": {m: prices[m] for m in models if m in prices},   # credits per message; a model not listed is free
-                "by_tokens": [m for m in models if m not in prices and credits.token_prices(m)]}   # charged by the tokens they use
+                "by_tokens": [m for m in models if m not in prices and credits.token_prices(m)],   # charged by the tokens they use
+                # the effort levels each Claude model takes, and the one it uses when none is picked
+                "efforts": {m: dict(zip(("levels", "default"), claude.efforts(m))) for m in models if m.startswith("claude/")}}
     except agent.AgentError as error:
         return {"online": False, "detail": str(error)}
 
@@ -445,10 +452,27 @@ def _keep_thread(state, user, project, body, model, thread, reply):
         return
     kept = {k: v for k, v in thread.items() if k not in THREAD_NOT_KEPT}   # the whole message is made anew each time
     kept["last"] = _said(reply)
+    if thread.get("skills"):   # a skill sent to a session that was new in this message: that session is the thread's now
+        kept["skills"] = {k: [v[0] or thread.get("id"), v[1]] for k, v in thread["skills"].items()}
     runs.keep_thread(state.db, user["id"], _thread_run(body), project, kept)
 
 
 THREAD_NOT_KEPT = ("full", "stood_in", "key", "record", "row", "missed")
+
+
+def _skill_sent(thread, skill_id):
+    """Whether this conversation's Claude session holds the skill already: read_skill sent it whole to this session,
+    and the session has not been compacted since (a summary keeps no skill word for word)."""
+    if not thread or not thread.get("id"):
+        return False
+    return (thread.get("skills") or {}).get(skill_id) == [thread["id"], thread.get("compacted") or 0]
+
+
+def _skill_sending(thread, skill_id):
+    """Note in the thread that read_skill sends the skill to its session. A new session has no id yet: _keep_thread
+    fills it in."""
+    if thread is not None:
+        thread.setdefault("skills", {})[skill_id] = [thread.get("id"), thread.get("compacted") or 0]
 
 
 def _hosted_claude(state):
@@ -532,6 +556,7 @@ async def list_skills(user: dict = Depends(current_user)):
 
 
 ENTRY_FIELDS = ("look_of", "variant", "from_scene", "palette", "relations")   # book_save's JSON fields of an entry (kit.update)
+SCRIPT_CHARS = 200_000   # the most of a script book_save keeps from text, as one typed into NeuralCore (api/kit.SCRIPT_CHARS)
 
 
 def _is_admin(user):
@@ -650,7 +675,7 @@ async def _retake(state, user, item, verdict, previous):
     settings = json.loads(item["settings"] or "{}")
     settings["values"] = dict(settings.get("values") or {}, **{roles["prompt"]["id"]: fix["prompt"]})
     settings.update(workflow=schema["id"], seed_mode="random", parent=item["id"], project_id=item["project_id"],
-                    name=(item["name"] + " · retake")[:80])
+                    name=(item["name"].removesuffix(" · retake") + " · retake")[:80])   # a retake of a retake is not named twice
     shot = settings.get("shot")
     if isinstance(shot, dict) and shot.get("id"):
         settings["shot"] = {"id": shot["id"], "take": int(shot.get("take") or 1) + 1}
@@ -910,7 +935,9 @@ async def agent_plan(body: dict, request: Request, user: dict = Depends(current_
     if not instruction:
         raise HTTPException(400, "Write a message for the agent.")
     project = _project_id(request, user, body.get("project_id"))
-    events = _kept_alive(_planning(request, user, body, instruction, project))
+    # What the agent's work says of how the studio is built (skills, NeuralCore, its session, tokens) is put in plain
+    # words for someone who may not see it (internals.py).
+    events = internals.for_user(_kept_alive(_planning(request, user, body, instruction, project)), user)
     if "application/x-ndjson" in request.headers.get("accept", ""):
         async def lines():
             try:
@@ -994,6 +1021,9 @@ async def _planning(request, user, body, instruction, project):
     state = request.app.state
     started = time.monotonic()
     log = []   # what the user sees of the work afterwards: {"type": "activity" | "thought", ...}
+    # How hard Claude thinks over this message, as the user picked it for the model (claude.EFFORT); the model's own
+    # default when it was not picked or the model does not take it.
+    claude.EFFORT.set(claude.chosen_effort(body.get("model") or state.agent.model or "", body.get("effort")))
 
     def logged(event):
         event["at"] = round(time.monotonic() - started, 1)
@@ -1038,6 +1068,10 @@ async def _planning(request, user, body, instruction, project):
                 selection[-1]["begins"] = " ".join(words[:TEXT_OPENING].split())
     if selection:
         yield activity("attach", "Read what you attached: " + ", ".join(s["name"] for s in selection))
+    # An asset sheet attached (a CSV of type, name, image link and notes a row) is this module's references: its rows
+    # come into the module's NeuralCore before anything is planned, whatever the message says, and the agent is told so.
+    for found in await _bring_in_sheets(state, user, project, body.get("selection") or [], selection):
+        yield activity("book", found)
 
     # What was made lately here, so "the music you just made" can be put on "this video" without attaching either.
     # The whole films come first, those a long run made too (its other working files are left out).
@@ -1057,7 +1091,7 @@ async def _planning(request, user, body, instruction, project):
     instruction = re.sub(r"(@\d+)(?=/)", lambda m: m.group(1) + " ", instruction)   # a command typed straight after an attached file (@1/skill)
     for match in reversed(list(SLASH.finditer(instruction))):
         if skills.find(match.group(1)):
-            forced.insert(0, match.group(1))
+            forced.insert(0, skills.find(match.group(1))["id"])   # /craft-director is director here
             # the /command is an instruction to the agent, not shot text
             instruction = (instruction[:match.start()] + " " + instruction[match.end():]).strip()
     instruction = re.sub(r"[ \t]{2,}", " ", instruction)
@@ -1069,6 +1103,12 @@ async def _planning(request, user, body, instruction, project):
         if kept and skills.find(kept):
             forced.append(kept)
             yield activity("skill", "Carried on with “{}”, the skill of this run".format(skills.find(kept)["title"]))
+    # No skill is picked by a message's words: only the user picks one. A message asking for a video with none picked
+    # gets the default skill, as if the user had named it (it hands on to the craft skills it needs).
+    if not any(skills.find(f) for f in forced) and skills.find(skills.DEFAULT) and skills.wants_video(
+            instruction, body.get("history"), [s["kind"] for s in selection]):
+        forced.append(skills.DEFAULT)
+        yield activity("skill", "No skill picked: “{}”, the default for making a video".format(skills.find(skills.DEFAULT)["title"]))
     picked = skills.pick(instruction, body.get("history"), force=forced)
     # A long skill the user named is the whole procedure: no other skill picked by the message's words goes beside it.
     if any(s["id"] in forced and len(s["text"]) > CHECKED_SKILL for s in picked):
@@ -1331,7 +1371,7 @@ async def _planning(request, user, body, instruction, project):
             try:
                 given = json.loads(str(call.get("settings")))
             except ValueError:
-                return "settings must be a word (always, hide, unhide, project) or a JSON object of the entry's fields."
+                return "settings must be the word always or a JSON object of the entry's fields."
             if not isinstance(given, dict):
                 return "settings must be a JSON object of the entry's fields."
             how = "always" if given.get("always") is True else str(given.get("how") or "").strip().lower()
@@ -1339,7 +1379,6 @@ async def _planning(request, user, body, instruction, project):
         always_on = how == "always"
         about = str(call.get("value") or "").strip()
         folder = state.assets_dir / str(user["id"])
-        in_module = kit.root(state.db, project) != project
         elsewhere = shared.entry_elsewhere(call["asset"]) if call.get("asset") else None
         if elsewhere is not None:
             # An entry of another project is read only from here: it is copied into this project's NeuralCore, file and all.
@@ -1352,24 +1391,8 @@ async def _planning(request, user, body, instruction, project):
                 kit.update(state.db, keeper, asset, {"name": name})
             noted("book", "Copied “{}” into NeuralCore from another project".format(elsewhere["name"]))
             return json.dumps({"asset": asset, "name": name or elsewhere["name"], "copied_from": elsewhere["project_id"]})
-        if call.get("asset") and in_module and how not in ("project", "show"):
-            # In a module, an entry of the project's NeuralCore is changed for this module only: always on here, hidden
-            # here, shown again, or the picture of it to prefer here. Its name, type and description are the project's.
-            current = next((e for e in kit.entries(state.db, user["id"], project, hidden=True) if e["id"] == call["asset"]), None)
-            if current is None:
-                return "There is no NeuralCore entry {}.".format(call["asset"])
-            if name != current["name"] or (said_type and kit.tag_of(said_type) != current["tag"]) or about or fields:
-                return ("That changes “{}” for the whole project, not only this module. Ask the user first, listing what changes; "
-                        "when they say yes, call book_save again with settings \"project\".".format(current["name"]))
-            changes = {"always": True} if always_on else {"removed": True} if how == "hide" else \
-                {"removed": False} if how == "unhide" else {}
-            if call.get("item"):
-                changes["preferred_item"] = call["item"]
-            if not changes:
-                return "In a module, settings is \"always\", \"hide\" or \"unhide\", item the picture to prefer here, or \"show\" to change the project's entry."
-            kit.override(state.db, user["id"], project, current["id"], changes)
-            noted("book", "Changed “{}” in this module only".format(current["name"]))
-            return json.dumps({"asset": current["id"], "name": current["name"], "changed_in": "this module", **changes})
+        if call.get("asset") and not any(e["id"] == call["asset"] for e in kit.entries(state.db, user["id"], project)):
+            return "There is no NeuralCore entry {} in this module.".format(call["asset"])   # another module's is never this one's
         if call.get("asset"):
             changes = {"name": name, "type": said_type, **({"about": about} if about else {}), **({"always": True} if always_on else {})}
             found = kit.update(state.db, user["id"], call["asset"], changes)
@@ -1382,6 +1405,18 @@ async def _planning(request, user, body, instruction, project):
             if not asset:
                 return "There is no library item {}.".format(call["item"])
             kit.update(state.db, user["id"], asset, {"name": name, "type": said_type, **({"about": about} if about else {})})
+        elif kit.tag_of(said_type) == "script" and about:
+            # A script written here (a story a skill wrote): "value" is its text, or "$state:/path" for the text kept there.
+            try:
+                words = shared.fill_text(about) if about.startswith("$state:") else about
+            except runs.RunError as error:
+                return str(error)
+            asset = kit.add(state.db, folder, user["id"], project or None, words.strip()[:SCRIPT_CHARS].encode("utf-8"), name + ".txt",
+                            "text", name, "script", always_on)
+            if not asset:
+                return "There is no NeuralCore here: it belongs to a project."
+            noted("book", "Kept the script “{}” in NeuralCore".format(name))
+            return json.dumps({"asset": asset, "name": name, "type": "script", "characters": len(words.strip())})
         else:
             return "Give the library id of what to keep in item, or NeuralCore entry to change in asset."
         if fields:
@@ -1479,30 +1514,68 @@ async def _planning(request, user, body, instruction, project):
             return str(error)
         return "op is remember, recall or forget."
 
+    # A skill is sent once. The model has those given whole with the message (in the system prompt while a long skill
+    # runs), the ones read_skill gave it in this message, and, in its Claude session, those it gave it in the earlier
+    # ones (_skill_sent).
+    prompted = {s["id"] for s in picked if len(s["text"]) <= skills.MAX_CHARS} if long_skill else set()
+    sent_now = set()
+
+    def loaded(skill):
+        """What the model is told when it asks for a skill it has: where that skill is, not the skill again."""
+        noted("skill", "“{}” is loaded already in this conversation: not sent again".format(skill["title"]))
+        if skill["id"] in prompted:
+            return "“{}” is given to you whole, with the messages of this conversation: there is nothing more of it to read. " \
+                   "Follow it as given.".format(skill["title"])
+        if len(skill["text"]) <= skills.READ_WHOLE:
+            return "“{}” is loaded already: read_skill gave it to you whole earlier in this conversation, and it is still " \
+                   "there. Follow that copy; a skill is sent once.".format(skill["title"])
+        return "“{}” is loaded already: its opening and the list of its parts are earlier in this conversation. Read a " \
+               "part you have not read with its number in \"query\".".format(skill["title"])
+
     async def read_skill(call):
         named = str(call.get("op") or "").strip()
-        skill = next((s for s in picked if s["id"] == named), None)
+        whole = " ".join(str(call.get("query") or "").split()) in ("", "0")   # the skill, not one of its parts
+        thread = threaded[0] if threaded else None
+        skill = next((s for s in picked if s["id"] in (named, skills.canonical(named))), None)
         if skill is None and named and skills.find(named):   # a skill of the catalogue, loaded now: it is followed from here
             skill = skills.find(named)
             # A skill mid-way is not left for another unless the user asks for it, or it hands on to it or calls on a craft.
             under_way = skills.find(carried) if carried else next((s for s in picked if s["id"] in forced and len(s["text"]) > CHECKED_SKILL), None)
             handed = bool(under_way) and skill["id"] in under_way["next"]
-            if under_way and not handed and not skill["craft"] and not asked_for(skill):
-                noted("skip", "Did not load “{}”: “{}” is under way".format(skill["title"], under_way["title"]))
-                return ("“{}” is under way in this run. Do not load another skill in the middle of it unless the user asks for it: "
-                        "finish its steps first, or ask the user whether to switch to “{}”.".format(under_way["title"], skill["title"]))
-            if handed and run and len(skill["text"]) > CHECKED_SKILL:   # the run carries on with the skill it was handed to
+            # Only the user picks a skill. Another is loaded when the user names it, or a skill in use hands on to it or
+            # calls for it (a craft skill).
+            called = any(skill["id"] in s["next"] for s in picked) or (skill["craft"] and bool(picked))
+            if not picked and not asked_for(skill):
+                noted("skip", "Did not load “{}”: the user picked no skill".format(skill["title"]))
+                return ("The user has not picked a skill, and a skill is used only when the user picks it. Do the work without "
+                        "one, or ask the user whether to use “{}”.".format(skill["title"]))
+            if not handed and not called and not asked_for(skill):
+                in_use = under_way or picked[0]
+                noted("skip", "Did not load “{}”: “{}” is under way".format(skill["title"], in_use["title"]))
+                return ("“{}” is in use. Do not load another skill in the middle of it unless the user asks for it or it calls "
+                        "for it: finish its steps first, or ask the user whether to switch to “{}”.".format(in_use["title"], skill["title"]))
+            # the run carries on with the skill it was handed to; a craft skill is a part of the one in use, which stays the run's
+            if handed and run and len(skill["text"]) > CHECKED_SKILL and not skill["craft"]:
                 runs.keep_skill(state.db, user["id"], run, skill["id"])
                 noted("skill", "Handed on from “{}” to “{}”".format(under_way["title"], skill["title"]))
             picked.append(skill)
             turn["tags"].append(skill["id"])   # Langfuse's trace says it too, from the next call on
+            whole = whole or len(skill["text"]) <= skills.READ_WHOLE
+            if whole and _skill_sent(thread, skill["id"]):   # sent in an earlier message of this session: not again
+                sent_now.add(skill["id"])
+                return loaded(skill)
             noted("skill", "Loaded the skill “{}”".format(skill["title"]))
-            if len(skill["text"]) <= CHECKED_SKILL:
-                return skills.guide([skill])
-            return skills.guide([skill], skills.MAX_CHARS // 4)
+            if whole:
+                # whole when it fits in one result, else its opening and its parts, each read when its step comes
+                sent_now.add(skill["id"])
+                _skill_sending(thread, skill["id"])
+                return skills.guide([skill], skills.READ_WHOLE)
+            # a part of a long skill loaded in an earlier message: that part, now that the skill is loaded again
         skill = skill or (picked[0] if len(picked) == 1 else None)
         if skill is None:
             return "Name the skill in op: {}.".format(", ".join(s["id"] for s in picked) or "no skill is in use")
+        if skill["id"] in prompted or (skill["id"] in sent_now and (whole or len(skill["text"]) <= skills.READ_WHOLE)):
+            return loaded(skill)
         text, problem = skills.read_part(skill, call.get("query"), call.get("offset") or 0)
         if problem:
             return problem
@@ -1510,9 +1583,37 @@ async def _planning(request, user, body, instruction, project):
         return text
 
     def asked_for(skill):
-        """Whether the user's message asks for this skill: by its id, its title, or the words it is found by."""
+        """Whether the user's message names this skill: by its id or its title. Its trigger words are not enough: a
+        message that only fits a skill has not picked it."""
         said = instruction.lower()
-        return skill["id"] in said or skill["title"].lower() in said or bool(skill["words"].search(instruction))
+        return skill["id"] in said or skill["title"].lower() in said
+
+    async def book_import(call):
+        """An asset sheet (sheet.py) brought into this module's NeuralCore: each row's picture fetched from its link."""
+        from .. import sheet
+        if not project:
+            return "There is no NeuralCore here: it belongs to a project, and this message is in no project. Say so to the user."
+        if isinstance(call.get("item"), int) and call["item"]:
+            row = state.db.one("SELECT name, filename FROM generations WHERE id = ? AND user_id = ? AND kind = 'text'", (call["item"], user["id"]))
+            path = state.outputs.folder(user["id"]) / row["filename"] if row else None
+            if not path or not path.is_file():
+                return "That is not a sheet in the library: give the id of the CSV the user attached, or the sheet's text in value."
+            text, called = path.read_text(encoding="utf-8-sig", errors="replace"), row["name"]
+        else:
+            text, called = str(call.get("value") or ""), "the sheet"
+        try:
+            rows, left = sheet.parse(text)
+        except sheet.SheetError as error:
+            return "Not brought in: {}".format(error)
+        keeper = kit.keeper_of(state.db, user["id"], project)
+        with core.as_everyone() if keeper != user["id"] else contextlib.nullcontext():
+            done = await sheet.bring_in(state.db, state.assets_dir / str(keeper), keeper, project, rows)
+        new = sum(1 for a in done["added"] if a["new"])
+        noted("book", "Brought {} entr{} into NeuralCore from {}{}".format(new, "y" if new == 1 else "ies", called,
+                                                                          ", {} failed".format(len(done["failed"])) if done["failed"] else ""))
+        return json.dumps({"added": [{k: a[k] for k in ("asset", "name", "type")} for a in done["added"] if a["new"]],
+                           "there_already": [{k: a[k] for k in ("asset", "name")} for a in done["added"] if not a["new"]],
+                           "looks_linked": done["looks"], "failed": done["failed"], "rows_left_out": left}, ensure_ascii=False)
 
     async def read_text(call):
         if isinstance(call.get("asset"), int) and call["asset"]:   # a script kept in the project's kit
@@ -1625,6 +1726,8 @@ async def _planning(request, user, body, instruction, project):
             return "settings must be JSON text of an object."
         try:
             settings = shared.resolve_all(settings) if shared.keeps_state else settings
+            if call["op"] == "html" and not settings.get("html"):   # the page comes as it is in "value", not inside the JSON
+                settings["html"] = call.get("value") or ""
             if settings.get("save_to"):   # the speech spans are kept where save_to points: the episode, most often
                 place = shared._writable(settings["save_to"])
                 settings = dict(settings, save_to=place.path, **({"state_run": place.run} if place.run != run else {}))
@@ -1699,7 +1802,7 @@ async def _planning(request, user, body, instruction, project):
             data, kind, final = await fetch.fetch(url)
         except fetch.FetchError as error:
             return "Not brought in: {}".format(error)
-        made = await _file_in(request, user, data, fetch.filename_for(final, kind), kind, project or None, "Brought in from a link",
+        made = await _file_in(request, user, data, fetch.filename_for(final, kind, data), kind, project or None, "Brought in from a link",
                               workflow=IMPORTED, name=" ".join(str(call.get("query") or "").split())[:80], source=url)
         noted("attach", "Brought in “{}” from a link".format(made["name"]))
         return json.dumps({"item": made["id"], "kind": kind, "name": made["name"], **made["context"]}, ensure_ascii=False)
@@ -1707,7 +1810,7 @@ async def _planning(request, user, body, instruction, project):
     threaded = []   # the thread of the conversation with Claude, when it keeps one (_thread)
 
     tools = {"find_assets": find_assets, "look": look, "check_shots": check_shots, "review": review_it, "save_note": save_note,
-             "book_save": book_save,
+             "book_save": book_save, "book_import": book_import,
              "state_read": state_read, "state_write": state_write, "state_check": state_check, "film": film_op, "import_url": import_url,
              "transcript": read_transcript, "timing": timing, "read_text": read_text, "read_skill": read_skill, "memory": memory_tool,
              "preset_search": preset_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion}
@@ -1742,7 +1845,8 @@ async def _planning(request, user, body, instruction, project):
             going = {"thread": thread} if thread is not None else {}
             if with_tools:   # the model works in a loop of tool calls, and may search the web
                 return await state.agent.ask_with_tools(system, asking, [o["id"] for o in offers], tools, finishing, rounds=rounds,
-                                                        **going, **_model(body), **({"web": True} if _hosted_claude(state) else {}))
+                                                        **going, **_model(body), **({"web": True} if _hosted_claude(state) else {}),
+                                                        **({"reply_chars": agent.RUN_REPLY_CHARS} if long_skill else {}))
             return await state.agent.ask(system, asking, [o["id"] for o in offers], **going, **_model(body))
 
         if thread is None:
@@ -1769,11 +1873,14 @@ async def _planning(request, user, body, instruction, project):
                     record("error", "Could not compact: {}".format(error))
                 except claude.Lost:
                     thread["id"], going_on = None, False
-            asking = agent.follow_up(parts, thread["seen"]) if going_on else full
+            # A compaction (here, in the user's Compact, or by Claude Code in the middle of a turn) keeps a summary of the
+            # conversation, not its parts word for word: the message after one sends every part again.
+            seen = thread["seen"] if thread.get("seen_at", 0) == (thread.get("compacted") or 0) else {}
+            asking = agent.follow_up(parts, seen) if going_on else full
             if going_on and thread.get("missed"):
                 asking = _missed_text(thread["missed"]) + "\n\n" + asking
                 record("note", "Sent along {} turns another model answered".format(len(thread["missed"])))
-            thread.update(seen=agent.fingerprints(parts), full=full)
+            thread.update(seen=agent.fingerprints(parts), seen_at=thread.get("compacted") or 0, full=full)
             record("prompt", asking, {"going_on": going_on, "model": chosen_model})
             started_with = thread.get("id")
             try:
@@ -2093,6 +2200,10 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
         words = kit.in_words(pinned, left_out)
         if words:
             proposed = dict(proposed, prompt=proposed["prompt"].rstrip() + "\n" + words)
+    # A prompt longer than its model reads well, or than a job takes, goes back to the model to be shortened: never cut unseen.
+    too_long = agent.too_long(schema, original.get("prompt"), proposed.get("prompt")) if proposed.get("tool", "generate") == "generate" else None
+    if too_long:
+        return too_long
     # A step can start on what an earlier step of this plan makes, if that is a picture or a video
     # and this workflow has a first frame to put it in.
     first_frame = (schema.get("slots") or {}).get("first_frame")
@@ -2136,6 +2247,9 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
         settings["save_to_state"] = slot
     if isinstance(proposed.get("check"), str) and proposed["check"].strip():   # what its review checks closely
         settings["check"] = " ".join(proposed["check"].split())[:400]
+    voice = (schema.get("slots") or {}).get("voice_track")
+    if proposed.get("clean_voice") is True and voice and any(use["slot"] == voice for use in uses):
+        settings["clean_voice"] = True   # its voice track has music or noise under it: the voice is taken out first (jobs.py)
     planned_fields(settings, proposed, uses)
     # A shot takes the shape of the picture it starts on: a portrait picture in a landscape video comes out squashed.
     agent.shape_like(schema, settings, steps[earlier].get("shape") if chained else shapes.get(start))
@@ -2166,7 +2280,7 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
     return None
 
 
-PLANNED_KEYS = ("shot_number", "shot_numbers", "board", "placement_group", "review_refs", "variation")   # settings a card keeps when changed
+PLANNED_KEYS = ("shot_number", "shot_numbers", "board", "placement_group", "review_refs", "variation", "clean_voice")   # settings a card keeps when changed
 PINNABLE = ("video", "image")   # the kinds of workflow a chat can be pinned to (body "workflows")
 
 
@@ -2323,9 +2437,49 @@ async def _finished(state, job_id, timeout=FILM_WAIT):
         await asyncio.sleep(0.4)
 
 
+SHEET_TYPES = (".csv", ".tsv")
+
+
+async def _bring_in_sheets(state, user, project, given, selection):
+    """Bring every asset sheet among the attached items (given: their ids) into the module's NeuralCore (sheet.py), and
+    say so on its line of `selection` (added there when the message's words did not point at it). Returns the lines
+    shown to the user. A sheet already brought in adds nothing and fetches nothing again (its rows are there by name)."""
+    from .. import sheet
+    ids = [i for i in given if isinstance(i, int) and not isinstance(i, bool)][:MAX_SELECTION]
+    rows = [r for r in (state.db.one("SELECT id, kind, name, filename FROM generations WHERE id = ? AND user_id = ?", (i, user["id"]))
+                        for i in ids) if r and r["kind"] == "text" and r["filename"].lower().endswith(SHEET_TYPES)]
+    shown = []
+    for row in rows:
+        path = state.outputs.folder(user["id"]) / row["filename"]
+        line = next((s for s in selection if s["id"] == row["id"]), None)
+        if line is None:
+            line = {"tag": "@{}".format(len(selection) + 1), "id": row["id"], "kind": "text", "name": row["name"]}
+            selection.append(line)
+        if not project:
+            line["sheet"] = "an asset sheet, not brought in: NeuralCore belongs to a project and this message is in none. Say so."
+            continue
+        try:
+            entries, left = sheet.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
+        except (OSError, sheet.SheetError):
+            continue   # a table that is not an asset sheet (a shot list, say): an attached text like any other
+        keeper = kit.keeper_of(state.db, user["id"], project)
+        with core.as_everyone() if keeper != user["id"] else contextlib.nullcontext():
+            done = await sheet.bring_in(state.db, state.assets_dir / str(keeper), keeper, project, entries)
+        line["sheet"] = sheet.told(done, left, row["name"])
+        line.pop("begins", None)   # what it is, said whole above
+        new = sum(1 for a in done["added"] if a["new"])
+        if new or done["failed"]:
+            shown.append("Brought {} entr{} from {} into NeuralCore{}{}".format(
+                new, "y" if new == 1 else "ies", row["name"], ", {} looks linked".format(len(done["looks"])) if done["looks"] else "",
+                ", {} failed".format(len(done["failed"])) if done["failed"] else ""))
+    return shown
+
+
 def attachment_line(item):
     """One attached item as the check of a skill is told it: its tag, its name and what it is, by its content."""
     what = {"audio": "a sound", "video": "a video", "image": "a picture", "text": "a text"}.get(item["kind"], item["kind"])
+    if item.get("sheet"):
+        return "{} {} (an asset sheet: its characters, locations and props are in NeuralCore now)".format(item["tag"], item["name"])
     if item.get("seconds"):
         what += ", {:.1f} s long".format(item["seconds"])
     if item["kind"] == "text" and "characters" in item:

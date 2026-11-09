@@ -5,6 +5,7 @@ by shot, and an entry's fields through book_save. No model, render server or web
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -107,10 +108,36 @@ def test_a_skill_under_way_is_not_left_for_another_unless_handed_on(client, monk
     monkeypatch.setattr(client.app.state.agent, "preflight", ready)
     seen = hosted(monkeypatch, client, {"tool": "read_skill", "op": "product-ad", "query": "0"},
                   {"tool": "read_skill", "op": "director", "query": "0"}, {"tool": "finish", "reply": "ok"})
-    client.post("/api/agent/plan", json={"instruction": "/pocket-motion-seedance-v2 go"})
+    client.post("/api/agent/plan", json={"instruction": "/script-to-video go"})
     results = [t for t in told(seen) if t.startswith("Result of read_skill")]
-    assert "is under way in this run" in results[0]
-    assert "Directing a script" in results[1]   # a craft skill the skill calls for is loaded
+    assert "is in use" in results[0]
+    assert "Craft Director (skill director" in results[1]   # a craft skill the skill calls for is loaded
+
+
+def test_a_video_with_no_skill_picked_runs_script_to_video_and_nothing_else_loads_by_itself(client, monkeypatch):
+    from scene import runs
+    register(client)
+
+    async def ready(*args, **kwargs):
+        return {"ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}
+    monkeypatch.setattr(client.app.state.agent, "preflight", ready)
+    # no skill picked and no video asked for: no skill, and the agent cannot load one by itself
+    seen = hosted(monkeypatch, client, {"tool": "read_skill", "op": "short-film", "query": "0"}, {"tool": "finish", "reply": "ok"})
+    plan = client.post("/api/agent/plan", json={"instruction": "a girl and her dog in the rain", "run": "s2v-0"}).json()
+    assert "a skill is used only when the user picks it" in [t for t in told(seen) if t.startswith("Result of read_skill")][0]
+    assert not any(e["text"].startswith("Loaded the skill") for e in plan["activity"])
+    # a video asked for with no skill picked: script-to-video, as if named; its craft skills load, and the run stays on it
+    seen = hosted(monkeypatch, client, {"tool": "read_skill", "op": "director", "query": "0"},
+                  {"tool": "read_skill", "op": "product-ad", "query": "0"}, {"tool": "finish", "reply": "ok"})
+    plan = client.post("/api/agent/plan", json={"instruction": "make a video from my script and this audio", "run": "s2v-1"}).json()
+    assert any(e["text"].startswith("No skill picked: “Script to Video") for e in plan["activity"])
+    results = [t for t in told(seen) if t.startswith("Result of read_skill")]
+    assert "Craft Director (skill director" in results[0] and "is in use" in results[1]
+    assert runs.kept_skill(client.app.state.db, 1, "s2v-1") == "script-to-video"
+    # a skill the user picked is not replaced by the default
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "ok"})
+    plan = client.post("/api/agent/plan", json={"instruction": "/product-ad make a video for our shoes"}).json()
+    assert not any(e["text"].startswith("No skill picked") for e in plan["activity"])
 
 
 # ---------------------------------------------------------------- 5: explain mode
@@ -232,6 +259,29 @@ def test_a_finished_shot_is_checked_in_the_background_and_retaken_once_when_allo
     assert client.portal.call(aftercare.after, state, job, 0) is None
 
 
+def test_the_shots_of_a_batch_are_checked_once_the_last_is_made(client, monkeypatch):
+    me = register(client)
+    state = client.app.state
+    model_says(monkeypatch, client, PASSED)
+    monkeypatch.setattr(aftercare, "WAIT", 0)
+    monkeypatch.setattr(aftercare, "BATCH_POLL", 0.01)
+    item, job = shot(client, me["id"], "job0")
+    add = "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created) VALUES (?, ?, 'Other', 'video/h3_all_in_one', 'video', ?, 'running', 1)"
+    # a render the agent did not plan is not part of the batch
+    state.db.run(add, ("by_hand", me["id"], "{}"))
+    assert not aftercare.batch_running(state, job)
+    # another shot of the plan is still being made: nothing is checked yet
+    state.db.run(add, ("job1", me["id"], json.dumps(job["settings"])))
+    assert aftercare.batch_running(state, job)
+    checked = client.portal.start_task_soon(aftercare.after_batch, state, job)
+    time.sleep(0.2)
+    assert not checked.done() and review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,))) is None
+    # the last one is made: now it is
+    state.db.run("UPDATE jobs SET status = 'done' WHERE id = 'job1'")
+    checked.result(timeout=10)
+    assert review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,)))["passed"] is True
+
+
 def test_a_sound_is_measured_for_its_length_loudness_and_silences(client, tmp_path):
     loud = {"seconds": 30.0, "loudness": -14.0, "problems": []}
     assert review.sound_verdict(loud, 30)["passed"] is True
@@ -284,12 +334,19 @@ def test_several_questions_come_together_with_their_defaults(client, monkeypatch
         {"text": "How long?", "options": ["15 s", "30 s"], "default": "30 s"},
         {"text": "Shape?", "options": ["Reels", "YouTube"], "default": "nope"}, {"text": "Bad", "options": ["one"]}]})
     plan = client.post("/api/agent/plan", json={"instruction": "an ad"}).json()
-    assert plan["questions"] == [{"text": "How long?", "options": ["15 s", "30 s"], "default": "30 s"},
-                                 {"text": "Shape?", "options": ["Reels", "YouTube"], "default": "Reels"}]
+    assert plan["questions"] == [{"text": "How long?", "options": ["15 s", "30 s"], "details": ["", ""], "default": "30 s"},
+                                 {"text": "Shape?", "options": ["Reels", "YouTube"], "details": ["", ""], "default": "Reels"}]
     assert plan["question"] is None
     model(monkeypatch, client, {"thought": "", "reply": "One thing.", "steps": [], "question": {"text": "Which?", "options": ["A", "B"]}})
     plan = client.post("/api/agent/plan", json={"instruction": "an ad"}).json()
-    assert plan["question"] == {"text": "Which?", "options": ["A", "B"]} and plan["questions"] == []
+    assert plan["question"] == {"text": "Which?", "options": ["A", "B"], "details": ["", ""], "default": ""} and plan["questions"] == []
+    # Each option may say what picking it does, and one is recommended; an "Other" the model adds is left out (the card has its own).
+    model(monkeypatch, client, {"thought": "", "reply": "One thing.", "steps": [], "question": {"text": "Fix the assets?",
+          "options": ["No corrections", "Corrections", "Something else"], "details": ["Plan the shots", "Name what to change", "x"],
+          "default": "No corrections"}})
+    plan = client.post("/api/agent/plan", json={"instruction": "an ad"}).json()
+    assert plan["question"] == {"text": "Fix the assets?", "options": ["No corrections", "Corrections"],
+                                "details": ["Plan the shots", "Name what to change"], "default": "No corrections"}
 
 
 # ---------------------------------------------------------------- 15: the workflows a chat uses
@@ -307,8 +364,10 @@ def test_a_chat_pinned_to_a_workflow_plans_on_it(client, monkeypatch):
 # ---------------------------------------------------------------- 17: an entry's fields through book_save
 
 def test_book_save_passes_an_entrys_fields_and_says_why_one_is_wrong(client, monkeypatch):
-    register(client)
+    me = register(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
+    client.app.state.db.run("INSERT INTO assets (id, user_id, name, tag, kind, filename, size, created, origin, project_id) "
+                            "VALUES (5, ?, 'Maya', 'character', 'image', 'maya.png', 1, 1, 'kit', ?)", (me["id"], project))
     calls = []
 
     def update(db, user_id, asset, changes):
@@ -317,7 +376,6 @@ def test_book_save_passes_an_entrys_fields_and_says_why_one_is_wrong(client, mon
             raise ValueError("relations must be a list of {to, relation}.")
         return {"id": asset}
     monkeypatch.setattr(kit, "update", update)
-    monkeypatch.setattr(kit, "root", lambda db, p: p)
     seen = hosted(monkeypatch, client,
                   {"tool": "book_save", "text": "Maya", "op": "character", "asset": 5,
                    "settings": json.dumps({"always": True, "variant": "rain", "look_of": 3, "relations": [{"to": 2, "relation": "mother", "blood": True}]})},

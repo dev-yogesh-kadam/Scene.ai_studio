@@ -9,7 +9,6 @@ import { store, subscribe, startLive, stopLive, refreshJobs } from './store.js';
 const home = () => import('./pages/home.js');
 const create = () => import('./pages/create.js');
 const canvas = () => import('./pages/canvas.js');
-const timeline = () => import('./pages/timeline.js');
 const projects = () => import('./pages/projects.js');
 const project = () => import('./pages/project.js');
 const library = () => import('./pages/library.js');
@@ -32,7 +31,6 @@ const PAGES = [
   { path: '/project', page: project, under: '/projects' },
   { path: '/analytics', label: 'Analytics', page: analytics, under: '/projects' },
   { path: '/canvas', page: canvas, under: '/projects' },
-  { path: '/timeline', page: timeline, under: '/projects' },
   { path: '/settings', label: 'Settings', icon: 'sliders', page: settings, menu: true },
 ];
 const LANDING = '/projects';
@@ -206,7 +204,7 @@ function showApp() {
     leavePage = null;
     close();
     trail = null;
-    tabTitle(target.label);   // the canvas and the timeline put the name of their project here once it is loaded
+    tabTitle(target.label);   // the canvas puts the name of its project here once it is loaded
     const ticket = ++routing;
     // An address that names a project or module by its id (/canvas/PRJ.../module/MOD...) is looked up first: the page
     // then opens on it, as on the one worked in last.

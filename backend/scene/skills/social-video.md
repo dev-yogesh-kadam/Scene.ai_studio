@@ -9,5 +9,6 @@ words: \b(reels?|shorts|tiktok|instagram|insta|youtube shorts|ugc|vlog|creator|i
 3. Three to five quick shots of 4 to 6 seconds beat a long one. Change the framing between shots (close, medium, wide)
    so the cut feels quick.
 4. A creator or presenter NeuralCore has is used in every shot they are in. Someone speaking to camera: medium
-   close-up, eye level, natural light, a phone-camera feel, the exact words in quotation marks after "Audio:".
+   close-up, eye level, natural light, a phone-camera feel, the exact words in quotation marks, tied to who says them
+   ("she says: ...").
 5. Words on screen (a caption, a title, a call to action) are a "motion" step or an "overlay", never words in a video prompt.

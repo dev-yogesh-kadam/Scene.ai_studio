@@ -1,12 +1,18 @@
 // The landing page: what a visitor who is not signed in sees at the site's address. The first screen is a camera
 // monitor on the set: the frame is a scene, with frame lines, a timecode that runs, the lens and light readouts, and a
-// slate where the plan of the shot types itself. Picking another scene cuts the whole set. Below it, plain sections in
-// the monitor's language: the take report, the agent, what is on the cart, the price, and the cut. Everything it shows
-// is something the studio does; the pictures are drawn as SVG (landing-scenes.js), so the page needs no media files.
+// slate where the plan of the shot types itself. Each scene is made as the studio makes one: the storyboard, Approve,
+// the takes rendering, then its three shots, each a camera move through the set (drawn in layers, landing-set.js, or
+// built in 3D where the browser can, landing-3d.js); the shot rows play a shot, the scene buttons cut the whole set,
+// and the set has its sound (landing-sound.js). Scrolling folds the monitor away and lays its shots out on a timeline.
+// Below that, plain sections in the monitor's language: the take report, the agent, what is on the cart, the price,
+// and the cut. Everything it shows is something the studio does; the pictures are drawn by the page itself
+// (landing-scenes.js), so it needs no media files.
 
 import { el } from '../dom.js';
 import { go } from '../nav.js';
 import * as scenes from './landing-scenes.js';
+import { drawnSet } from './landing-set.js';
+import { sound } from './landing-sound.js';
 
 // What can be made, with the models that make it. Kept in step with workflows/ (see docs/HANDOVER.md, Workflows).
 const KIT = [
@@ -24,7 +30,7 @@ const STEPS = [
   ['Say what you want', 'Type the shot, or tell the agent about the whole film. Add reference pictures if you have them.'],
   ['Approve the plan', 'Every step comes with its model and its price. Nothing runs until you press Approve.'],
   ['Every take is checked', 'Wrong face, broken hands, the wrong place: the take is flagged and can be retaken with a new approach.'],
-  ['Cut and export', 'Shots in order on the timeline, music under them, titles on top. One finished video.'],
+  ['Cut and export', 'The agent puts the shots in order, music under them, titles on top. One finished video.'],
 ];
 
 // What people make with it, each with a prompt to start from. The picture is one of the drawn scenes.
@@ -47,7 +53,7 @@ const AGENT = ['Plans whole films, ads and Reels', 'Prices every step first', 'L
 // After the take: the rest of the studio.
 const BENCH = [
   ['Canvas', 'One row per shot', 'Results land in the row of their shot; takes stack newest on top, so the board reads like a shot list.'],
-  ['Timeline', 'A finished cut', 'Trim, order, add music. Fades, music ducked under speech and even loudness, in one export.'],
+  ['Final cut', 'A finished film', 'Trim, order, add music. Fades, music ducked under speech and even loudness, in one export.'],
   ['Long runs', 'Films made step by step', 'A script becomes a film over many turns. It carries on by itself, and another tab or teammate can pick it up.'],
   ['Shape', 'Any screen', 'A video cropped to 9:16, 1:1, 4:5 or 16:9 around what matters, or widened with the new space filled in.'],
   ['Free', 'Edits on the house', 'Trims, joins, subtitles burned in, retimes to a voice track and proof sheets run on the studio, at no cost.'],
@@ -60,7 +66,7 @@ const FAQ = [
   ['Will my character look the same from shot to shot?', 'That is what NeuralCore is for. Keep a face, an outfit, a place or a voice once, and every later shot of it uses that picture.'],
   ['What does it cost?', 'Credits, for what you make: a set price per picture, a price per second for video and music. You see the price before you press Generate.'],
   ['What if a take comes out wrong?', 'A job that fails or is cancelled gives its credits back. The agent checks each take it planned and offers a retake when something is off.'],
-  ['Can my team work in the same project?', 'Yes. A project has members with roles, its own canvases, timeline and memory, so anyone on it can carry on the work.'],
+  ['Can my team work in the same project?', 'Yes. A project has members with roles, its own canvases and memory, so anyone on it can carry on the work.'],
 ];
 
 // The camera's readouts for each scene: lens and stop, sensitivity and shutter, colour temperature.
@@ -72,6 +78,7 @@ const TAKES = [['rooftop', 'Take 1', '6.0 s', 'Rejected · face', 'dull'], ['roo
   ['rooftop', 'Take 3', '6.0 s', 'Kept', 'kept'], ['neon', 'Take 4', '5.0 s', 'New seed', '']];
 
 const still = () => document.documentElement.dataset.motion === 'calm';   // the Motion setting (theme.js)
+const calmNow = () => still() || matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // A picture the studio draws: one of the landing scenes, filling its box. The markup is the page's own, never anyone's input.
 function picture(name, cls = '', sketch = false) {
@@ -86,81 +93,302 @@ export function frameTimecode(frames) {
   return `${two(Math.floor(frames / 86400) % 24)}:${two(Math.floor(frames / 1440) % 60)}:${two(Math.floor(frames / 24) % 60)}:${two(frames % 24)}`;
 }
 
+// How a scene is made on the monitor, as the studio makes it: the storyboard first while the plan types itself, then
+// Approve, then the takes render (the colour wipes across the sketch), then the three shots play, each a camera move.
+const BOARD = 2800, APPROVE = 500, RENDER = 1700, SWAP = 650;   // ms; the set changes under the sketch at SWAP
+// A real take of each scene from the render PC, to play over the drawn set while its shots run: scene name → its
+// address under /assets/landing/. None has been made yet; the drawn and 3D sets stand in.
+const CLIPS = {};
+const SET_KEY = 'scene.landingSet';   // '3d' or 'drawn', when the visitor picked one
+
+// Can this browser show the 3D sets? WebGL, the full motion setting and a screen wide enough for the monitor.
+function canThree() {
+  if (calmNow() || window.innerWidth < 900) return false;
+  try { return !!document.createElement('canvas').getContext('webgl2'); } catch (e) { return false; }
+}
+
 function monitor(join, signupOpen, start) {
-  const frames = [el('div', { class: 'la-frame' }), el('div', { class: 'la-frame out' })];
-  let shown = 0, current = -1, touched = false, typing = null;
+  const calm = calmNow();
+  const set = drawnSet();
+  const canvas = el('canvas', { class: 'la-3d', 'aria-hidden': 'true' });
+  const take = document.createElement('video');
+  Object.assign(take, { muted: true, loop: true, playsInline: true, className: 'la-real' });
+  const board = el('div', { class: 'la-board', 'aria-hidden': 'true' });
+  const wipe = el('i', { class: 'la-wipe', 'aria-hidden': 'true' });
+  const flash = el('i', { class: 'la-flash', 'aria-hidden': 'true' });
+  const frame = el('div', { class: 'la-set' }, set.node, canvas, take, board, wipe, flash);
+
   const tc = el('span', { class: 'la-rec' }, '01:00:00:00');
   const lens = el('span'), iso = el('span'), wb = el('span');
-  const sceneName = el('span');
-  const typed = el('div', { class: 'la-typed' });
+  const moveName = el('b'), moveBar = el('i');
+  const move = el('div', { class: 'la-move la-mono', 'aria-hidden': 'true' }, moveName, moveBar);
+  const sceneName = el('span'), state = el('span');
+  const typed = el('div', { class: 'la-typed', 'aria-hidden': 'true' });
   const rows = el('ol');
+  const note = el('span', { class: 'la-mono' }), approve = el('span', { class: 'la-btn solid small' });
   const buttons = scenes.names.map((name, i) => el('button', { type: 'button', 'aria-pressed': 'false',
     onclick: () => { touched = true; cut(i); } }, `${i + 1} · ${scenes.info(name).title}`));
+  const modeButtons = ['3d', 'drawn'].map((m) => el('button', { type: 'button', 'aria-pressed': 'false', onclick: () => pickMode(m, true) },
+    m === '3d' ? '3D' : 'Drawn'));
+  const modes = el('span', { class: 'la-modes hidden', role: 'group', 'aria-label': 'Set' }, el('span', { class: 'la-mono' }, 'Set'), modeButtons);
+  const bars = [0, 1, 2, 3, 4].map(() => el('i'));
+  const noise = sound();
+  const soundButton = el('button', { type: 'button', class: 'la-sound la-mono', 'aria-pressed': 'false', title: 'The sound of the set',
+    onclick: () => {
+      if (noise.on) noise.stop(); else noise.start(scenes.names[current]);
+      soundButton.setAttribute('aria-pressed', String(noise.on));
+      soundLabel.textContent = noise.on ? 'Sound on' : 'Sound off';
+    } }, el('span', { 'aria-hidden': 'true' }, bars));
+  const soundLabel = el('span', {}, 'Sound off');
+  soundButton.append(soundLabel);
+
+  const node = el('section', { class: 'la-monitor' },
+    frame, el('div', { class: 'la-grade' }), el('div', { class: 'la-grain' }),
+    el('div', { class: 'la-chrome' },
+      el('div', { class: 'la-hud', 'aria-hidden': 'true' }, ['tl', 'tr', 'bl', 'br'].map((c) => el('i', { class: 'la-corner la-' + c })),
+        el('div', { class: 'la-thirds' }), el('div', { class: 'la-cross' })),
+      el('header', { class: 'la-top' },
+        el('a', { class: 'la-brand', href: '/' }, el('img', { src: '/assets/img/logo.svg?v=clapper', alt: '' }), 'Scene.ai'),
+        el('div', { class: 'la-readout la-mono', 'aria-hidden': 'true' }, tc, lens, iso, wb),
+        el('nav', { class: 'la-doors' },
+          signupOpen && el('a', { class: 'la-btn quiet', href: '/signin' }, 'Sign in'),
+          join('solid'))),
+      move,
+      el('div', { class: 'la-lower' },
+        el('div', {},
+          el('h1', {}, 'Direct', el('br'), 'your ', el('b', {}, 'scene.')),
+          el('p', { class: 'la-sub' }, 'Write the shot. The studio makes the takes, keeps the same faces from shot to shot, and cuts them together, without a node graph in sight.'),
+          ask(start)),
+        el('div', { class: 'la-slate' },
+          el('header', { class: 'la-mono', 'aria-hidden': 'true' }, sceneName, state),
+          typed, rows,
+          el('footer', { 'aria-hidden': 'true' }, note, approve))),
+      el('div', { class: 'la-scenes', role: 'group', 'aria-label': 'Scene' }, el('span', { class: 'la-mono' }, 'Scene'), buttons, modes),
+      soundButton));
+
+  // Under the monitor: the same scene as its three shots on a timeline. On a wide screen scrolling folds the monitor
+  // into the corner and lays the shots out under it (the reel); elsewhere it is a plain section after the monitor.
+  const cutLabel = el('span');
+  const ruler = el('div', { class: 'la-ruler la-mono', 'aria-hidden': 'true' });
+  const clips = el('div', { class: 'la-clips' });
+  const head = el('i', { class: 'la-head', 'aria-hidden': 'true' });
+  const wave = el('div', { class: 'la-wave', 'aria-hidden': 'true' },
+    Array.from({ length: 140 }, (_, i) => el('i', { style: `height:${(18 + Math.abs(Math.sin(i * 0.37) * 52 + Math.sin(i * 1.7) * 18)).toFixed(0)}%` })));
+  const cutline = el('div', { class: 'la-cutline' },
+    el('div', { class: 'la-cut-copy' },
+      el('div', { class: 'la-mono la-cut-label' }, cutLabel),
+      el('h2', {}, 'One prompt.', el('br'), el('b', {}, 'Three shots, one cut.')),
+      el('p', {}, 'The scene above was planned as these three shots: each one a camera move on the same set, with the same runner, cut together with sound. Pick a shot to play it.')),
+    el('div', { class: 'la-track' }, ruler, el('div', { class: 'la-lanes' }, clips, wave, head)));
+  const pin = el('div', { class: 'la-reel-pin' }, node, cutline);
+  const reel = el('div', { class: 'la-reel' }, pin);
+
+  let current = -1, phase = 'shots', shot = 0, phaseAt = 0, swapped = true, touched = false, typing = null;
+  let mode = 'drawn', three = null;
+  const camera = () => scenes.info(scenes.names[current]).camera;
+  const shotSeconds = () => camera().reduce((n, c) => n + c.dur, 0) / 1000;
 
   function type(text) {
     clearInterval(typing);
-    if (still()) { typed.textContent = text; return; }
+    if (calm) { typed.textContent = text; return; }
     let n = 0;
     typing = setInterval(() => { typed.textContent = text.slice(0, ++n); if (n >= text.length) clearInterval(typing); }, 32);
   }
-  // Cut to a scene: the new frame fades in over the old, and the readouts, the slate and its plan change with it.
+
+  // The slate's shot rows and the timeline's clips: buttons that play that shot.
+  function drawShots(name) {
+    const info = scenes.info(name);
+    rows.replaceChildren(...info.shots.map((title, n) => el('li', {}, el('button', { type: 'button', class: 'la-shot', 'aria-label': `Play shot ${n + 1}: ${title}`,
+      onclick: () => { touched = true; play(n); } }, el('span', {}, `0${n + 1}`), el('span', {}, title), el('span', {}, '60 cr')))));
+    clips.replaceChildren(...info.shots.map((title, n) => {
+      const c = info.camera[n].to;
+      const pic = picture(name, 'la-clip-pic');
+      pic.style.transformOrigin = `${(c.fx / 16).toFixed(1)}% ${(c.fy / 9).toFixed(1)}%`;
+      pic.style.transform = `scale(${c.k.toFixed(2)})`;
+      return el('button', { type: 'button', class: 'la-clip', style: `flex-grow:${info.camera[n].dur}`, 'aria-label': `Play shot ${n + 1}: ${title}`,
+        onclick: () => { touched = true; play(n); } }, pic, el('span', { class: 'la-mono' }, `0${n + 1} · ${title}`),
+        el('em', { class: 'la-mono' }, `${(info.camera[n].dur / 1000).toFixed(1)} s`));
+    }));
+    const total = Math.round(shotSeconds());
+    ruler.replaceChildren(...Array.from({ length: Math.floor(total / 3) + 1 }, (_, i) => el('span', {}, `00:${String(i * 3).padStart(2, '0')}`)));
+    cutLabel.textContent = `The cut · Scene 0${current + 1} · ${info.title} · ${total} s`;
+  }
+
+  // What the slate's right column says for each shot: its price on the storyboard, how far its take has rendered,
+  // then its length once the takes are in.
+  function rowNotes(f) { [...rows.querySelectorAll('.la-shot')].forEach((b, n) => { b.lastChild.textContent = f(n); }); }
+
+  // Cut to a scene. With the storyboard (the usual way), the sketch comes up over the old set and the new set is
+  // built under it; without (calm motion), straight to its first shot.
   function cut(i) {
     if (i === current) return;
     current = i;
     const name = scenes.names[i], info = scenes.info(name);
-    const next = 1 - shown;
-    frames[next].innerHTML = scenes.svg(name);
-    frames[next].classList.remove('out');
-    frames[shown].classList.add('out');
-    shown = next;
-    [lens.textContent, iso.textContent, wb.textContent] = READOUT[name];
+    [, iso.textContent, wb.textContent] = READOUT[name];
     sceneName.textContent = `Scene 0${i + 1} · ${info.title}`;
-    rows.replaceChildren(...info.shots.map((shot, n) => el('li', {}, el('span', {}, `0${n + 1}`), el('span', {}, shot), el('span', {}, '60 cr'))));
     buttons.forEach((b, n) => b.setAttribute('aria-pressed', String(n === i)));
     type(`${info.shots[0]}. The same runner in every shot.`);
+    drawShots(name);
+    noise.scene(name);
+    frame.classList.remove('taking'); take.pause();
+    if (calm) { set.show(name); if (three) three.show(name); play(0); return; }
+    board.innerHTML = scenes.svg(name, { sketch: true });
+    board.style.clipPath = '';
+    board.classList.add('on');
+    frame.classList.remove('wiping');
+    phase = 'board'; phaseAt = performance.now(); swapped = false;
+    state.textContent = 'Storyboard';
+    note.textContent = 'Nothing is made until you approve';
+    approve.textContent = 'Approve · 180';
+    approve.classList.remove('pressed');
+    lens.textContent = info.camera[0].lens;
+    move.classList.remove('on');
+    rowNotes(() => '60 cr');
+    rows.querySelectorAll('li').forEach((li) => li.classList.remove('on'));
   }
 
-  const node = el('section', { class: 'la-monitor' },
-    frames[0], frames[1],
-    el('div', { class: 'la-grade' }), el('div', { class: 'la-grain' }),
-    el('div', { class: 'la-hud', 'aria-hidden': 'true' }, ['tl', 'tr', 'bl', 'br'].map((c) => el('i', { class: 'la-corner la-' + c })),
-      el('div', { class: 'la-thirds' }), el('div', { class: 'la-cross' })),
-    el('header', { class: 'la-top' },
-      el('a', { class: 'la-brand', href: '/' }, el('img', { src: '/assets/img/logo.svg?v=clapper', alt: '' }), 'Scene.ai'),
-      el('div', { class: 'la-readout la-mono', 'aria-hidden': 'true' }, tc, lens, iso, wb),
-      el('nav', { class: 'la-doors' },
-        signupOpen && el('a', { class: 'la-btn quiet', href: '/signin' }, 'Sign in'),
-        join('solid'))),
-    el('div', { class: 'la-lower' },
-      el('div', {},
-        el('h1', {}, 'Direct', el('br'), 'your ', el('b', {}, 'scene.')),
-        el('p', { class: 'la-sub' }, 'Write the shot. The studio makes the takes, keeps the same faces from shot to shot, and cuts them together, without a node graph in sight.'),
-        ask(start)),
-      el('div', { class: 'la-slate', 'aria-hidden': 'true' },
-        el('header', { class: 'la-mono' }, sceneName, el('span', {}, 'Plan')),
-        typed, rows,
-        el('footer', {}, el('span', { class: 'la-mono' }, 'Nothing is made until you approve'), el('span', { class: 'la-btn solid small' }, 'Approve · 180')))),
-    el('div', { class: 'la-scenes', role: 'group', 'aria-label': 'Scene' }, el('span', { class: 'la-mono' }, 'Scene'), buttons),
-    el('div', { class: 'la-meters', 'aria-hidden': 'true' }, el('i'), el('i'), el('i')));
+  function swap() {
+    if (swapped) return;
+    swapped = true;
+    const name = scenes.names[current];
+    set.show(name);
+    if (three) three.show(name);
+  }
 
-  cut(0);
-  // The timecode runs at 24 frames a second, as the camera's would; the set cuts to the next scene now and then until
-  // the visitor picks one. Both stop once the page is left.
+  // Play shot n of the scene: a cut (a blink of black), then the camera's move over the shot's length.
+  function play(n) {
+    swap();
+    board.classList.remove('on'); frame.classList.remove('wiping');
+    phase = 'shots'; shot = n; phaseAt = performance.now();
+    const c = camera()[n];
+    set.shot(c, calm ? 0 : c.dur);
+    if (three) three.shot(n, c.dur, phaseAt);
+    lens.textContent = c.lens;
+    moveName.textContent = `Shot 0${n + 1} · ${c.move}`;
+    move.classList.toggle('on', !calm);
+    state.textContent = `Take · shot 0${n + 1}`;
+    note.textContent = `Cut together · ${Math.round(shotSeconds())} s`;
+    approve.textContent = 'Approved';
+    approve.classList.add('pressed');
+    rowNotes((k) => `${(camera()[k].dur / 1000).toFixed(1)} s`);
+    rows.querySelectorAll('li').forEach((li, k) => li.classList.toggle('on', k === n));
+    clips.querySelectorAll('.la-clip').forEach((b, k) => b.classList.toggle('on', k === n));
+    const clip = CLIPS[scenes.names[current]];
+    if (clip && !calm) {
+      if (!take.src.endsWith(clip)) take.src = clip;
+      take.play().then(() => frame.classList.add('taking'), () => frame.classList.remove('taking'));
+    }
+    if (!calm) { flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
+  }
+
+  // The 3D sets, loaded once the page has shown, where the browser can run them; the visitor can switch back.
+  function pickMode(m, chosen) {
+    if (m === '3d' && !three) return;
+    mode = m;
+    frame.classList.toggle('three', m === '3d');
+    modeButtons.forEach((b, i) => b.setAttribute('aria-pressed', String((i === 0) === (m === '3d'))));
+    if (chosen) { try { localStorage.setItem(SET_KEY, m); } catch (e) { /* storage off: the choice lasts this visit */ } }
+  }
+  if (canThree()) {
+    setTimeout(() => import('./landing-3d.js').then((mod) => {
+      if (!node.isConnected) return;
+      three = mod.create(canvas);
+      three.size(frame.clientWidth, frame.clientHeight);
+      if (current >= 0) {
+        three.show(scenes.names[current]);
+        if (phase === 'shots') three.shot(shot, camera()[shot].dur, phaseAt);
+      }
+      modes.classList.remove('hidden');
+      let saved = '';
+      try { saved = localStorage.getItem(SET_KEY) || ''; } catch (e) { /* storage off */ }
+      pickMode(saved === 'drawn' ? 'drawn' : '3d');
+    }, () => { /* no 3D here: the drawn set stays */ }), 900);
+  }
+
+  // The monitor's clock: the timecode at 24 frames a second, the steps of a scene, the shot's progress, the level
+  // bars and the 3D frame. It stops, and lets go of the 3D set and the sound, once the page is left.
   const started = performance.now();
-  const tick = () => {
-    if (!node.isConnected && node.dataset.placed) return;
-    if (node.isConnected) node.dataset.placed = '1';
-    tc.textContent = frameTimecode(Math.floor((performance.now() - started) / (1000 / 24)) + 24 * 3600);
+  const tick = (now) => {
+    if (!reel.isConnected && reel.dataset.placed) {
+      if (three) three.dispose();
+      noise.close();
+      window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize);
+      sized.disconnect();
+      return;
+    }
+    if (reel.isConnected) reel.dataset.placed = '1';
+    tc.textContent = frameTimecode(Math.floor((now - started) / (1000 / 24)) + 24 * 3600);
+    const t = now - phaseAt;
+    if (phase === 'board') {
+      if (t > SWAP) swap();
+      if (t > BOARD) { phase = 'approve'; phaseAt = now; approve.classList.add('pressed'); state.textContent = 'Approved'; }
+    } else if (phase === 'approve') {
+      if (t > APPROVE) { phase = 'render'; phaseAt = now; state.textContent = 'Rendering'; note.textContent = 'Approved · making the takes'; frame.classList.add('wiping'); }
+    } else if (phase === 'render') {
+      const q = Math.min(1, t / RENDER);
+      const at = -12 + q * 124;   // the sketch's left edge, in % of the frame, slanted 12% across its height
+      board.style.clipPath = `polygon(${at}% 0, 100% 0, 100% 100%, ${at - 12}% 100%)`;
+      wipe.style.left = `${at - 6}%`;
+      rowNotes((n) => { const done = Math.min(1, Math.max(0, q * 1.6 - n * 0.3)); return done >= 1 ? '✓' : `${Math.round(done * 100)}%`; });
+      if (q >= 1) play(0);
+    } else if (!calm) {
+      const c = camera()[shot], p = Math.min(1, t / c.dur);
+      moveBar.style.setProperty('--p', p.toFixed(3));
+      const before = camera().slice(0, shot).reduce((n, k) => n + k.dur, 0);
+      head.style.left = `${(((before + p * c.dur) / 1000 / shotSeconds()) * 100).toFixed(2)}%`;
+      if (p >= 1) {
+        if (shot < 2) play(shot + 1);
+        else if (touched) play(0);
+        else cut((current + 1) % scenes.names.length);
+      }
+    }
+    if (noise.on) noise.levels(5).forEach((v, i) => { bars[i].style.transform = `scaleY(${(0.15 + v * 0.85).toFixed(2)})`; });
+    if (three && mode === '3d' && !node.classList.contains('off') && !document.hidden) three.frame(now);
     requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
-  if (!still()) {
-    const timer = setInterval(() => {
-      if (node.dataset.placed && !node.isConnected) clearInterval(timer);
-      else if (!touched) cut((current + 1) % scenes.names.length);
-    }, 8000);
+
+  // The reel: how far the page has scrolled through it folds the monitor into the corner (0 full, 1 folded).
+  const live = () => !calm && window.innerWidth >= 900 && window.innerHeight >= 620;
+  function onScroll() {
+    if (!reel.classList.contains('live')) return;
+    const span = reel.offsetHeight - window.innerHeight;
+    const p = Math.min(1, Math.max(0, -reel.getBoundingClientRect().top / span));
+    const e = p * p * (3 - 2 * p);
+    const w = window.innerWidth, h = window.innerHeight;
+    const to = Math.min(w * 0.46, 880) / w;   // the folded monitor's width, as a share of the screen
+    const s = 1 + (to - 1) * e;
+    node.style.transform = `translate(${((w - 92 - w * to) * e).toFixed(1)}px, ${(h * 0.11 * e).toFixed(1)}px) scale(${s.toFixed(4)})`;
+    node.style.borderRadius = `${((14 * e) / s).toFixed(1)}px`;
+    pin.style.setProperty('--reel', e.toFixed(3));
+    pin.classList.toggle('folded', e > 0.4);   // the faded monitor's buttons stop taking clicks; the timeline's start
+    const bar = reel.parentNode && reel.parentNode.querySelector('.la-bar-top');
+    if (bar && e > 0) bar.classList.toggle('on', e > 0.55);
   }
-  return node;
+  function onResize() {
+    reel.classList.toggle('live', live());
+    if (!reel.classList.contains('live')) { node.style.transform = node.style.borderRadius = ''; pin.style.removeProperty('--reel'); }
+    onScroll();
+  }
+  const sized = new ResizeObserver(() => {
+    set.resize();
+    if (three) three.size(frame.clientWidth, frame.clientHeight);
+  });
+  sized.observe(frame);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onResize);
+  onResize();
+
+  // The 3D camera leans with the mouse too (the drawn planes read --px and --py, set in smooth()).
+  node.addEventListener('pointermove', (e) => {
+    if (!three || e.pointerType !== 'mouse') return;
+    const box = node.getBoundingClientRect();
+    three.pointer(((e.clientX - box.left) / box.width) * 2 - 1, ((e.clientY - box.top) / box.height) * 2 - 1);
+  });
+  node.addEventListener('pointerleave', () => { if (three) three.pointer(0, 0); });
+
+  cut(0);
+  requestAnimationFrame(tick);
+  return reel;
 }
 
 // A row of a section's label: its number and name on the left, a note on the right.
@@ -223,10 +451,15 @@ export function smooth(page) {
     });
     monitorNode.addEventListener('pointerleave', () => { monitorNode.style.setProperty('--px', 0); monitorNode.style.setProperty('--py', 0); });
   }
+  // The cue scrolls on to what comes next: through the reel to the shots laid out (the landing), or to the first section.
   const next = page.querySelector('.la-manifesto');
   if (monitorNode && next) {
-    monitorNode.append(el('button', { type: 'button', class: 'la-cue la-mono', onclick: () => next.scrollIntoView({ behavior: calm ? 'auto' : 'smooth' }) },
-      'Scroll', el('i')));
+    const onward = () => {
+      const reel = page.querySelector('.la-reel.live');
+      if (reel) window.scrollTo({ top: reel.offsetTop + reel.offsetHeight - window.innerHeight, behavior: calm ? 'auto' : 'smooth' });
+      else next.scrollIntoView({ behavior: calm ? 'auto' : 'smooth' });
+    };
+    (monitorNode.querySelector('.la-chrome') || monitorNode).append(el('button', { type: 'button', class: 'la-cue la-mono', onclick: onward }, 'Scroll', el('i')));
   }
   if (monitorNode) {
     new IntersectionObserver(([e]) => {

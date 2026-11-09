@@ -193,9 +193,9 @@ def test_a_run_keeps_its_files_for_the_messages_after(client, monkeypatch, tmp_p
     assert runs.kept_attached(client.app.state.db, 1, "pm-1") == [sound["id"], script["id"]]
 
 
-def test_a_run_keeps_a_skill_picked_by_its_words_and_its_files(client, monkeypatch, tmp_path):
-    # The skill was not named: the message's words picked it. "continue" with nothing attached still has the sound, so
-    # the workflows that work on one (transcribe) stay offered.
+def test_a_run_keeps_the_skill_the_user_picked_and_its_files(client, monkeypatch, tmp_path):
+    # "continue" with nothing attached still has the skill and the sound, so the workflows that work on one
+    # (transcribe) stay offered.
     register(client)
     from scene import runs, skills
     (tmp_path / "pocket-motion-seedance-v2.md").write_text(
@@ -213,7 +213,11 @@ def test_a_run_keeps_a_skill_picked_by_its_words_and_its_files(client, monkeypat
     agent_ = client.app.state.agent
     monkeypatch.setattr(agent_, "chat", answer)
     monkeypatch.setattr(agent_, "_service_of", lambda name: ({"name": "Test"}, name))
-    client.post("/api/agent/plan", json={"instruction": "@1 make the first minute of this episode", "selection": [sound["id"]], "run": "pm-9"})
+    # the skill's words alone ("episode") pick nothing
+    client.post("/api/agent/plan", json={"instruction": "@1 the first minute of this episode", "selection": [sound["id"]], "run": "pm-8"})
+    assert runs.kept_skill(client.app.state.db, 1, "pm-8") is None
+    client.post("/api/agent/plan", json={"instruction": "@1 /pocket-motion-seedance-v2 make the first minute of this episode",
+                                         "selection": [sound["id"]], "run": "pm-9"})
     assert runs.kept_skill(client.app.state.db, 1, "pm-9") == "pocket-motion-seedance-v2"
     assert runs.kept_attached(client.app.state.db, 1, "pm-9") == [sound["id"]]
     plan = client.post("/api/agent/plan", json={"instruction": "continue", "selection": [], "run": "pm-9"}).json()

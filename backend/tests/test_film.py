@@ -131,6 +131,12 @@ def test_burned_subtitles_and_the_join_on_the_master(tmp_path):
     tones(tmp_path / "long.wav", [(3, True)])
     with pytest.raises(media.MediaError):   # pictures and master that do not match are refused
         run(film.join_on_master(trims, tmp_path / "long.wav", tmp_path / "bad.mp4"))
+    assert not (tmp_path / "bad.mp4").exists()   # refused before anything is joined
+
+
+def test_an_ffmpeg_that_never_ends_is_stopped():
+    with pytest.raises(media.MediaError, match="stopped responding"):
+        run(media._ffmpeg("-loglevel", "error", "-re", "-f", "lavfi", "-i", "color=size=16x16:rate=1", "-f", "null", "-", limit=0.5))
 
 
 def test_speech_spans_drop_the_narration_around_a_line(tmp_path):

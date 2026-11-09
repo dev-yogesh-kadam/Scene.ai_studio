@@ -59,7 +59,7 @@ export function render(view) {
     if (!projects.length) {
       return body.replaceChildren(el('div', { class: 'empty first' },
         el('h2', {}, 'Create your first project'),
-        el('p', {}, 'A project keeps the shots, the canvas and the timeline of one piece of work together.'),
+        el('p', {}, 'A project keeps the shots and the canvas of one piece of work together.'),
         el('button', { class: 'btn primary', onclick: create }, 'Create your first project')));
     }
     const shown = projects.filter((p) => p.name.toLowerCase().includes(query));

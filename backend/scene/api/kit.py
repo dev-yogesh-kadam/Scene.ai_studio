@@ -5,6 +5,7 @@ POST   /api/kit                   add: a file (multipart "file", "name", "type",
                                   (JSON {"item", "name", "type", "project_id", "always"}) or a script (JSON {"text", "name"})
 PUT    /api/kit/{id}              change: name, type, about, use_note, always
 POST   /api/kit/order             {"project_id", "ids"}: the entries in this order
+POST   /api/kit/sheet             an asset sheet (a CSV: type, name, link, notes a row) brought in, each picture fetched
 DELETE /api/kit/{id}
 GET    /api/kit/{id}/file         the entry's file
 
@@ -76,9 +77,8 @@ async def get_kit(request: Request, project: int = 0, user: dict = Depends(curre
     project, keeper, reading = _keeper(request, user, project, "viewer")
     with reading():
         describe_soon(request, keeper, project)
-        entries = [memory.kit_row(e) for e in kit.entries(state.db, keeper["id"], project, hidden=True)]
-    module = bool(project) and kit.root(state.db, project) != project   # a module: it may change entries for itself
-    return {"entries": entries, "project": bool(project), "module": module,
+        entries = [memory.kit_row(e) for e in kit.entries(state.db, keeper["id"], project)]
+    return {"entries": entries, "project": bool(project),
             "types": [{"id": tag, "label": said} for tag, said in kit.TYPES.items()]}
 
 
@@ -138,6 +138,36 @@ async def add_entry(request: Request, user: dict = Depends(current_user)):
         return memory.kit_row(kit.entry(state.db, keeper["id"], asset))
 
 
+@router.post("/sheet", dependencies=[limited("kit-sheet", 10, 600), uploading])
+async def import_sheet(request: Request, user: dict = Depends(current_user)):
+    """An asset sheet (a CSV or TSV: one row an entry, with its type, name, a link to its picture and notes) brought into
+    a project's NeuralCore, each row's picture fetched from its link (sheet.py). Multipart "file" and "project_id", or
+    JSON {"text", "project_id"}. Returns what was added, what was there already, the looks linked and the rows that
+    failed, with why."""
+    from .. import sheet
+    if request.headers.get("content-type", "").startswith("application/json"):
+        body = await request.json()
+        given, text = body.get("project_id"), str(body.get("text") or "")
+    else:
+        form = await request.form(max_files=1, max_fields=4)
+        upload = form.get("file")
+        if not hasattr(upload, "filename"):
+            raise HTTPException(400, "Choose the sheet: a .csv or .tsv file.")
+        data, _ = await read_text_upload(upload)
+        given, text = form.get("project_id"), data.decode("utf-8-sig")
+    project, keeper, reading = _keeper(request, user, given, "creator")
+    if not project:
+        raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
+    try:
+        rows, left = sheet.parse(text)
+    except sheet.SheetError as error:
+        raise HTTPException(400, str(error))
+    with reading():
+        done = await sheet.bring_in(request.app.state.db, _folder(request, keeper), keeper["id"], project, rows)
+        describe_soon(request, keeper, project)
+    return dict(done, left_out=left)
+
+
 @router.get("/{asset_id}/file")
 async def entry_file(asset_id: int, request: Request, user: dict = Depends(current_user)):
     keeper, reading = _keeper_of_entry(request, user, asset_id, "viewer")
@@ -157,21 +187,6 @@ async def change_entry(asset_id: int, body: dict, request: Request, user: dict =
             found = kit.update(request.app.state.db, keeper["id"], asset_id, body)
         except ValueError as error:   # a look, a palette or a relative that does not fit (kit._links)
             raise HTTPException(400, str(error))
-    if found is None:
-        raise HTTPException(404, "No such NeuralCore entry.")
-    return memory.kit_row(found)
-
-
-@router.put("/{asset_id}/here")
-async def change_entry_here(asset_id: int, body: dict, request: Request, user: dict = Depends(current_user)):
-    """Change an entry of the project's NeuralCore for one module only. Body: {"project_id": the module, "removed"?,
-    "always"?, "use_note"?, "preferred_item"?}; a null goes back to the project's."""
-    project, keeper, reading = _keeper(request, user, body.get("project_id"), "creator")
-    if not project or kit.root(request.app.state.db, project) == project:
-        raise HTTPException(400, "Only a module changes an entry for itself; in the project, change the entry.")
-    changes = {k: body[k] for k in ("removed", "always", "use_note", "preferred_item") if k in body}
-    with reading():
-        found = kit.override(request.app.state.db, keeper["id"], project, asset_id, changes)
     if found is None:
         raise HTTPException(404, "No such NeuralCore entry.")
     return memory.kit_row(found)

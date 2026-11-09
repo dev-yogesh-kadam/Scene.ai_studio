@@ -57,9 +57,18 @@ def words(camera, kind="video"):
     return [FIELDS[f][camera[f]][0] for f in (FIELDS if kind == "video" else STILL_FIELDS) if camera.get(f)]
 
 
+# A prompt laid out in labelled parts (the studio's structure, or a model's guide, prompters/) says the camera and the
+# end in its own parts: the words go there, or nowhere when its timed beats already carry the camera.
+CAMERA_LINE = re.compile(r"(?im)^(CAMERA:[^\n]*)$")
+BEATS = re.compile(r"(?m)^SHOTS\s*$")
+END_PART = re.compile(r"(?m)^END STATE:?\s*$")
+
+
 def apply(prompt, camera, kind="video"):
-    """The prompt with the camera said in it. A phrase the prompt already has (in any of its spellings) is not added again,
-    and the end state is added as the last sentence unless the prompt already ends on it."""
+    """The prompt with the camera said in it. A phrase the prompt already has (in any of its spellings) is not added again.
+    In a prompt with a CAMERA: line the missing words go on that line; one with timed SHOTS beats (H3's guide) says its
+    camera beat by beat and gets none. The end state is added as the last sentence unless the prompt already has it or
+    an END STATE part."""
     prompt = (prompt or "").strip()
     if not prompt:
         return prompt
@@ -69,9 +78,12 @@ def apply(prompt, camera, kind="video"):
         if value and not re.search(FIELDS[field][value][1], prompt, re.IGNORECASE):
             missing.append(FIELDS[field][value][0])
     out = prompt
-    if missing:
+    line = CAMERA_LINE.search(out)
+    if missing and line:
+        out = out[:line.end()].rstrip(" .") + "; " + ", ".join(missing) + "." + out[line.end():]
+    elif missing and not BEATS.search(out):
         out = out.rstrip(" .") + ". Camera: " + ", ".join(missing) + "."
     end = camera.get("end_state")
-    if end and kind == "video" and end.lower().rstrip(". ") not in prompt.lower():
-        out += " It ends with " + end.rstrip(". ") + "."
+    if end and kind == "video" and end.lower().rstrip(". ") not in prompt.lower() and not END_PART.search(prompt):
+        out += "\nAt the end: " + end.rstrip(". ") + "." if "\n" in out else " At the end: " + end.rstrip(". ") + "."
     return out

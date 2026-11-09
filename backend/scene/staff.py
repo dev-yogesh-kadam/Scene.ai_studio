@@ -19,7 +19,9 @@ AREAS = {
     "users": "Users", "credits": "Credits", "library": "Library", "projects": "Projects", "assets": "Project files",
     "moderation": "Moderation", "pricing": "Pricing", "economics": "Economics", "export": "CSV exports",
     "workflows": "Workflows", "agent": "Agent", "skills": "Skills",
-    "audit": "Audit log", "backups": "Backups", "storage": "Storage", "announcement": "Announcement",
+    "audit": "Audit log", "backups": "Backups", "storage": "Storage", "announcement": "Announcement", "showcase": "Home page",
+    # Not a section of the console: reading it shows the agent's workings in the chat as they are (internals.py)
+    "internals": "Agent internals",
 }
 ADMIN_ONLY = {"roles", "settings", "maintenance", "endpoints", "sessions"}   # never given to another role
 
@@ -35,6 +37,9 @@ BUILT_IN = {
                 "read": BASE | {"users", "jobs", "credits", "pricing", "economics", "export"},
                 "write": {"users", "credits", "pricing"},
                 "fields": {"add_credits", "note", "daily_cap"}},
+    "insider": {"label": "Insider", "about": "Sees how the agent works in the chat as an admin does: the skills it reads, "
+                "NeuralCore, its Claude session and the tokens it uses. Nothing more in the console.",
+                "read": {"internals"}, "write": set(), "fields": set()},
     "moderator": {"label": "Moderator", "about": "What is made: reviews the library and the moderation queue, removes items, disables accounts.",
                   "read": BASE | {"users", "jobs", "library", "moderation"},
                   "write": {"users", "library", "moderation"},
@@ -46,7 +51,7 @@ FIELDS_FOR = {"users": {"note", "disabled", "sign-out"}, "credits": {"add_credit
 # The console's sections and the area each one reads.
 SECTIONS = {"overview": "overview", "jobs": "jobs", "system": "system", "sessions": "sessions", "users": "users", "credits": "credits",
             "library": "library", "projects": "projects", "moderation": "moderation", "pricing": "pricing",
-            "economics": "economics", "workflows": "workflows", "agent": "agent", "skills": "skills",
+            "economics": "economics", "workflows": "workflows", "agent": "agent", "skills": "skills", "showcase": "showcase",
             "audit": "audit", "roles": "roles", "endpoints": "endpoints", "settings": "settings"}
 
 _roles = {}   # role id -> {"label", "about", "read", "write", "fields", "built_in"}, without "admin"
@@ -152,6 +157,11 @@ def may(role, path, method):
     if area == "users" and path.rstrip("/").endswith("/sign-out"):
         return "sign-out" in found["fields"]
     return area in found["write"]
+
+
+def sees(role, area):
+    """Whether `role` may read `area`: an admin reads every one, a role the areas it was given, anyone else none."""
+    return role == "admin" or area in _roles.get(role, {}).get("read", ())
 
 
 def sections(role):

@@ -14,19 +14,66 @@ export const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.flo
 
 const ITEM_URL = { item: (id) => `/api/library/${id}/file`, asset: (id) => `/api/kit/${id}/file` };
 
-// An item or a saved asset named in a message: its picture and its name. onPick(table, id) when it is clicked.
+// An item or a saved asset named in a message: its picture and its name. onPick(table, id) when it is clicked; while
+// the pointer rests on it, a bigger look at it pops up over the chip.
 export function chip(table, id, known, onPick) {
-  return el('button', { type: 'button', class: 'md-chip', title: known.name, onclick: () => onPick(table, id) },
+  const node = el('button', { type: 'button', class: 'md-chip', title: known.name, onclick: () => { hideChipPreview(); onPick(table, id); } },
     el('span', { class: 'md-chip-thumb' }, still(ITEM_URL[table](id), known.kind, known.name)), el('span', { class: 'md-chip-name' }, known.name));
+  if (known.kind === 'image' || known.kind === 'video') {
+    node.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') chipPreview(node, table, id, known); });
+    node.addEventListener('pointerleave', hideChipPreview);
+  }
+  return node;
+}
+
+// The bigger look of a chip: the picture, or a video playing without sound on its poster. It waits a moment, so
+// passing over a chip does not open it, sits above the chip (under it when there is no room), and goes when the
+// pointer leaves, the page scrolls, or the chip is gone (the agent's log is drawn again while jobs move).
+let chipShown = null;
+export function hideChipPreview() {
+  if (!chipShown) return;
+  clearTimeout(chipShown.timer);
+  chipShown.node.remove();
+  window.removeEventListener('pointermove', chipShown.check);
+  window.removeEventListener('scroll', hideChipPreview, true);
+  chipShown = null;
+}
+function chipPreview(anchor, table, id, known) {
+  hideChipPreview();
+  const url = ITEM_URL[table](id);
+  const poster = table === 'item' ? `/api/library/${id}/poster` : null;
+  const media = known.kind === 'video'
+    ? el('video', { src: url, poster, muted: true, autoplay: true, loop: true, playsinline: true, preload: 'auto' })
+    : el('img', { src: url, alt: known.name, decoding: 'async' });
+  if (media.tagName === 'VIDEO') media.muted = true;   // the attribute alone does not let it start on its own everywhere
+  const node = el('div', { class: 'chip-preview', role: 'tooltip' }, media);
+  const place = () => {
+    const r = anchor.getBoundingClientRect();
+    const w = node.offsetWidth, h = node.offsetHeight;
+    node.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+    node.style.top = (r.top - h - 8 >= 8 ? r.top - h - 8 : Math.min(window.innerHeight - h - 8, r.bottom + 8)) + 'px';
+  };
+  const check = () => { if (!anchor.isConnected || !anchor.matches(':hover')) hideChipPreview(); };
+  const timer = setTimeout(() => {
+    if (!anchor.isConnected) return hideChipPreview();
+    document.body.append(node);
+    place();
+    media.addEventListener(media.tagName === 'VIDEO' ? 'loadedmetadata' : 'load', place, { once: true });
+  }, 180);
+  window.addEventListener('pointermove', check);
+  window.addEventListener('scroll', hideChipPreview, true);
+  chipShown = { node, check, timer };
 }
 
 // A file the reply hands over ([[show:item:12]] on a line of its own): the video, picture or sound itself to play there,
 // its name, and Download, Copy link (the studio's own link, /api/m/<id>: it opens only for someone signed in who may
 // see it) and Open (where it is in the studio).
+// A video loads nothing until it is kept on the page (the agent's log sets preload once it is): the log is drawn again
+// often, and each copy that is thrown away would start a download.
 export function mediaCard(table, id, known, onPick) {
   const url = ITEM_URL[table](id);
   const view = known.kind === 'video'
-    ? el('video', { src: url, controls: true, preload: 'metadata', playsinline: true, poster: table === 'item' ? `/api/library/${id}/poster` : null })
+    ? el('video', { src: url, controls: true, preload: 'none', playsinline: true, poster: table === 'item' ? `/api/library/${id}/poster` : null })
     : known.kind === 'image' ? el('img', { src: url, alt: known.name, loading: 'lazy' })
       : known.kind === 'audio' ? soundPlayer(url, known.name) : null;
   const copy = el('button', { type: 'button', class: 'md-media-act', title: 'Copy link' }, icon('copy'), 'Copy link');
@@ -70,8 +117,10 @@ function inline(text, chips, onPick) {
 }
 
 const LIST = /^\s*([-*•]|\d+[.)])\s+/;
-const FENCE = /```csv[ \t]*\n([\s\S]*?)\n```/g;
+// A fenced block: ```csv is a table, any other (a story a skill posts whole, a script) a block of text to copy.
+const FENCE = /```([\w-]*)[ \t]*\n([\s\S]*?)\n```/g;
 const LIBRARY_LINK = /^\/api\/(library|assets)\/(\d+)\/file$/;
+const TOKEN = /\[\[(?:show:)?(item|asset):(\d+)\]\]/g;
 
 // One row of CSV: commas split cells, a cell in double quotes may hold commas ("" is a quote mark).
 function csvRow(line) {
@@ -90,10 +139,11 @@ function csvRow(line) {
 }
 
 // A cell of a table: a link to one of the user's library items (or kit entries) shows its picture — a video its
-// poster, found when the file itself is not a picture; anything else is text. Only the studio's own links are shown.
-function tableCell(text) {
+// poster, found when the file itself is not a picture; [[item:12]] or [[asset:3]] is the item's small picture and name;
+// anything else is text. Only the studio's own links are shown.
+function tableCell(text, chips, onPick) {
   const found = LIBRARY_LINK.exec(text);
-  if (!found) return el('td', {}, text);
+  if (!found) return el('td', {}, text.includes('[[') ? inline(text, chips, onPick) : text);
   const img = el('img', { src: text, alt: '', loading: 'lazy' });
   img.addEventListener('error', () => {
     if (found[1] === 'library' && !img.dataset.poster) { img.dataset.poster = '1'; img.src = `/api/library/${found[2]}/poster`; }
@@ -102,23 +152,39 @@ function tableCell(text) {
   return el('td', { class: 'md-cell-media' }, el('a', { href: text, target: '_blank', rel: 'noopener', title: text }, img));
 }
 
+const done = (button, text) => { const was = button.title; button.title = text; button.classList.add('done'); setTimeout(() => { button.title = was; button.classList.remove('done'); }, 1500); };
+
+// The table as text for a spreadsheet: each [[item:12]] or [[asset:3]] becomes the whole link to its file, the
+// studio's own (/api/m/<id>) when the reply gave one.
+function linked(csv, chips) {
+  return csv.replace(TOKEN, (_, kind, id) => new URL((chips[`${kind}:${id}`] || {}).link || ITEM_URL[kind](id), location.origin).href);
+}
+
 // A table in a box of its own that scrolls inside the reply, its header staying in view, with Copy (the CSV, for a
 // spreadsheet) and Download (a .csv file) at its top right.
-function table(csv) {
+function table(csv, chips = {}, onPick = () => {}) {
   const [head, ...rows] = csv.split('\n').filter((line) => line.trim()).map(csvRow);
-  const done = (button, text) => { const was = button.title; button.title = text; button.classList.add('done'); setTimeout(() => { button.title = was; button.classList.remove('done'); }, 1500); };
+  const text = () => linked(csv.trim(), chips);
   const tools = el('div', { class: 'md-table-tools' },
     el('button', { type: 'button', class: 'icon-btn small', title: 'Copy the table', 'aria-label': 'Copy the table',
-      onclick: (e) => { const b = e.currentTarget; navigator.clipboard.writeText(csv.trim()).then(() => done(b, 'Copied')).catch(() => {}); } }, icon('copy')),
+      onclick: (e) => { const b = e.currentTarget; navigator.clipboard.writeText(text()).then(() => done(b, 'Copied')).catch(() => {}); } }, icon('copy')),
     el('button', { type: 'button', class: 'icon-btn small', title: 'Download as CSV', 'aria-label': 'Download the table as CSV',
       onclick: () => {
-        const url = URL.createObjectURL(new Blob([csv.trim() + '\n'], { type: 'text/csv' }));
+        const url = URL.createObjectURL(new Blob([text() + '\n'], { type: 'text/csv' }));
         el('a', { href: url, download: 'table.csv' }).click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       } }, icon('download')));
   return el('div', { class: 'md-table-box' }, tools, el('div', { class: 'md-table' }, el('table', {},
     el('thead', {}, el('tr', {}, (head || []).map((h) => el('th', {}, h)))),
-    el('tbody', {}, rows.map((cells) => el('tr', {}, cells.map(tableCell)))))));
+    el('tbody', {}, rows.map((cells) => el('tr', {}, cells.map((cell) => tableCell(cell, chips, onPick))))))));
+}
+
+// A block of text the reply hands over whole (a story, a script), kept as written, with Copy at its top right.
+function textBlock(words) {
+  const tools = el('div', { class: 'md-table-tools' },
+    el('button', { type: 'button', class: 'icon-btn small', title: 'Copy the text', 'aria-label': 'Copy the text',
+      onclick: (e) => { const b = e.currentTarget; navigator.clipboard.writeText(words).then(() => done(b, 'Copied')).catch(() => {}); } }, icon('copy')));
+  return el('div', { class: 'md-table-box md-text-box' }, tools, el('pre', { class: 'md-text' }, words));
 }
 
 // A sound as a player: a round play button, its waveform (drawn from the file the first time it is shown) that also
@@ -182,13 +248,15 @@ export function soundPlayer(url, name = '') {
   return node;
 }
 
-// A reply as paragraphs, lists and ```csv tables. chips: {"item:12": {name, kind}} for the items it may name.
+// A reply as paragraphs, lists, ```csv tables and other fenced blocks. chips: {"item:12": {name, kind}} for the items
+// it may name.
 export function markdown(text, chips = {}, onPick = () => {}) {
   const out = [];
   const source = String(text || '').replace(/\r/g, '');
   let at = 0;
   for (const found of source.matchAll(FENCE)) {
-    out.push(...prose(source.slice(at, found.index), chips, onPick), table(found[1]));
+    out.push(...prose(source.slice(at, found.index), chips, onPick),
+      found[1].toLowerCase() === 'csv' ? table(found[2], chips, onPick) : textBlock(found[2]));
     at = found.index + found[0].length;
   }
   return [...out, ...prose(source.slice(at), chips, onPick)];

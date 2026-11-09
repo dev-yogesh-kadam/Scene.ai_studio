@@ -1,7 +1,8 @@
 """What happens once a shot the agent planned is made: it is checked straight away, with the agent panel open or not.
 
 A job the agent planned carries a "shot" in its settings (workspace.py gives every planned generation one). When it is
-done (jobs.JobManager.finished, see install), its result is checked in the background WAIT seconds later:
+done (jobs.JobManager.finished, see install) and no other planned shot of that project is still waiting or being made,
+so that a batch is checked together, its result is checked in the background WAIT seconds later:
 
 - a picture or a clip is reviewed by the agent's model (review.review_item), against the references the step used
   ("review_refs") and the project's always-on entries;
@@ -25,6 +26,7 @@ from . import review
 from .db import as_everyone
 
 WAIT = 30              # seconds after a job is done before the background looks at its result
+BATCH_POLL = 15        # seconds between looks at whether the rest of a batch is made
 RETRY_KEY = "agent_retry_once.{}"   # a user's "Retry a failed shot once by itself", in the settings table
 REVIEWED = ("image", "video", "audio")
 running = {}           # item id -> the task reviewing it now, so the panel and the background never review it twice at once
@@ -49,7 +51,7 @@ def install(state):
     def finished(job, status):
         if status != "done" or not agent_made(job.get("settings")):
             return
-        task = asyncio.get_running_loop().create_task(_quietly(after(state, dict(job))))
+        task = asyncio.get_running_loop().create_task(_quietly(after_batch(state, dict(job))))
         state.jobs.working_after = getattr(state.jobs, "working_after", set())
         state.jobs.working_after.add(task)   # kept until done: a task nobody holds may be collected half-way
         task.add_done_callback(state.jobs.working_after.discard)
@@ -100,6 +102,21 @@ def references_of(state, user_id, settings, item):
             if e["kind"] in ("image", "video") and e["made_from"] != item["id"] and path.is_file():
                 found.append((e["name"], path))
     return found
+
+
+def batch_running(state, job):
+    """Whether another shot the agent planned for this user and project is still waiting or being made."""
+    with as_everyone():   # outside any request: the statement names the user itself
+        rows = state.db.all("SELECT settings, project_id FROM jobs WHERE user_id = ? AND id != ? AND status IN ('queued', 'running')",
+                            (job["user_id"], job["id"]))
+    return any(r["project_id"] == job.get("project_id") and agent_made(json.loads(r["settings"] or "{}")) for r in rows)
+
+
+async def after_batch(state, job):
+    """Check a finished job once the batch it belongs to is made, so its shots are checked together."""
+    while batch_running(state, job):
+        await asyncio.sleep(BATCH_POLL)
+    await after(state, job)
 
 
 async def after(state, job, wait=None):

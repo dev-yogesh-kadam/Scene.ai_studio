@@ -58,11 +58,14 @@ def _kind(data, url, content_type):
     return found
 
 
-def filename_for(url, kind):
-    """A file name for what a link brought: the link's own name, with an extension of its kind."""
+def filename_for(url, kind, data=b""):
+    """A file name for what a link brought: the link's own name, with an extension of its kind. data: the file, whose
+    first bytes name the type of a picture whose link names none (an image proxy's "?url=...&output=webp")."""
     name = PurePosixPath(urlsplit(url).path).name or kind
     if PurePosixPath(name).suffix.lower() not in KINDS[kind]:
-        name = (PurePosixPath(name).stem or kind) + EXTENSION[kind]
+        head = bytes(data[:12])
+        suffix = ".webp" if head[:4] == b"RIFF" and head[8:12] == b"WEBP" else ".jpg" if head.startswith(b"\xff\xd8\xff") else EXTENSION[kind]
+        name = (PurePosixPath(name).stem or kind) + (suffix if kind == "image" else EXTENSION[kind])
     return name
 
 

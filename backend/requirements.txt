@@ -3,7 +3,7 @@ uvicorn==0.54.0
 python-multipart==0.0.32
 httpx==0.28.1
 websockets==17.2
-imageio-ffmpeg==0.6.0
+imageio-ffmpeg==0.8.1
 psycopg[binary]==3.3.6
 claude-agent-sdk==0.2.174
 cryptography==50.0.2

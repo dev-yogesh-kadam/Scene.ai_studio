@@ -1,6 +1,7 @@
 {
   "title": "Text to Image: FLUX 3 Image Klein",
   "description": "FLUX 3 Image Klein text-to-image (FLUX Kommunity (outputs OK < $5M revenue)). Your prompt is expanded by BFL's prompt upsampler first (recommended by BFL).",
+  "pick_when": "A picture from a short idea: its upsampler writes the detail (second on a product shot in the studio's test, lower on scenes). References up to 16. Its licence allows use below $5M revenue.",
   "output_name": "9.filename_prefix",
   "labels": {},
   "required_refs": [],

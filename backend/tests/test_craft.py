@@ -23,12 +23,12 @@ def test_the_agent_looks_up_presets_and_loads_a_skill_from_the_catalogue(client,
     seen = hosted(monkeypatch, client, {"tool": "preset_search", "query": "push in"},
                   {"tool": "read_skill", "op": "camera-coverage", "query": "0"},
                   {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "hello there"})
+    client.post("/api/agent/plan", json={"instruction": "hello there, with camera-coverage"})   # the user names the skill
     told = [m["content"] for m in seen[-1] if m["role"] == "user"]
     asked = "\n".join(m["content"] for m in seen[0])
     assert "camera-coverage (craft" in asked and "Presets:" in asked   # the catalogue (craft skills marked) and the rules went with it
     assert any('"id": "push-in"' in t for t in told)
-    assert any("Camera angles and coverage" in t for t in told)        # the whole skill, loaded
+    assert any("Study the subject first" in t for t in told)            # the whole skill, loaded
 
 
 def test_a_steps_check_goes_with_it_and_its_review_reads_it(client, monkeypatch):

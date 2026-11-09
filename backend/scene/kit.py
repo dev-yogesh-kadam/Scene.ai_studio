@@ -13,8 +13,8 @@ Entries come in from everywhere work is done: named in an agent message ("Maya -
 (keep_made), saved by the agent (its book_save tool), dropped into a job's reference slot (keep_upload), and added by
 the user in the panel or from a result on the canvas.
 
-A kit belongs to one project (its modules share it): nothing is kept outside a project, and nothing is shared between
-projects. The assets saved before kits existed, with no project, are not used at all.
+A kit belongs to one module (a project's main canvas counts as one): nothing is kept outside a project, and nothing is
+shared between modules or projects. The assets saved before kits existed, with no project, are not used at all.
 """
 
 import contextlib
@@ -177,98 +177,24 @@ def _own_look(db, user_id, asset_id):
         db.run("UPDATE assets SET look_of = ?, variant = ? WHERE id = ?", (base["id"], found.group(2).strip()[:VARIANT_CHARS], asset_id))
 
 
-def root(db, project):
-    """The project whose kit a project uses: a module shares the kit of the project it is in."""
-    if not project:
-        return project
-    row = db.one("SELECT parent_id FROM projects WHERE id = ?", (project,))
-    return row["parent_id"] if row and row["parent_id"] else project
-
-
 def _where(project):
     return ("project_id = ?", (project,))
 
 
-def entries(db, user_id, project, hidden=False):
-    """The kit of a project, in order: the always-on entries first, then the rest. Each a row of assets with "type".
-    Outside a project there is none. In a project shared with the user it is the owner's kit (sharing.py).
-    In a module, what the module changed for itself is put in (overrides()): an entry it hid is left out (kept, with
-    "hidden": True, when `hidden`), and its own always, use note and preferred picture replace the project's."""
-    module = project
-    project = root(db, project)
+def entries(db, user_id, project):
+    """The kit of a module, in order: the always-on entries first, then the rest. Each a row of assets with "type".
+    Outside a project there is none. In a project shared with the user it is the owner's kit (sharing.py)."""
     if not project:
         return []
     keeper = keeper_of(db, user_id, project)
     where, params = _where(project)
     with as_everyone() if keeper != user_id else contextlib.nullcontext():
+        # made_review: the review of the picture an entry was made from (a sheet the agent made), so a failed one shows
         rows = db.all("SELECT id, name, tag, kind, filename, size, about, use_note, origin, made_from, always, position, named, created, facts, public_id, "
-                      "project_id, look_of, variant, from_scene, palette, relations "
+                      "project_id, look_of, variant, from_scene, palette, relations, "
+                      "(SELECT review FROM generations WHERE generations.id = assets.made_from) AS made_review "
                       "FROM assets WHERE user_id = ? AND " + where + " ORDER BY always DESC, position, created", (keeper, *params))
-    rows = [dict(row, type=TYPES.get(row["tag"], "other")) for row in rows]
-    if module and module != project:
-        rows = _in_module(rows, overrides(db, keeper, module), hidden)
-    return rows
-
-
-def _in_module(rows, changed, hidden):
-    out = []
-    for row in rows:
-        mine = changed.get(row["id"])
-        if mine:
-            if mine["removed"]:
-                if not hidden:
-                    continue
-                row = dict(row, hidden=True)
-            if mine["always"] is not None:
-                row = dict(row, always=mine["always"])
-            if mine["use_note"] is not None:
-                row = dict(row, use_note=mine["use_note"])
-            if mine["preferred_item"]:
-                row = dict(row, preferred_item=mine["preferred_item"])
-            row = dict(row, changed_here=True)
-        out.append(row)
-    return sorted(out, key=lambda r: (not r["always"], r["position"], r["created"]))
-
-
-def overrides(db, keeper, module):
-    """{asset id: what this module changed of it}."""
-    with as_everyone():
-        rows = db.all("SELECT asset_id, removed, always, use_note, preferred_item FROM kit_overrides WHERE user_id = ? AND module_id = ?",
-                      (keeper, module))
-    return {r["asset_id"]: r for r in rows}
-
-
-def override(db, user_id, module, asset_id, changes):
-    """Change an entry of the project's kit for one module only: {"removed"?, "always"?, "use_note"?, "preferred_item"?};
-    a None value goes back to the project's. Returns the entry as the module sees it, or None when it is not there.
-    Every member who may make things in the project may do it (the caller checks the role)."""
-    project = root(db, module)
-    if not project or project == module:
-        return None
-    keeper = keeper_of(db, user_id, project)
-    found = next((e for e in entries(db, user_id, module, hidden=True) if e["id"] == asset_id), None)
-    if found is None:
-        return None
-    with as_everyone():
-        now = db.one("SELECT removed, always, use_note, preferred_item FROM kit_overrides WHERE module_id = ? AND asset_id = ?",
-                     (module, asset_id)) or {"removed": 0, "always": None, "use_note": None, "preferred_item": None}
-        fields = dict(now)
-        if "removed" in changes:
-            fields["removed"] = 1 if changes["removed"] else 0
-        if "always" in changes:
-            fields["always"] = None if changes["always"] is None else (1 if changes["always"] else 0)
-        if "use_note" in changes:
-            fields["use_note"] = None if changes["use_note"] is None else clean_note(changes["use_note"])
-        if "preferred_item" in changes:
-            fields["preferred_item"] = int(changes["preferred_item"]) if changes["preferred_item"] else None
-        if not fields["removed"] and all(fields[k] is None for k in ("always", "use_note", "preferred_item")):
-            db.run("DELETE FROM kit_overrides WHERE module_id = ? AND asset_id = ?", (module, asset_id))
-        else:
-            db.run("INSERT INTO kit_overrides (user_id, module_id, asset_id, removed, always, use_note, preferred_item, updated) "
-                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(module_id, asset_id) DO UPDATE SET removed = excluded.removed, "
-                   "always = excluded.always, use_note = excluded.use_note, preferred_item = excluded.preferred_item, updated = excluded.updated",
-                   (keeper, module, asset_id, fields["removed"], fields["always"], fields["use_note"], fields["preferred_item"], time.time()))
-    return next((e for e in entries(db, user_id, module, hidden=True) if e["id"] == asset_id), None)
+    return [dict(row, type=TYPES.get(row["tag"], "other")) for row in rows]
 
 
 def keeper_of(db, user_id, project):
@@ -284,7 +210,6 @@ def entry(db, user_id, asset_id):
 
 
 def _next_position(db, user_id, project):
-    project = root(db, project)
     where, params = _where(project)
     found = db.one("SELECT MAX(position) AS last FROM assets WHERE user_id = ? AND " + where, (user_id, *params))
     return (found["last"] or 0) + 1 if found else 1
@@ -292,10 +217,9 @@ def _next_position(db, user_id, project):
 
 def add(db, folder, user_id, project, data, filename, kind, name, tag="other", always=False, named=True, about="",
         use_note="", made_from=None, origin="kit"):
-    """Add a file to a project's kit and return its id. The same file added again to the same project is the entry it
+    """Add a file to a module's kit and return its id. The same file added again to the same module is the entry it
     already is: a name, a type and always-on given now fill in what it lacked (an entry without a name gets one).
-    None outside a project: a kit belongs to a project and is never kept for all work."""
-    project = root(db, project)
+    None outside a project: a kit belongs to a module and is never kept for all work."""
     if not project:
         return None
     digest = hashlib.sha1(data).hexdigest()[:10]
@@ -365,8 +289,7 @@ def update(db, user_id, asset_id, changes):
 
 
 def reorder(db, user_id, project, ids):
-    """Put a project's entries in the order given (ids); the ones not named keep their place after them."""
-    project = root(db, project)
+    """Put a module's entries in the order given (ids); the ones not named keep their place after them."""
     mine = {row["id"] for row in entries(db, user_id, project)}
     for position, asset_id in enumerate([i for i in ids if i in mine], start=1):
         db.run("UPDATE assets SET position = ? WHERE id = ?", (position, asset_id))
@@ -395,7 +318,7 @@ def remove(db, folder, user_id, asset_id):
 # ---------------------------------------------------------------- always on: what goes into every shot
 
 def always(db, user_id, project):
-    """The always-on entries of a project, in order. A look ("Maya - torn sleeve") is never always on: a shot that
+    """The always-on entries of a module, in order. A look ("Maya - torn sleeve") is never always on: a shot that
     needs it names it, and its base entry stands for the person or place in every other shot."""
     return [e for e in entries(db, user_id, project) if e["always"] and not e.get("look_of")]
 

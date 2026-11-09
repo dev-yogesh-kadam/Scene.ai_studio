@@ -236,18 +236,14 @@ CREATE TABLE IF NOT EXISTS user_memory (
     updated REAL NOT NULL,
     PRIMARY KEY (user_id, key)
 );
--- What one module changes of its project's NeuralCore for itself (kit.py): an entry hidden there, always on or not
--- there, its own use note, or the picture of it to prefer there. The project's entry stays as it is for the others.
-CREATE TABLE IF NOT EXISTS kit_overrides (
+-- Links that open one library item without signing in (api/shares.py), by the hash of their token.
+CREATE TABLE IF NOT EXISTS shares (
+    token_hash TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    module_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-    removed INTEGER NOT NULL DEFAULT 0,
-    always INTEGER,
-    use_note TEXT,
-    preferred_item INTEGER,
-    updated REAL NOT NULL,
-    PRIMARY KEY (module_id, asset_id)
+    item_id INTEGER NOT NULL,
+    created REAL NOT NULL,
+    expires REAL NOT NULL,
+    views INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS run_state (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -345,7 +341,7 @@ COLUMNS = [
     ("assets", "always", "INTEGER NOT NULL DEFAULT 0"),
     ("assets", "position", "REAL NOT NULL DEFAULT 0"),
     ("assets", "named", "INTEGER NOT NULL DEFAULT 1"),
-    # A module: a project inside a project, with a canvas, a timeline and agent tabs of its own, sharing the kit of the
+    # A module: a project inside a project, with a canvas and agent tabs of its own, sharing the kit of the
     # project it is in. NULL for a project.
     ("projects", "parent_id", "INTEGER"),
     # The name of a project's own canvas, the first of its modules; empty = "Main canvas".
@@ -411,6 +407,7 @@ CREATE INDEX IF NOT EXISTS assets_public ON assets(public_id);
 DROP TABLE IF EXISTS brands;
 DROP TABLE IF EXISTS brand_fonts;
 DROP TABLE IF EXISTS brand_assets;
+DROP TABLE IF EXISTS kit_overrides;
 """
 
 # The studio's two machines, added to an installation that has no servers yet. Every value can be changed in the
@@ -464,10 +461,28 @@ def _seed(db, starting_credits):
                 db.run("UPDATE users SET credits = ?", (starting_credits,))
     with as_everyone():
         refs.fill_projects(db)
+        _kit_per_module(db)
+        _films_shown(db)
     if not db.one("SELECT 1 FROM servers"):
         for server in SERVERS:
             db.run("INSERT INTO servers (name, cpu, gpu, vram_gb, role, renders, generation_power_w, created) "
                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (*server, time.time()))
+
+
+def _films_shown(db):
+    """A run's whole film (placement.FINISHED) used to be filed as a working file of the run, so no canvas listed it."""
+    db.run("UPDATE generations SET run = '' WHERE run <> '' AND workflow IN ('edit/film', 'edit/assemble')")
+
+
+def _kit_per_module(db):
+    """Once: NeuralCore was the project's, shared by its modules; now each module has its own. An entry kept on a
+    project's top that was made in one of its modules moves to that module; the rest stay with the main canvas."""
+    if db.one("SELECT 1 FROM settings WHERE key = 'kit_per_module'"):
+        return
+    db.run("UPDATE assets SET project_id = (SELECT g.project_id FROM generations g WHERE g.id = assets.made_from) "
+           "WHERE made_from IS NOT NULL AND EXISTS (SELECT 1 FROM generations g JOIN projects m ON m.id = g.project_id "
+           "WHERE g.id = assets.made_from AND m.parent_id = assets.project_id)")
+    db.run("INSERT INTO settings (key, value) VALUES ('kit_per_module', '1')")
 
 
 class Database:
@@ -557,7 +572,7 @@ ID_TABLES = set(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \(\s*id INTEGER PR
 # pricing, servers, the audit log) have no owner.
 OWNED = {"users": "id", "sessions": "user_id", "jobs": "user_id", "generations": "user_id", "projects": "user_id",
          "boards": "user_id", "assets": "user_id", "credit_events": "user_id", "uploads": "user_id", "run_state": "user_id",
-         "kit_overrides": "user_id", "user_memory": "user_id"}
+         "user_memory": "user_id", "shares": "user_id"}
 ACTING_SQL = "current_setting('app.user_id', true)"
 OWN_ROWS = ("{acting} = 'all' OR {column} = (CASE WHEN {acting} ~ '^[0-9]+$' THEN {acting}::bigint END)")
 

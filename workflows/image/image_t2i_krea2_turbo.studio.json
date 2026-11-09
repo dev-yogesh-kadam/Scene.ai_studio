@@ -1,6 +1,7 @@
 {
   "title": "Text to Image: Krea 2 Turbo",
   "description": "Krea 2 Turbo text-to-image (Krea 2 Community License). 8-step turbo with prompt enhancer.",
+  "pick_when": "A fast photographic draft (about 25 s), or a picture that must take the look (colours, medium, mood) of a style picture. Near the bottom of the studio's test: not for finals.",
   "output_name": "9.filename_prefix",
   "labels": {
     "200:image": "REFERENCE 1 (style)"

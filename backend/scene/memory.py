@@ -91,7 +91,7 @@ def keep_made(db, folder, user_id, item_id, source, kind, keep):
     if not keep:
         return None
     made = db.one("SELECT project_id FROM generations WHERE id = ? AND user_id = ?", (item_id, user_id))
-    project = kit.root(db, made["project_id"]) if made else None
+    project = made["project_id"] if made else None
     if not project:
         return None   # made outside a project: there is no kit to keep it in
     where, params = ("project_id = ?", (project,))
@@ -162,7 +162,6 @@ def keep_named(db, folder, outputs, user_id, named, project=None):
     unless its own line said otherwise. Returns [{"asset", "name", "type"}] of the ones kept now (not those kept already
     under the same name and type)."""
     kept = []
-    project = kit.root(db, project)
     if not project:
         return kept
     for entry in named:
@@ -188,7 +187,6 @@ def keep_unnamed(db, folder, outputs, user_id, project, items):
     """Keep attached pictures nobody named in the project's kit, as entries without a name: the agent asks the user who
     or what they are. Returns the ids of the ones new to the kit."""
     made = []
-    project = kit.root(db, project)
     if not project:
         return made
     for item_id in items:
@@ -213,8 +211,9 @@ def _asset_entry(row):
         entry["unnamed"] = True
     if row["use_note"]:
         entry["use"] = row["use_note"]
-    if row.get("preferred_item"):   # the picture of it this module prefers (kit.override)
-        entry["prefer_item"] = row["preferred_item"]
+    made = review.load({"review": row.get("made_review")})
+    if made and not made.get("passed"):   # a sheet that failed its review: made again before shots lean on it
+        entry["review"] = review.summary(made)
     _add_facts(entry, row)
     return entry
 
@@ -268,7 +267,13 @@ def book(db, user_id, project, pinned=None):
     from a library item has its "item" too. Items past the latest few have only their id, name and kind, and "brief":
     True. The private keys "_file" and "_table" say where the file is and where its description is kept;
     book_for_model() drops them."""
-    entries = [_asset_entry(row) for row in kit.entries(db, user_id, project)[:BOOK_ASSETS + BOOK_UPLOADS]]
+    rows = kit.entries(db, user_id, project)[:BOOK_ASSETS + BOOK_UPLOADS]
+    entries = [_asset_entry(row) for row in rows]
+    names = {row["id"]: row["name"] for row in rows}
+    for entry, row in zip(entries, rows):   # a look says whose look it is, and the scene it starts in
+        if row.get("look_of") in names:
+            entry.update({"look_of": names[row["look_of"]], "look": row.get("variant") or "",
+                          **({"from_scene": row["from_scene"]} if row.get("from_scene") else {})})
     named = {e["item"] for e in entries if e.get("item")}   # a picture in the kit is in the book once, by its name there
     rows = [row for row in _project_items(db, user_id, project, BOOK_ITEMS) if row["id"] not in named]
     for number, row in enumerate(rows):
@@ -303,8 +308,6 @@ def kit_row(row):
             "about": row["about"], "use_note": row["use_note"], "origin": row["origin"], "created": row["created"],
             "always": bool(row["always"]), "named": bool(row["named"]), "position": row["position"], "item": row["made_from"],
             "url": "/api/kit/{}/file".format(row["id"]),
-            # what a module changed of the project's entry for itself (kit.override)
-            "hidden": bool(row.get("hidden")), "changed_here": bool(row.get("changed_here")), "preferred_item": row.get("preferred_item"),
             # how it hangs together with the other entries (kit.py): a look or time of day, a palette, relatives as stored
             "look_of": row.get("look_of"), "variant": row.get("variant") or "", "from_scene": row.get("from_scene"),
             "palette": row.get("palette") or "", "relations": kit.relations_of(row)}

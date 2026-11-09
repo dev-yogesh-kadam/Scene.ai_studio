@@ -305,19 +305,19 @@ class Core:
             row = self.db.one("SELECT id, parent_id FROM projects WHERE id = ?", (project_id,))
         return (row["parent_id"] or row["id"]) if row else None
 
-    # -- the cast: the project's NeuralCore entries as this module uses them -------------------------------------------
+    # -- the cast: this module's NeuralCore entries ----------------------------------------------------------------------
 
     def cast_entries(self):
-        """The entries of the project as this module sees them (hidden ones too), each with "public_id" given."""
+        """The entries of this module's NeuralCore, each with "public_id" given."""
         if not self.project:
             return []
         from . import kit
-        rows = kit.entries(self.db, self.user_id, self.project, hidden=True)
+        rows = kit.entries(self.db, self.user_id, self.project)
         ids = public_ids(self.db, "assets", [r["id"] for r in rows])
         return [dict(r, public_id=ids.get(r["id"], "")) for r in rows]
 
     def cast(self):
-        """{name: {"type", "visual", "ref", "always", "use"?, "hidden_here"?, "entry", and how it hangs together:
+        """{name: {"type", "visual", "ref", "always", "use"?, "entry", and how it hangs together:
         "look_of"? and "variant"? (a look or a time of day, by the base's name), "from_scene"?, "looks"? (a base's,
         by name), "palette"?, "relatives"? ([{"name", "relation", "blood"}])}} with names in snake_case."""
         from . import kit
@@ -336,7 +336,7 @@ class Core:
             out[names[row["id"]]] = {
                 "type": row["type"], "visual": row["about"], "ref": "$state:/assets/{}/url".format(row["public_id"]),
                 "always": bool(row["always"]), **({"use": row["use_note"]} if row["use_note"] else {}),
-                **({"hidden_here": True} if row.get("hidden") else {}), "entry": row["id"],
+                "entry": row["id"],
                 **({"look_of": names.get(row["look_of"], ""), "variant": row["variant"]} if row.get("look_of") else {}),
                 **({"from_scene": row["from_scene"]} if row.get("from_scene") else {}),
                 **({"looks": looks} if looks else {}), **({"palette": row["palette"]} if row.get("palette") else {}),

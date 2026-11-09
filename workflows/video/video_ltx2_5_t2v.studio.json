@@ -1,6 +1,7 @@
 {
   "title": "LTX-2.5",
   "description": "Text to video with LTX-2.5 (Lightricks), with sound: cinematic motion and camera moves, fast.",
+  "pick_when": "A fast shot from words alone with a strong camera move and sound, when no person or place must match another shot: it takes no references.",
   "output_name": "75.filename_prefix",
   "labels": {
     "405:376:value": "Describe the shot: who, where, the action, the camera and the sound.",

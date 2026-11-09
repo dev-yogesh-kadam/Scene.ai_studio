@@ -104,7 +104,7 @@ def test_the_agent_puts_a_saved_asset_it_knows_by_name_into_a_slot(client, monke
                      {"item": harbour, "asset": 0, "slot": "205:image"}]}]}   # a picture of the project, not attached
 
     monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
-    plan = client.post("/api/agent/plan", json={"instruction": "a short film: Meera walks home in the rain", "project_id": film(client)}).json()
+    plan = client.post("/api/agent/plan", json={"instruction": "/short-film a short film: Meera walks home in the rain", "project_id": film(client)}).json()
     step = plan["steps"][0]
     assert [(u.get("asset"), u["id"], u["name"], u["slot"]) for u in step["uses"]] == [
         (meera, 0, "Meera", "201:image"), (None, harbour, "Harbour", "205:image")]
@@ -134,13 +134,37 @@ def test_an_asset_saved_from_the_library_keeps_what_the_model_saw_and_notes_can_
     assert saved["about"] == "A small harbour, at dawn." and len(saved["use_note"]) == 600
 
 
-def test_skills_are_picked_by_what_the_message_asks_for(tmp_path):
-    assert [s["id"] for s in skills.pick("a short film: a girl finds a stray dog in the rain")] == ["short-film"]
-    assert [s["id"] for s in skills.pick("make a 20 second Reel ad for our coffee product")] == ["product-ad", "social-video"]
-    assert skills.pick("hello, what can you do?") == []
+def test_only_the_user_picks_a_skill_and_a_video_gets_the_default(tmp_path):
+    # a message's words never pick a skill: only the ones the user chose are given, in their order
+    assert skills.pick("a short film: a girl finds a stray dog in the rain") == []
+    assert skills.pick("make a 20 second Reel ad for our coffee product") == []
+    assert [s["id"] for s in skills.pick("x", force=["product-ad", "no-such-skill", "product-ad"])] == ["product-ad"]
+    # a message asking for a video is one for the default skill; an edit of a video already there is not
+    assert skills.DEFAULT == "script-to-video" and skills.find(skills.DEFAULT)
+    for said in ("make a video from this script and audio", "turn my script into a film", "create a 30 second reel for my cafe",
+                 "i want a short film about two brothers", "script to video", "here is my script, make it into a movie"):
+        assert skills.wants_video(said), said
+    for said in ("make the video shorter", "add music to this video", "cut this video in half", "make a picture of a cat",
+                 "hello, what can you do?", "make a character sheet of maya"):
+        assert not skills.wants_video(said), said
+    # a habit or a past film is no request; one clip (at most 15 s, "a clip") is made without the skill...
+    for said in ("I always make Reels", "we usually create short films for clients", "I made a film last week",
+                 "a music video is hard to make", "make a 5 second video of a cat", "generate a 10s clip of rain on a window",
+                 "make a quick clip of a dog running", "i like films about rain"):
+        assert not skills.wants_video(said), said
+    # a video of words and shapes is the agent's own pages (HyperFrames), not a film made from a script
+    for said in ("create a cool video using hyperframes", "make a motion graphics video about our app",
+                 "create a kinetic typography video for this quote", "make a lyric video for my song"):
+        assert not skills.wants_video(said), said
+    # ...unless it is more than one clip, or a script or a sound is attached
+    for said in ("make a 30 second film about two brothers", "make a 10 s video of the 3 scenes of my story",
+                 "can you make a reel for my cafe?", "i'd like a short film about rain"):
+        assert skills.wants_video(said), said
+    assert skills.wants_video("make a 5 second video", attached=["audio"]) and skills.wants_video("turn @1 into a 10 s video", attached=["text"])
+    assert not skills.wants_video("make a 5 second video", attached=["image"])
     # A short follow-up is about the same work as the message before it.
-    assert [s["id"] for s in skills.pick("make it portrait", [{"instruction": "a product ad for our shoes"}])] == ["product-ad"]
-    # Every skill that ships can be read and has words to be picked by.
+    assert skills.wants_video("yes, portrait", [{"instruction": "make a video of my dog"}])
+    # Every skill that ships can be read and has words the user can name it by.
     shipped = skills.load()
     assert {s["id"] for s in shipped} >= {"short-film", "product-ad", "character-sheet", "social-video"}
     # (a skill an admin adds may have no trigger words: it then runs only when named with /command)
@@ -149,7 +173,7 @@ def test_skills_are_picked_by_what_the_message_asks_for(tmp_path):
     (tmp_path / "broken.md").write_text("id: broken\nwords: (unclosed\n---\nText.", encoding="utf-8")
     (tmp_path / "fine.md").write_text("id: fine\ntitle: Fine\nwords: \\bfine\\b\n---\nDo it well.", encoding="utf-8")
     assert [s["id"] for s in skills.load(tmp_path)] == ["fine"]
-    assert "Fine (skill fine v1):\nDo it well." == skills.guide(skills.pick("a fine thing", folder=tmp_path))
+    assert "Fine (skill fine v1):\nDo it well." == skills.guide(skills.pick("a fine thing", folder=tmp_path, force=["fine"]))
 
 
 def test_a_file_dropped_into_a_job_is_kept_once_as_an_upload_of_its_project(client, monkeypatch):

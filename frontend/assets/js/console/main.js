@@ -18,6 +18,7 @@ import { skills } from './skills.js';
 import { roles } from './roles.js';
 import { servers } from './servers.js';
 import { sessions } from './sessions.js';
+import { showcase } from './showcase.js';
 import { Spring, project, tracker } from '../spring.js';
 
 // `live`: how often the section redraws itself while it is open, in ms. `group` is the heading it sits under.
@@ -36,6 +37,7 @@ const SECTIONS = [
   { id: 'workflows', label: 'Workflows', icon: 'frame', draw: workflows, group: 'Studio' },
   { id: 'agent', label: 'Agent', icon: 'chat', draw: agent, group: 'Studio' },
   { id: 'skills', label: 'Skills', icon: 'skill', draw: skills, group: 'Studio' },
+  { id: 'showcase', label: 'Home page', icon: 'home', draw: showcase, group: 'Studio' },
   { id: 'endpoints', label: 'Servers', icon: 'server', draw: servers, group: 'Studio' },
   { id: 'roles', label: 'Roles', icon: 'people', draw: roles, group: 'Records' },
   { id: 'audit', label: 'Audit log', icon: 'book', draw: audit, group: 'Records' },

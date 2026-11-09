@@ -345,17 +345,16 @@ def test_admin_gives_and_takes_credits_with_a_note(client):
     assert ("Took credits", "-650") in audit and ("Gave credits", "+250 · Launch bonus") in audit
 
 
-def test_canvas_and_timeline_boards_are_saved_per_project_and_private(client):
+def test_canvas_boards_are_saved_per_project_and_private(client):
     register(client)
     project = client.post("/api/projects", json={"name": "Skincare ad"}).json()
     assert client.get("/api/boards/canvas").json() == {"data": {}}
     client.put("/api/boards/canvas", json={"data": {"items": {"7": {"x": 40, "y": 80}}}})
     client.put("/api/boards/canvas", json={"project": project["id"], "data": {"items": {}}})
-    client.put("/api/boards/timeline", json={"data": {"clips": [{"id": 7, "start": 0, "end": 2}]}})
     assert client.get("/api/boards/canvas").json()["data"]["items"]["7"] == {"x": 40, "y": 80}
     assert client.get("/api/boards/canvas?project=%d" % project["id"]).json() == {"data": {"items": {}}}
-    assert client.get("/api/boards/timeline").json()["data"]["clips"][0]["end"] == 2
     assert client.get("/api/boards/notes").status_code == 404
+    assert client.get("/api/boards/timeline").status_code == 404
     client.post("/api/auth/logout")
     client.post("/api/auth/register", json={"email": "bob@example.com", "password": "another one"})
     assert client.get("/api/boards/canvas").json() == {"data": {}}
@@ -505,7 +504,7 @@ def test_a_plain_prompt_becomes_a_caption_just_before_it_renders_with_the_others
         third = client.post("/api/jobs", data={"settings": json.dumps(job)}).json()["id"]
 
         async def down(*args, **kwargs):
-            raise AgentError("The agent's model server (Ollama) can't be reached.")
+            raise AgentError("Claude can't be reached.")
         monkeypatch.setattr(app.state.agent, "chat", down)
         row = app.state.db.one("SELECT * FROM jobs WHERE id = ?", (third,))
         row["settings"] = json.loads(row["settings"])
@@ -697,7 +696,9 @@ def test_the_agent_uses_the_claude_model_the_user_picked(client, monkeypatch):
     monkeypatch.setattr(brain, "model", "haiku")   # config.json may name it without "claude/"
     found = client.get("/api/agent/status").json()
     assert found == {"online": True, "model": "claude/haiku", "models": ["claude/sonnet", "claude/haiku"],
-                     "hosted": [{"id": "claude", "name": "Claude"}], "prices": {}, "by_tokens": ["claude/sonnet", "claude/haiku"]}
+                     "hosted": [{"id": "claude", "name": "Claude"}], "prices": {}, "by_tokens": ["claude/sonnet", "claude/haiku"],
+                     "efforts": {"claude/sonnet": {"levels": ["low", "medium", "high", "xhigh", "max"], "default": "high"},
+                                 "claude/haiku": {"levels": ["low", "medium", "high", "xhigh", "max"], "default": "medium"}}}
     for picked in ("claude/sonnet", "gemini/flash", "", None):
         client.post("/api/agent/plan", json={"instruction": "hi", "model": picked})
     assert used == ["claude/sonnet", "claude/haiku", "claude/haiku", "claude/haiku"]
@@ -1292,14 +1293,15 @@ def test_each_agent_tab_keeps_its_own_conversation(client):
 def test_the_studio_pages_have_addresses_of_their_own(client):
     root = client.get("/")
     assert root.status_code == 200 and "<div id=\"app\">" in root.text
-    for path in ("/signin", "/signup", "/home", "/projects", "/library", "/skills", "/create", "/canvas", "/timeline", "/settings", "/admin", "/project"):
+    for path in ("/signin", "/signup", "/home", "/projects", "/library", "/skills", "/create", "/canvas", "/settings", "/admin", "/project"):
         page = client.get(path)
         assert page.status_code == 200 and page.text == root.text, path
     assert client.get("/nothing-here").status_code == 404
+    assert client.get("/timeline").status_code == 404
     assert client.get("/assets/css/app.css").status_code == 200
 
 
-def test_a_project_holds_modules_that_share_its_kit(client):
+def test_a_project_holds_modules_each_with_its_own_kit(client):
     me = register(client)
     db = client.app.state.db
     film = client.post("/api/projects", json={"name": "Pocket"}).json()["id"]
@@ -1316,14 +1318,12 @@ def test_a_project_holds_modules_that_share_its_kit(client):
     assert client.get("/api/projects/%d" % one["id"]).json()["project"]["id"] == film   # a module's page is its project's
     assert len(client.get("/api/library?project=%d" % film).json()["items"]) == 1
     assert len(client.get("/api/library?project=%d&modules=1" % film).json()["items"]) == 2
-    # the kit of a module is the project's kit
-    from scene import kit
-    assert kit.root(db, one["id"]) == film and kit.root(db, film) == film
-    # what is kept from a module's canvas is in the project's NeuralCore, and no other project's
+    # what is kept from a module's canvas is in that module's NeuralCore only: not the main canvas's, nor another project's
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     kept = client.post("/api/kit", files={"file": ("maya.png", png, "image/png")}, data={"name": "Maya", "project_id": str(one["id"])}).json()
-    assert db.one("SELECT project_id FROM assets WHERE id = ?", (kept["id"],))["project_id"] == film
-    assert [e["name"] for e in client.get("/api/kit?project=%d" % film).json()["entries"]] == ["Maya"]
+    assert db.one("SELECT project_id FROM assets WHERE id = ?", (kept["id"],))["project_id"] == one["id"]
+    assert [e["name"] for e in client.get("/api/kit?project=%d" % one["id"]).json()["entries"]] == ["Maya"]
+    assert client.get("/api/kit?project=%d" % film).json()["entries"] == []
     other = client.post("/api/projects", json={"name": "Other"}).json()["id"]
     assert client.get("/api/kit?project=%d" % other).json()["entries"] == []
     # deleting a module deletes its items; the main canvas keeps its own

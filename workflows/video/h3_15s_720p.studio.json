@@ -1,6 +1,7 @@
 {
   "title": "H3 15 s (720p)",
   "description": "One 15-second MiniMax H3 video at 720p with sound: three 5-second parts from three prompts, each starting where the last ended, joined. About 9 minutes at 30 steps.",
+  "pick_when": "One continuous 15 s shot at 720p, made of three 5 s parts that each carry on from the last.",
   "output_name": "306.filename_prefix",
   "labels": {
     "101:value": "Prompt for seconds 0-5",

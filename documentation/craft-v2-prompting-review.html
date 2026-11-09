@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Craft v2 Prompting Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the same production-report column as the first v2 review: a header slate, a contents strip, numbered sections; wide tables scroll in their own boxes. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --ink: #18202a; --muted: #586474; --line: #d9dfe6;
+  --accent: #1d5a86; --accent-soft: #e2edf5;
+  --new: #1d7a46; --new-soft: #e1f2e8; --changed: #9a5b00; --changed-soft: #fbefdb;
+  --same: #55606d; --same-soft: #eceff3; --gap: #b02a2a; --gap-soft: #f8e3e3;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11161c; --surface: #19212a; --ink: #e5eaf0; --muted: #9ba7b4; --line: #2a3440;
+  --accent: #82b8e0; --accent-soft: #1b2b3a;
+  --new: #6fcf97; --new-soft: #17301f; --changed: #f0b45a; --changed-soft: #33270f;
+  --same: #aab4bf; --same-soft: #232c36; --gap: #f08a8a; --gap-soft: #3a1c1c; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11161c; --surface: #19212a; --ink: #e5eaf0; --muted: #9ba7b4; --line: #2a3440;
+  --accent: #82b8e0; --accent-soft: #1b2b3a;
+  --new: #6fcf97; --new-soft: #17301f; --changed: #f0b45a; --changed-soft: #33270f;
+  --same: #aab4bf; --same-soft: #232c36; --gap: #f08a8a; --gap-soft: #3a1c1c; color-scheme: dark }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 64px; }
+.page { max-width: 1100px; margin: 0 auto; display: grid; gap: 34px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.12; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(34px, 6vw, 52px); font-weight: 700; letter-spacing: .01em; }
+h2 { font-size: 30px; font-weight: 700; display: flex; gap: 12px; align-items: baseline; }
+h2 .n { font-family: var(--mono); font-size: 15px; color: var(--accent); font-weight: 500; }
+h3 { font-size: 22px; font-weight: 600; margin-top: 6px; }
+p { margin: 0; max-width: 74ch; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+q { font-style: italic; }
+.slate { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px 24px; display: grid; gap: 14px; }
+.slate .meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--display); font-size: 15px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.slate .meta b { color: var(--ink); font-weight: 600; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.toc a { font-family: var(--display); font-size: 16px; letter-spacing: .03em; text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); }
+.toc a:hover { border-color: var(--accent); color: var(--accent); }
+section { display: grid; gap: 14px; scroll-margin-top: 16px; }
+ul, ol { margin: 0; padding-left: 22px; display: grid; gap: 6px; max-width: 82ch; }
+li::marker { color: var(--muted); }
+.lead { font-size: 18px; }
+.muted { color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 10px; min-width: 0; align-content: start; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; }
+tr.group td { background: var(--bg); font-family: var(--display); font-size: 15px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding-block: 6px; }
+table.matrix td, table.matrix th { min-width: 150px; }
+table.matrix td:first-child, table.matrix th:first-child { min-width: 170px; }
+table.rules td:nth-child(2), table.rules td:nth-child(3) { min-width: 260px; }
+.chip { display: inline-block; font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.new { color: var(--new); background: var(--new-soft); }
+.changed { color: var(--changed); background: var(--changed-soft); }
+.same { color: var(--same); background: var(--same-soft); }
+.gap { color: var(--gap); background: var(--gap-soft); }
+.studio { color: var(--accent); background: var(--accent-soft); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.flow { font-family: var(--mono); font-size: 14px; background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: nowrap; }
+.words { display: flex; flex-wrap: wrap; gap: 6px; }
+.words span { font-family: var(--mono); font-size: 13.5px; background: var(--gap-soft); color: var(--gap); border-radius: 5px; padding: 2px 7px; }
+.q { border-left: 3px solid var(--accent); }
+.q h3 { display: flex; gap: 10px; align-items: baseline; }
+.q h3 .n { font-family: var(--mono); font-size: 14px; color: var(--accent); }
+.rec { background: var(--accent-soft); border-radius: 8px; padding: 8px 12px; }
+.rec b { font-family: var(--display); letter-spacing: .04em; text-transform: uppercase; font-size: 15px; }
+footer { color: var(--muted); font-size: 14px; display: grid; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="slate">
+  <div class="meta"><span>Scene.ai studio</span><span><b>Prompting:</b> craft v2 vs studio</span><span>4 November 2026</span><span><b>Nothing changed yet</b></span></div>
+  <h1>Craft v2 Prompting Review</h1>
+  <p class="lead">The prompting in <code>craft skills v2/</code> compared with the studio's own prompting, for every
+  picture workflow (6) and every video workflow (11) in <code>workflows/</code>. On v2's side that means its four video
+  prompters and the picture prompts written inside asset-designer, anchor and script-to-video. On ours, the eight
+  model guides in <code>backend/scene/prompters/</code>, each workflow's hints, the agent's prompt rules and our
+  asset-designer.</p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#summary">Summary</a><a href="#cover">Who covers what</a><a href="#pictures">Picture workflows</a>
+    <a href="#h3">H3 workflows</a><a href="#video">Other video</a><a href="#seedance">Seedance and Wan 3</a>
+    <a href="#gaps">Our own gaps</a><a href="#decide">Decisions</a>
+  </nav>
+</header>
+
+<section id="summary">
+  <h2><span class="n">01</span>Summary</h2>
+  <ul>
+    <li><b>v2 has four video prompters:</b> MiniMax H3, Seedance 2.0, Seedance 2.5 and Wan 3.0. Only H3 runs in the
+      studio. v2 has <b>no picture prompter</b>. Its picture prompts are four templates inside other skills
+      (character sheet, location frame, anchor, shot frame), all written for Seedream 5 Pro.</li>
+    <li><b>The studio has eight guides</b>, one per model family. Together they cover 15 of our 17 workflows. Talking
+      Head has no guide and falls back to the general structure. Lip Sync takes no prompt.</li>
+    <li><b>H3 is the one real overlap</b> (three workflows). Both sides use the same eight blocks. v2 is better at
+      wiring: a role line for every slot, the order to drop references in, voice and audio locks, continuity lines and
+      a report after each call. Ours is better at how H3 behaves in our own renders: one action takes 1–2 beats, the
+      action stays in frame, a new framing is a hard cut, and the word limits are enforced.</li>
+    <li><b>For pictures, v2's templates have the better content</b> (sheets, anchors). On our models they hit four
+      problems:
+      <ul>
+        <li>their "No …" words, while our FLUX guide says to write no negatives;</li>
+        <li>the 200-word limit on FLUX.3 Klein and Krea 2 (a filled sheet prompt is about 230 words);</li>
+        <li>four different ways of naming references;</li>
+        <li>HunyuanImage (no references) and Krea 2 (a style reference only), which can't make family sheets, changed
+          looks or anchors.</li>
+      </ul></li>
+    <li><b>Our asset-designer has already lost v2 words:</b> 6 phrases from the sheet prompt and 12 from the location
+      prompt. That breaks your rule to keep every v2 word.</li>
+    <li><b>LTX and Wan 2.x have no v2 counterpart.</b> Wan 3's layout doesn't suit Wan 2.x, which needs a short prompt
+      and makes no sound. Five general lines from the Seedance and Wan 3 prompters would still help our guides.</li>
+    <li><b>Nine decisions</b> are at the end (P1–P9). They follow on from D1–D16 in the
+      <a href="craft-skills-v2-review.html">first v2 review</a>, which still stand.</li>
+  </ul>
+</section>
+
+<section id="cover">
+  <h2><span class="n">02</span>Who covers what</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>v2's prompting</h3>
+      <ul>
+        <li><code>craft-prompter-minimax-h3</code>: 8 steps from inputs to the call, 8 blocks.</li>
+        <li><code>craft-prompter-seedance-2</code> and <code>-2-5</code>: 8 blocks, plus edit and extend modes.</li>
+        <li><code>craft-prompter-wan-3</code>: Alibaba's five sections in square brackets.</li>
+        <li>Picture templates: the sheet and location frame (craft-asset-designer §2), the anchor (craft-anchor §4) and
+          the shot frame (script-to-video step 8), all for Seedream 5 Pro.</li>
+        <li>Rules spread over the director: no readable text, light only from real sources, feelings shown as a visible
+          tell.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>The studio's prompting</h3>
+      <ul>
+        <li>8 guides: <code>flux2</code>, <code>flux3-klein</code>, <code>hunyuan-image</code>, <code>krea2</code>,
+          <code>qwen-image</code>, <code>minimax-h3</code>, <code>ltx</code>, <code>wan</code>. Each has a target length and a
+          word limit, and a prompt over the limit goes back to the agent.</li>
+        <li>Each workflow's <code>hints</code> and <code>pick_when</code> (H3 Chunk has 10 hints).</li>
+        <li>The agent's rules: one action per shot, prompts in English with spoken words in the user's language, no
+          settings or tags in a prompt, "a complete shot", and the general structure (SCENE CONTEXT … AUDIO) for
+          workflows with no guide.</li>
+        <li>Camera fields turned into words (<code>camera.apply</code>).</li>
+        <li>The sheet and location prompts in our asset-designer (from v1, trimmed).</li>
+      </ul>
+    </div>
+  </div>
+  <div class="legend"><span class="chip same">Same</span> both sides say it <span class="chip new">v2</span> v2 is better or has it alone
+    <span class="chip studio">Studio</span> ours is better or has it alone <span class="chip changed">Partial</span> part fits
+    <span class="chip gap">Gap / clash</span> missing on both sides, or the two disagree</div>
+  <div class="tw"><table>
+    <thead><tr><th>Workflow</th><th>Studio guide</th><th>v2 counterpart</th><th>Match</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="4">Picture workflows</td></tr>
+      <tr><td>FLUX.2 dev</td><td><code>flux2</code></td><td>Sheet, location, anchor and shot-frame templates</td><td><span class="chip new">Templates fit</span></td></tr>
+      <tr><td>FLUX.2 Klein 9B</td><td><code>flux2</code></td><td>The same templates</td><td><span class="chip changed">Drafts only</span></td></tr>
+      <tr><td>FLUX.3 Klein</td><td><code>flux3-klein</code></td><td>The same templates</td><td><span class="chip gap">Sheet over limit</span></td></tr>
+      <tr><td>HunyuanImage 2.1</td><td><code>hunyuan-image</code></td><td>Only templates that need no references</td><td><span class="chip changed">No references</span></td></tr>
+      <tr><td>Krea 2 Turbo</td><td><code>krea2</code></td><td>Only templates that need no references</td><td><span class="chip gap">Sheet over limit</span></td></tr>
+      <tr><td>Qwen Image 2.1</td><td><code>qwen-image</code></td><td>The same templates</td><td><span class="chip new">Templates fit</span></td></tr>
+      <tr class="group"><td colspan="4">Video workflows</td></tr>
+      <tr><td>H3 All in One</td><td><code>minimax-h3</code></td><td>craft-prompter-minimax-h3</td><td><span class="chip same">Direct</span></td></tr>
+      <tr><td>H3 Chunk</td><td><code>minimax-h3</code></td><td>craft-prompter-minimax-h3 + craft-anchor</td><td><span class="chip same">Direct</span></td></tr>
+      <tr><td>H3 15 s (720p)</td><td><code>minimax-h3</code>, on part 1's field only</td><td>The H3 prompter's frames mode</td><td><span class="chip changed">Partial</span></td></tr>
+      <tr><td>Talking Head / Narration</td><td>None: the general structure</td><td>H3 frames mode + recorded audio lines</td><td><span class="chip gap">No guide</span></td></tr>
+      <tr><td>Lip Sync</td><td>None (no prompt)</td><td>None</td><td><span class="chip same">Nothing to compare</span></td></tr>
+      <tr><td>LTX-2.5</td><td><code>ltx</code></td><td>None</td><td><span class="chip studio">Ours only</span></td></tr>
+      <tr><td>Restyle Video: LTX-2.3</td><td><code>ltx</code></td><td>Ideas from the Wan 3 and Seedance edit modes</td><td><span class="chip studio">Ours only</span></td></tr>
+      <tr><td>Restyle Video: Wan VACE</td><td><code>wan</code></td><td>Ideas from the Wan 3 edit mode</td><td><span class="chip studio">Ours only</span></td></tr>
+      <tr><td>Restyle Video: Wan 2.2 Fun Control</td><td><code>wan</code></td><td>Ideas from the Wan 3 edit mode</td><td><span class="chip studio">Ours only</span></td></tr>
+      <tr><td>Change shape: Wan VACE</td><td><code>wan</code></td><td>Ideas from the Wan 3 and Seedance extend modes</td><td><span class="chip studio">Ours only</span></td></tr>
+      <tr><td>Wan Animate 2</td><td><code>wan</code></td><td>Wan 3's "replace the subject" line</td><td><span class="chip gap">Guide vs labels</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="pictures">
+  <h2><span class="n">03</span>Picture workflows</h2>
+  <p>v2 makes every picture on Seedream 5 Pro, which the studio doesn't have. D7 in the first review picked FLUX.2 dev
+  in its place. The table shows how each of v2's four templates lands on each of our six picture models.</p>
+  <div class="tw"><table class="matrix">
+    <thead><tr><th></th><th>FLUX.2 dev</th><th>FLUX.2 Klein 9B</th><th>FLUX.3 Klein</th><th>HunyuanImage 2.1</th><th>Krea 2 Turbo</th><th>Qwen Image 2.1</th></tr></thead>
+    <tbody>
+      <tr><td>References and their names</td><td>Up to 16, <code>image 1</code>…</td><td>Up to 16, <code>image 1</code>…</td><td>Up to 16, <code>&lt;ref_image_0&gt;</code>…, counted from zero</td><td>None</td><td>One style picture</td><td>Up to 16, <code>&lt;image1&gt;</code>…</td></tr>
+      <tr><td>Words: aim / limit</td><td>40–150 / 300</td><td>40–150 / 300</td><td>30–100 / 200</td><td>60–200 / 400</td><td>30–100 / 200</td><td>60–200 / 400</td></tr>
+      <tr><td>Rewrites the prompt</td><td>No</td><td>No</td><td>Yes (upsampler)</td><td>No</td><td>Yes (enhancer)</td><td>No</td></tr>
+      <tr><td>v2 sheet, about 230 words filled</td><td><span class="chip changed">Under the limit, over the aim</span></td><td><span class="chip changed">Under the limit, over the aim</span></td><td><span class="chip gap">Over the limit: sent back</span></td><td><span class="chip new">Fits</span></td><td><span class="chip gap">Over the limit: sent back</span></td><td><span class="chip new">Fits</span></td></tr>
+      <tr><td>v2 location frame, about 150–180 words</td><td><span class="chip new">Fits</span></td><td><span class="chip new">Fits</span></td><td><span class="chip changed">Near the limit</span></td><td><span class="chip new">Fits</span></td><td><span class="chip changed">Near the limit</span></td><td><span class="chip new">Fits</span></td></tr>
+      <tr><td>v2 anchor, 80–150 words (200 with 4+ figures)</td><td><span class="chip new">Fits</span></td><td><span class="chip new">Fits</span></td><td><span class="chip changed">At the limit with 4+ figures</span></td><td><span class="chip gap">Can't: needs references</span></td><td><span class="chip gap">Can't</span></td><td><span class="chip new">Fits</span></td></tr>
+      <tr><td>Family sheets, twins, changed looks, pairs (all need references)</td><td>Yes</td><td>Yes</td><td>Yes, but the upsampler rewrites the look</td><td>No</td><td>No</td><td>Yes</td></tr>
+      <tr><td>A negative prompt field</td><td>None</td><td>Empty, and ignored at cfg 1</td><td>Empty</td><td>Yes (shown, never used)</td><td>None</td><td>Yes (shown, never used)</td></tr>
+      <tr><td>Studio test, 3 Nov (average place)</td><td>2.0, first</td><td>4.75, last</td><td>4.25</td><td>3.5</td><td>4.5</td><td>2.0, first</td></tr>
+      <tr><td>For v2's templates</td><td><span class="chip new">Best</span></td><td><span class="chip changed">Drafts only</span></td><td><span class="chip gap">Not for sheets or anchors</span></td><td><span class="chip changed">First-wave sheets only</span></td><td><span class="chip gap">Not for sheets</span></td><td><span class="chip changed">Second choice, never paid work</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">The word counts are the templates with a typical look (40–70 words) and style prompt filled in: the
+  sheet template alone is 126 words with its placeholders. The "upsampler" and "enhancer" rewrite the prompt before
+  the model reads it, so the look is no longer word for word, and H3 and the sheets both rely on matching words.</p>
+
+  <h3>Rule by rule</h3>
+  <div class="tw"><table class="rules">
+    <thead><tr><th>Rule</th><th>v2</th><th>Studio guides</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Order of the prompt</td><td>Sheet: kind and layout → look → light → texture → "No …" → style. Anchor: Keep → Subject → Style. Shot frame: the Keep sentence, then the picture at the peak of its action, who is where, size, lens, angle and tone, then the style.</td><td>Subject → moment → place → composition → light → style. FLUX weighs the first words most.</td><td><span class="chip same">They fit</span> On FLUX, the Keep sentence goes first and gets the most weight. That is what an anchor needs.</td></tr>
+      <tr><td>Saying what is not there</td><td>The sheet and location prompts are full of "No …" phrases. The anchor uses positive words only ("Seedream bends limbs and drops people unless…").</td><td>Never. "Say what is there, never what is not."</td><td><span class="chip gap">Clash</span> v2 disagrees with itself, and our guides forbid it. See P5.</td></tr>
+      <tr><td>Naming references</td><td><q>Image k is &lt;name&gt;, their &lt;relation&gt;</q>, <q>the figure in Image 1</q>.</td><td>FLUX.2 <code>image 1</code>; FLUX.3 <code>&lt;ref_image_0&gt;</code>; Qwen <code>&lt;image1&gt;</code>; Krea "reference 1" is the style.</td><td><span class="chip changed">Name swap</span> FLUX.3 counts from zero, so v2's Image 1 is <code>&lt;ref_image_0&gt;</code>.</td></tr>
+      <tr><td>Words in the picture</td><td>The director: no readable text in any picture. Phone screens, contracts and signs show as light, layout and shapes.</td><td>Quoted words, with where they sit and their lettering. Signs nobody named go far off or in soft focus.</td><td><span class="chip same">No clash once scoped</span> Inside a film, follow v2. For a poster or title card, follow ours.</td></tr>
+      <tr><td>Exact colours</td><td>A palette in words: a shadow colour and a highlight colour, muted and filmic.</td><td>A hex code tied to its object.</td><td><span class="chip same">Different jobs</span> v2's is for the grade, ours for brand colours.</td></tr>
+      <tr><td>Counts and measures</td><td>Anchor: no digits, counts or measures ("a few steps up", never "the third stair").</td><td>No rule.</td><td><span class="chip new">v2</span> This is Seedream advice. Keep it as written, by your rule.</td></tr>
+      <tr><td>Length</td><td>Anchor 80–150 words (200 with 4+ figures). No number for sheets or locations.</td><td>An aim and a limit per model. A prompt over the limit is sent back.</td><td><span class="chip studio">Studio</span> But v2's sheet is longer than two of our limits.</td></tr>
+      <tr><td>Style</td><td>The style prompt word for word, at the end.</td><td>Style and finish at the end.</td><td><span class="chip same">Same</span></td></tr>
+      <tr><td>Distilled models</td><td>—</td><td>Klein 9B: one clear subject, fewer stacked style words.</td><td><span class="chip studio">Studio</span></td></tr>
+      <tr><td>Which model</td><td>Names one model for sheets and anchors.</td><td>Our asset-designer says only "a workflow that takes reference pictures".</td><td><span class="chip new">v2</span> Without a named model, a sheet can land on Klein or Krea and be sent back. See P4.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="card">
+    <h3>v2 words our asset-designer dropped</h3>
+    <p>Word-level diff of <code>craft-asset-designer.md</code> §2 against <code>backend/scene/skills/asset-designer.md</code>
+    step 4. v1 had these words too, so they were lost when we ported it.</p>
+    <p><b>Character, creature, group and prop sheet</b> (126 words in v2, 93 in ours):</p>
+    <div class="words"><span>no frizzy flyaway strands</span><span>no blown highlights</span><span>no airbrushing</span><span>hide, scale, metal and stone with real surface detail</span><span>not HDR</span><span>No plastic waxy skin, no CGI sheen</span></div>
+    <p><b>Location frame</b> (144 words in v2, 89 in ours):</p>
+    <div class="words"><span>its layout stated</span><span>(outdoors, on a natural rise the place offers)</span><span>wide lens</span><span>midground and background separated by depth and haze</span><span>its time of day</span><span>in the world</span><span>or smoke</span><span>background only</span><span>Cinema camera optics</span><span>slight lens falloff at the edges</span><span>real surface wear on stone, metal, glass and ground</span><span>no labels</span></div>
+    <p><b>Palette and style lines:</b> <q>a power's colour, if the story has one, stays the only saturated hue</q> and
+    <q>or the style's name when it has no prompt</q>. Some other lines were reworded ("highlights rolling off softly"
+    became "soft highlight roll-off").</p>
+  </div>
+</section>
+
+<section id="h3">
+  <h2><span class="n">04</span>H3 workflows</h2>
+  <p>v2's H3 prompter and our <code>minimax-h3</code> guide use the same eight blocks:</p>
+  <div class="flow">GOAL → ASSETS → SCENE → OPENING → SHOTS → STYLE → END STATE → LOCKS</div>
+  <div class="tw"><table class="rules">
+    <thead><tr><th>Rule</th><th>v2 H3 prompter</th><th>Studio: guide + workflow hints</th><th>Better</th></tr></thead>
+    <tbody>
+      <tr><td>Length</td><td>"Kept short", up to a cap set in <code>video-guide-minimax</code>.</td><td>150–280 words, limit 450, sent back when over.</td><td><span class="chip studio">Studio</span></td></tr>
+      <tr><td>Beats</td><td><code>[0-2s] framing + lens + angle → one clear action + acting → {dialogue} → camera move</code> on every beat.</td><td>One action takes 1–2 beats. The first beat sets the framing. A new framing in a later beat is a hard cut, so write one only when a cut was asked for, as "Cut to".</td><td><span class="chip gap">Clash</span> Ours is right for one-action clips; v2's for a scene packed with planned shots. See P2.</td></tr>
+      <tr><td>Keep the action in frame</td><td>—</td><td>Hands, feet, the ball and anything handed over stay in frame. A push in that would crop them stays wider.</td><td><span class="chip studio">Studio</span></td></tr>
+      <tr><td>Posed endings</td><td>—</td><td>No eye contact with the camera and no posed endings, unless asked.</td><td><span class="chip studio">Studio</span></td></tr>
+      <tr><td>One role line per slot</td><td>One subject and one job each: <q>@Image1: Meera — face, hair, and clothing.</q></td><td>The same, with our slot names: "face, hair and clothing only".</td><td><span class="chip same">Same</span></td></tr>
+      <tr><td>Several views of one person</td><td>Say they jointly define one entity. A sheet of one character never defines two people.</td><td>Not in the guide, though H3 All in One has the slot "CHARACTER 2 (same person, other angle)".</td><td><span class="chip new">v2</span></td></tr>
+      <tr><td>The motion video</td><td><q>@Video1: camera movement and pacing only.</q></td><td>No role line, though both H3 workflows have the slot (207).</td><td><span class="chip new">v2</span></td></tr>
+      <tr><td>Clip frames as identity</td><td>Never wire extracted frames or QC sheets as identity.</td><td>Only in H3 Chunk's hints ("Never a clip's frame as identity").</td><td><span class="chip new">v2</span> It belongs in the guide.</td></tr>
+      <tr><td>Too many references</td><td>Keep, in order: what was named → anchors → speakers' sheets → the place → other sheets → props. Say what was dropped.</td><td>H3 Chunk's hints: the same order, without anchors.</td><td><span class="chip new">v2</span></td></tr>
+      <tr><td>Voice sample</td><td>On the character's role line: <q>never use it for any other character.</q></td><td><q>the voice of the main character only</q></td><td><span class="chip same">Same</span></td></tr>
+      <tr><td>Recorded lines</td><td>Bound twice (role line and landing moment), plus <q>Use the attached @Audio clips strictly as-is</q>. No voice sample alongside. All or nothing.</td><td><q>character 1 speaks 'line' at 3.2–5.0 s; nobody else's lips move</q></td><td><span class="chip new">v2</span> v2 adds the as-is lock and the no-sample rule.</td></tr>
+      <tr><td>How speech is written</td><td><q>Meera says: "Sign here, please."</q></td><td>The guide: <code>says: "…"</code>. The agent's rule and H3 All in One's hint: after <code>Audio:</code>.</td><td><span class="chip gap">Ours differs</span> v2 matches our guide; our other two places don't. See P3.</td></tr>
+      <tr><td>Silent clip</td><td>"No dialogue. No music."</td><td>The same, in LOCKS.</td><td><span class="chip same">Same</span></td></tr>
+      <tr><td>Continuity in the prompt</td><td>Text, staging grid, reference grid, first frame, anchor, fresh start. The anchor goes with any of them.</td><td>Text continuity in the guide. The board line is in the board skill and H3 Chunk's hints. No anchor.</td><td><span class="chip new">v2</span></td></tr>
+      <tr><td>First-frame mode</td><td>ASSETS names the frame. SHOTS give motion and camera only.</td><td>The same, and the first beat keeps the picture's framing: anything else is a hard cut away from it.</td><td><span class="chip studio">Studio</span></td></tr>
+      <tr><td>Feelings</td><td>Only as a visible tell. A feeling with no tell is dropped.</td><td><q>her jaw tightens</q>, not <q>she is angry</q></td><td><span class="chip new">v2</span> v2 adds the drop.</td></tr>
+      <tr><td>Staying faithful</td><td>Every line comes from the inputs. With no written scene, write only what the user said.</td><td>The agent's rule: write a complete shot, with camera, light and sound.</td><td><span class="chip gap">Clash</span> Still open from the first review: v2 inside a skill run, ours outside one.</td></tr>
+      <tr><td>Settings out of the prompt</td><td>No ratio, duration or resolution in the prompt.</td><td>The same.</td><td><span class="chip same">Same</span></td></tr>
+      <tr><td>Report after the call</td><td>What was made, references dropped, settings locked, gaps.</td><td>Only "say in the reply what was left out" (H3 Chunk).</td><td><span class="chip new">v2</span></td></tr>
+      <tr><td>Copyright map</td><td>Original names never reach the prompt.</td><td>None.</td><td><span class="chip new">v2</span></td></tr>
+      <tr><td>Hindi</td><td><code>hindi_mode</code>: prelock or recorded.</td><td>Respelling by ear.</td><td><span class="chip changed">Different</span></td></tr>
+      <tr><td>Keyframes</td><td>First and last only ("no middle frame on H3").</td><td>H3 Chunk takes one keyframe per shot (311–316) plus cut frames.</td><td><span class="chip studio">Studio has more</span> But neither side gives the words for them. Seedance's keyframe sentences are the nearest.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>v2's role lines on our slots</h3>
+  <div class="tw"><table>
+    <thead><tr><th>v2 role line</th><th>H3 All in One</th><th>H3 Chunk</th></tr></thead>
+    <tbody>
+      <tr><td>Character sheet: face, hair, clothing</td><td>CHARACTER 1 ("the main character"), CHARACTER 3 (second person)</td><td>Character 1–5, as <code>&lt;Picture 2&gt;</code> onwards, "character 1"…</td></tr>
+      <tr><td>Several views jointly define one entity</td><td>CHARACTER 2 (same person, other angle)</td><td>—</td></tr>
+      <tr><td>Location: layout, architecture, light; ignore any people in it</td><td>BACKGROUND / LOCATION ("the background")</td><td><code>&lt;Picture 1&gt;</code>, which gets the location sheet today</td></tr>
+      <tr><td>Anchor: space and positions, not a frame to copy</td><td>—</td><td><code>&lt;Picture 1&gt;</code>, once anchors exist (D7)</td></tr>
+      <tr><td>Prop: shape, material, colour</td><td>PROP / PRODUCT</td><td>Prop, Prop 2</td></tr>
+      <tr><td>Outfit (no line on either side; Wan 3's "partial borrowing" fits)</td><td>OUTFIT</td><td>Extra Reference (outfit, detail or style)</td></tr>
+      <tr><td>Staging grid or reference grid</td><td>—</td><td>Extra Reference</td></tr>
+      <tr><td>Motion clip: camera movement and pacing only</td><td>MOTION / CAMERA REFERENCE VIDEO</td><td>Motion / camera reference video</td></tr>
+      <tr><td>Voice sample</td><td>VOICE SAMPLE</td><td>Voice sample (character 1 only)</td></tr>
+      <tr><td>Recorded lines, lips syncing word for word</td><td>VOICE TRACK</td><td>Voice track (this chunk's slice)</td></tr>
+      <tr><td>First / last frame</td><td>FIRST FRAME, LAST FRAME</td><td>Shot 1–6 keyframes</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="card">
+    <h3>H3 15 s (720p)</h3>
+    <p>This workflow takes three prompts (seconds 0–5, 5–10, 10–15), and each part starts where the last ended. Only
+    part 1's field counts as "the prompt", so the guide and its limit are written for one prompt. Parts 2 and 3 are
+    plain text fields, guided only by the hint "repeat the same scene description in all three prompts and change only
+    the one small action and the line of each part". v2 has nothing like it. Its nearest rule is text continuity: each
+    part's OPENING restates the last part's END STATE. See P6.</p>
+  </div>
+</section>
+
+<section id="video">
+  <h2><span class="n">05</span>Other video workflows</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Talking Head / Narration <span class="chip gap">No guide</span></h3>
+      <p>The guide pattern <code>^video/h3_</code> misses this workflow, so it gets the general structure, whose AUDIO
+      section asks for the spoken words. The workflow's own field says the opposite: <q>Describe the delivery, motion
+      and camera (not the words). Call the portrait &lt;Picture 1&gt;.</q></p>
+      <p><b>From v2:</b> frames mode (motion and camera only), recorded audio <q>lips syncing to it word for word</q>,
+      and <q>use the attached audio strictly as-is</q>. <b>From ours:</b> the camera keeps the portrait's framing.
+      See P7.</p>
+    </div>
+    <div class="card">
+      <h3>Lip Sync <span class="chip same">No prompt</span></h3>
+      <p>A video and a voice track, nothing written. Nothing to compare.</p>
+    </div>
+    <div class="card">
+      <h3>LTX-2.5 <span class="chip studio">Ours only</span></h3>
+      <p>Our <code>ltx</code> guide: one flowing present-tense paragraph, 100–200 words, sound included. v2 has no LTX
+      prompter. The rules both sides share already apply: feelings as what shows, and no settings in the prompt. The
+      workflow itself has been broken since October (blurred blobs) and needs fixing on Zoro.</p>
+    </div>
+    <div class="card">
+      <h3>Restyle Video: LTX-2.3 <span class="chip studio">Ours only</span></h3>
+      <p>Our guide's restyle line: describe the new look and keep the action as the video has it. The nearest v2 lines
+      are Wan 3's <q>Replace &lt;subject&gt; in @Video1 with &lt;name&gt;, keeping the action, path, and scene
+      unchanged</q> and Seedance's "the new object inherits the timing, path, speed and occlusion". The workflow has a
+      fixed English negative prompt of its own.</p>
+    </div>
+    <div class="card">
+      <h3>Restyle: Wan VACE and Wan 2.2 Fun Control <span class="chip studio">Ours only</span></h3>
+      <p>Our <code>wan</code> guide: 60–120 words of plain prose (the umT5 encoder loses the end of a long prompt), the
+      new look only, never a different action. Both workflows have a fixed Chinese negative prompt the agent can't
+      change, which does the job of Wan 3's [Negative Prompts] section. Wan 3's partial-borrowing line fits VACE when
+      its reference is a style picture rather than a restyled first frame.</p>
+    </div>
+    <div class="card">
+      <h3>Change shape: Wan VACE <span class="chip studio">Ours only</span></h3>
+      <p>Our guide: describe what lies around the frame as a still place, with nothing new that moves and no new
+      people. The nearest v2 line is the extend-mode lock <q>each subject stays one continuous instance — no
+      duplicates</q>, which would fit this workflow's joins of 5-second parts.</p>
+    </div>
+    <div class="card">
+      <h3>Wan Animate 2 <span class="chip gap">Guide vs labels</span></h3>
+      <p>Our guide says: describe the background, the light on the character and the camera, <b>not</b> the character's
+      look or its moves. The workflow's two fields say <q>Describe the character and the background</q> and
+      <q>Describe the motion and the camera</q>, and the guide never mentions the second field. v2 has nothing for
+      character animation. See P8.</p>
+    </div>
+  </div>
+</section>
+
+<section id="seedance">
+  <h2><span class="n">06</span>Seedance 2.0, 2.5 and Wan 3.0</h2>
+  <p>None of these models is in the studio, and D16 said not to port their prompters. But these general lines would
+  improve our guides as they are:</p>
+  <div class="tw"><table>
+    <thead><tr><th>Line</th><th>From</th><th>Would help</th></tr></thead>
+    <tbody>
+      <tr><td><q>A name after every tag, everywhere … A tag straight before a verb, number, or position word gets misread as a count.</q></td><td>Seedance 2.0</td><td>H3 Chunk's <code>&lt;Picture N&gt;</code> names</td></tr>
+      <tr><td><q>Several people facing camera: pin each by screen side and a visible trait.</q></td><td>Seedance 2.0</td><td>H3, Qwen, anchors</td></tr>
+      <tr><td><q>One camera move per shot — never two at once (a push-in and a pan together jitter).</q></td><td>Seedance 2.0</td><td>H3, LTX (our Wan guide already says one move)</td></tr>
+      <tr><td><q>Never put a tag in a shot where that subject is absent — the model forces it into frame.</q></td><td>Seedance 2.0 and 2.5</td><td>H3</td></tr>
+      <tr><td><q>Partial borrowing is stated: "Use only the color palette and lighting of @Image2, not its characters."</q></td><td>Wan 3.0</td><td>Krea 2's style picture, Wan VACE's reference, H3's outfit and extra slots</td></tr>
+    </tbody>
+  </table></div>
+  <p><b>Not usable here:</b> Wan 3's five bracketed sections (too long for Wan 2.x, and they include sound that Wan 2.x
+  doesn't make); Seedance's <q>Please note that this is not video editing</q>; the edit and extend modes (we have no
+  such workflows, and the true Chain extension isn't wired); and the ffmpeg trims for 15 s and 30 s sources.</p>
+</section>
+
+<section id="gaps">
+  <h2><span class="n">07</span>Our own gaps, found on the way</h2>
+  <p>These are in the studio whether or not v2 is ported.</p>
+  <ol>
+    <li>Talking Head has no guide, because the pattern <code>^video/h3_</code> misses it.</li>
+    <li>H3 15 s: the guide covers part 1's field only.</li>
+    <li>H3 All in One's two keyframe prompts (Qwen Image Edit, fields 405 and 406) have no guide on either side.</li>
+    <li>Wan Animate 2: the guide and the field labels disagree, and the second field isn't mentioned.</li>
+    <li>HunyuanImage and Qwen Image show a NEGATIVE PROMPT field (101) that no guide mentions.</li>
+    <li>Speech is written in three ways: <code>says: "…"</code> in the guide, after <code>Audio:</code> in the
+      agent's rule and in H3 All in One's hint.</li>
+    <li>On H3 Chunk, script-to-video step 6 can fill both the voice sample and the voice track. v2 says never both.</li>
+    <li>Our asset-designer doesn't name a picture workflow for sheets, so a sheet can land on a model whose limit sends it
+      back.</li>
+    <li>LTX-2.5 text to video has been broken since October.</li>
+  </ol>
+</section>
+
+<section id="decide">
+  <h2><span class="n">08</span>Decisions</h2>
+  <p>Each one either changes v2's words or changes what the studio does today, so each needs your answer. D7, D10 and
+  D16 from the first review still stand.</p>
+  <div class="grid2">
+    <div class="card q"><h3><span class="n">P1</span>Bring back v2's dropped words</h3>
+      <p>Our asset-designer lost 18 phrases from the sheet and location prompts, plus the palette and style lines (§03).</p>
+      <p class="rec"><b>Recommend</b> restore them word for word, as your rule says. P5 decides where the "No …" words go.</p></div>
+    <div class="card q"><h3><span class="n">P2</span>Add v2's missing H3 lines to our guide</h3>
+      <p>Several views make one person, the motion video line, no clip frames as identity, the drop order with anchors,
+      the as-is audio lock, no voice sample next to a voice track, drop a feeling with no tell, and the report. Plus one
+      line for planned cuts: inside a skill run, each planned shot after the first opens with "Cut to" and gets its
+      keyframe.</p>
+      <p class="rec"><b>Recommend</b> yes. I'm asking because the guide applies to every H3 prompt, not just skill runs.
+      D10 (the H3 prompter as a skill, all its text kept) stands either way.</p></div>
+    <div class="card q"><h3><span class="n">P3</span>One way to write speech</h3>
+      <p><code>&lt;name&gt; says: "…"</code> (v2 and our guide) or after <code>Audio:</code> (the agent's rule and H3
+      All in One's hint).</p>
+      <p class="rec"><b>Recommend</b> <code>says:</code> everywhere, and change the agent's rule and the hint to
+      match.</p></div>
+    <div class="card q"><h3><span class="n">P4</span>Which picture model gets v2's templates</h3>
+      <p>Sheets and anchors need references, the words kept as written, and room for about 230 words.</p>
+      <p class="rec"><b>Recommend</b> FLUX.2 dev; Qwen only for unpaid work; HunyuanImage only for sheets without
+      references; never FLUX.3 Klein or Krea 2. Name the model in asset-designer and anchor. That is a model swap only,
+      plus the FLUX.3 numbering note if it is ever used.</p></div>
+    <div class="card q"><h3><span class="n">P5</span>v2's "No …" words</h3>
+      <p>v2's sheets use them, its anchor bans them, and our FLUX guide bans them.</p>
+      <p class="rec"><b>Recommend</b> keep every word. On Qwen and HunyuanImage, put the "No …" phrases in the NEGATIVE
+      PROMPT field. On FLUX.2, keep them in the prompt and first run one sheet with them and one without through
+      <code>scripts/prompt_ab.py</code>.</p></div>
+    <div class="card q"><h3><span class="n">P6</span>H3 15 s: three prompts</h3>
+      <p>Nothing says what goes in parts 2 and 3.</p>
+      <p class="rec"><b>Recommend</b> one guide line: GOAL, SCENE, STYLE and LOCKS repeat word for word in all three
+      parts; each part's OPENING is the last part's END STATE; only SHOTS change. This is v2's text-continuity
+      rule.</p></div>
+    <div class="card q"><h3><span class="n">P7</span>A Talking Head guide</h3>
+      <p>Today it falls back to a structure that asks for the spoken words.</p>
+      <p class="rec"><b>Recommend</b> a new <code>prompters/talking-head.md</code> built from v2's frames-mode and
+      recorded-audio lines plus our two hints (describe the delivery, keep the portrait's framing).</p></div>
+    <div class="card q"><h3><span class="n">P8</span>Wan Animate 2: describe the character or not</h3>
+      <p>The guide says no; the field labels say yes.</p>
+      <p class="rec"><b>Recommend</b> render both versions on Zoro, then fix whichever is wrong: the guide or the
+      labels.</p></div>
+    <div class="card q"><h3><span class="n">P9</span>Borrow five general lines</h3>
+      <p>The Seedance and Wan 3 lines in §06: name after every tag, screen side and a visible trait, one camera move,
+      no tag for an absent subject, partial borrowing.</p>
+      <p class="rec"><b>Recommend</b> add them to our H3 guide, plus partial borrowing to the Krea 2 and Wan guides.
+      Nothing else from those prompters.</p></div>
+  </div>
+</section>
+
+<footer>
+  <p>Read for this review: the four prompters, craft-asset-designer, craft-anchor, craft-director and script-to-video in
+  <code>craft skills v2/craft skills/</code>; <code>backend/scene/prompters/*.md</code> and <code>prompters.py</code>;
+  the prompt rules in <code>agent.py</code> and <code>camera.py</code>; the asset-designer, character-sheet,
+  script-to-video and continuity skills; every picture and video sidecar in <code>workflows/</code>, the reference and
+  text nodes in their graphs, and the 3 November test results. Word counts come from a word-level diff and count.</p>
+  <p>The skill and guide files are the truth. When they change, this page goes out of date.</p>
+</footer>
+
+</div>
+</body>
+</html>

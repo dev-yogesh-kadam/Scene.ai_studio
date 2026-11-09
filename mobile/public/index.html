@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Scene.ai</title>
+    <meta name="description" content="Your Scene.ai studio on your phone." />
+    <!-- Added to the home screen, it opens full screen like an app. -->
+    <link rel="manifest" href="/m/manifest.json" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Scene.ai" />
+    <link rel="apple-touch-icon" href="/m/icons/apple-touch-icon.png" />
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #000;
+        /* No grey flash when a finger lands on something, no zoom on a double tap, no pull-to-refresh of the page. */
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        overscroll-behavior: none;
+      }
+      @media (prefers-color-scheme: light) {
+        html,
+        body {
+          background: #f2f2f7;
+        }
+      }
+      body {
+        overflow: hidden;
+      }
+      /* No scrollbars, as on a phone: lists scroll by touch. */
+      * {
+        scrollbar-width: none;
+      }
+      *::-webkit-scrollbar {
+        display: none;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>Scene.ai needs JavaScript. Or open the <a href="/?desktop=1">full studio</a>.</noscript>
+    <div id="root"></div>
+  </body>
+</html>

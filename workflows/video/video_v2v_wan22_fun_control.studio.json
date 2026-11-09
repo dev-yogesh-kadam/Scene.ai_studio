@@ -17,6 +17,7 @@
     "95",
     "96"
   ],
+  "pick_when": "Restyle a video when the look matters most: the softest, most painted result in tests, about 5 times slower than Wan VACE.",
   "hints": [
     "Make the style frame from the video's first frame with a picture model, so the people and their places match.",
     "The length is in frames: 4n+1, such as 49, 81 or 121."

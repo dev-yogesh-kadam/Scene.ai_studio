@@ -12,8 +12,8 @@ file to be added.
 
 You need Python 3.10 or newer and a running ComfyUI server. Two things are optional:
 
-- A language model for the agent and for "Improve prompt": a local one on an [Ollama](https://ollama.com)
-  server, or a hosted one (Google Gemini, Kimi) with an API key.
+- [Claude Code](https://claude.com/claude-code), signed in: the agent and "Improve prompt" use Anthropic's Claude
+  models through it, and no other language model.
 - Node.js 22 or newer, for motion graphics. See [docs/motion.md](docs/motion.md).
 
 | System | Start |
@@ -36,6 +36,12 @@ second step when it is on), and it is the only place the admin routes are. By de
 this computer alone; see `console_host` below.
 
 Stop the app with `Ctrl+C`.
+
+## On a phone
+
+Open the studio on a phone and it shows its phone site (`/m/`): projects, modules as storyboards, the agent, creating,
+the library and skills, sized for a small screen. Tablets and computers get the full studio. The phone site is built
+from `mobile/` (`npm run build`; `scripts/start.bat` does it the first time). See [mobile/README.md](mobile/README.md).
 
 ## Project layout
 
@@ -65,7 +71,6 @@ Stop the app with `Ctrl+C`.
   editable before rendering, plus title cards, lower thirds and titles over a video. All rendered on
   the studio's own machine at no cost.
 - **Upscale** a video from the canvas to a larger, sharper one.
-- **Timeline**: put videos in order, trim them and export the cut as one video.
 - **Assets**: save characters, outfits, backgrounds and voices once and pick them in any reference box.
 - **Library**: search by name or prompt, group items in projects, re-run, or continue a video from its last frame.
 - **Credits**: every generation costs credits for what was asked for: a flat price for an image, a price per
@@ -79,11 +84,12 @@ Stop the app with `Ctrl+C`.
 | Setting | Default | Meaning |
 |---|---|---|
 | `comfy_url` | `http://127.0.0.1:8188` | ComfyUI address. An admin can also change it in the admin console. |
-| `ollama_url` | `http://127.0.0.1:11434` | The Ollama server whose language model the agent uses. It also improves prompts and writes the captions some image models need. |
-| `agent_model` | first model there is | The model the agent uses unless the user picks another, for example `qwen3.5:9b`, or `kimi/kimi-k2.6` for a hosted one. |
-| `ollama_models` | all of them | The local models the agent offers, comma separated, for example `qwen3.6:35b,nemotron3:33b`. Ollama may hold others, such as an embedding model, that should not be picked. |
-| `api_url`, `api_key`, `api_models` | none | A hosted model service for the agent beside the local ones, for example Kimi. See [docs/servers.md](docs/servers.md). |
-| `gemini_key`, `gemini_models` | none | Google Gemini models for the agent. |
+| `agent_model` | the first of `claude_models` | The Claude model the agent uses unless the user picks another, for example `sonnet`. |
+| `claude_models` | `sonnet, opus, haiku` | The Claude models the agent offers, as Claude Code names them. |
+| `claude_fast_model` | `haiku` | The model for small jobs: captions, notes, checks. Empty uses the one in use. |
+| `claude_path` | the one on PATH | The `claude` program; else the VS Code extension's. |
+| `claude_timeout` | `600` | Seconds one call to Claude may take. |
+| `claude_context` | `1000000` | Tokens of context the Claude models have; a session is compacted at 90% of it. |
 | `host`, `port` | `0.0.0.0`, `8080` | Where the app listens. Use `127.0.0.1` to keep it to this computer. |
 | `console_host`, `console_port` | `127.0.0.1`, `8090` | Where the admin console listens. `127.0.0.1` is this computer alone; a Tailscale address (`100.x.y.z`) lets your other machines in; several, comma-separated, listen on each (`127.0.0.1,100.x.y.z`). Never point a public tunnel at it. `console_port` `0` turns it off. |
 | `console_url` | `""` | The console's address as an admin's browser reaches it, for the studio's link. Empty means the studio's host on `console_port`. |
@@ -110,7 +116,7 @@ cd backend && ../.venv/bin/python -m pytest      # tests
 cd backend && ../.venv/bin/python -m scene       # run the app
 ```
 
-On Windows the Python is `.venv\Scripts\python.exe`. The tests need no ComfyUI, Ollama or Node.js.
+On Windows the Python is `.venv\Scripts\python.exe`. The tests need no ComfyUI, Claude or Node.js.
 
 ## Before putting it on the public internet
 

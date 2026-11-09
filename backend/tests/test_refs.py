@@ -42,7 +42,7 @@ def test_a_link_opens_only_for_people_in_the_project(client):
 
 def test_pages_answer_at_addresses_with_ids(client):
     for path in ("/project/PRJabcdefghijklm", "/canvas/PRJabcdefghijklm", "/canvas/PRJabcdefghijklm/module/MODabcdefghijklm",
-                 "/timeline/PRJabcdefghijklm/module/MODabcdefghijklm", "/analytics/PRJabcdefghijklm"):
+                 "/analytics/PRJabcdefghijklm"):
         answer = client.get(path)
         assert answer.status_code == 200 and "<html" in answer.text.lower()
 

@@ -222,7 +222,7 @@ def test_a_tab_goes_on_in_one_session_whatever_the_claude_model(tmp_path):
                                         {"instruction": "b", "reply": "B by Gemini"}]}
     back = _thread(state, user, 3, later, "claude/sonnet", "SYSTEM")
     assert back["id"] == "s-1" and [t["reply"] for t in back["missed"]] == ["A by Gemini", "B by Gemini"]
-    _keep_thread(state, user, 3, later, "claude/sonnet", dict(back, stood_in=True), "Ollama stood in")   # not Claude's answer
+    _keep_thread(state, user, 3, later, "claude/sonnet", dict(back, stood_in=True), "another model stood in")   # not Claude's answer
     assert _thread(state, user, 3, later, "claude/sonnet", "SYSTEM")["id"] == "s-1"                          # the thread stays as it was
 
 
@@ -537,3 +537,46 @@ def test_a_session_row_keeps_its_story_and_says_how_full_it_is(tmp_path):
     assert sessions.context(850_000, 1_000_000) == {"tokens": 850_000, "window": 1_000_000, "percent": 85, "offer": True}
     assert sessions.context(500_000, 1_000_000)["offer"] is False and sessions.context(5, 0)["percent"] == 0
     assert sessions.title("Agent 2", "Film › Episode 1", "Ada") == "Studio · Agent 2 · Film › Episode 1 · Ada"
+
+
+def test_each_model_offers_the_effort_levels_it_takes():
+    assert claude.efforts("claude/opus") == (list(claude.LEVELS), "medium")            # "opus" is Opus 5.5
+    assert claude.efforts("claude/sonnet") == (list(claude.LEVELS), "high")
+    assert claude.efforts("haiku") == (list(claude.LEVELS), "medium")
+    assert claude.efforts("claude-opus-4-6") == (["low", "medium", "high", "max"], "high")
+    assert claude.efforts("claude-opus-4-5") == (["low", "medium", "high"], "high")
+    assert claude.efforts("claude-haiku-4-5") == ([], None) and claude.efforts("claude-sonnet-4-5") == ([], None)
+    assert claude.chosen_effort("claude/opus", "XHIGH") == "xhigh"
+    assert claude.chosen_effort("claude-opus-4-6", "xhigh") == "" and claude.chosen_effort("claude/opus", "turbo") == ""
+
+
+def test_the_effort_picked_goes_to_the_conversation_and_not_to_the_small_jobs(monkeypatch, tmp_path):
+    monkeypatch.setattr(claude, "sdk", None)
+    brain = brain_with_claude()
+    brain.services["claude"]["home"] = str(tmp_path / "sessions")
+    runs = fake_claude(monkeypatch, printed(session_answer({"reply": "Hello.", "steps": []})), printed(answered({"reply": "On its own."})))
+    token = claude.EFFORT.set("xhigh")
+    try:
+        asyncio.run(brain.ask("You plan.", "hi", [], model="claude/sonnet", thread={"id": None}))
+        asyncio.run(brain.ask("You plan.", "hi", [], model="claude/sonnet"))     # a call of its own: the model's default
+    finally:
+        claude.EFFORT.reset(token)
+    first, second = runs[0]["args"], runs[1]["args"]
+    assert first[first.index("--effort") + 1] == "xhigh" and "--effort" not in second
+
+
+def test_a_live_session_opens_again_with_the_new_effort(monkeypatch):
+    brain = brain_with_claude()
+    opened = fake_live(monkeypatch, [result(dict(PLAN, reply="a"))], [result(dict(PLAN, reply="b"))])
+    thread = {"key": "1:tab1:3:claude/opus", "id": None}
+
+    def say(text, effort):
+        token = claude.EFFORT.set(effort)
+        try:
+            asyncio.run(brain.ask_with_tools("You plan.", text, ["w"], {}, model="claude/sonnet", thread=thread))
+        finally:
+            claude.EFFORT.reset(token)
+    say("one", "")
+    say("two", "max")
+    assert opened[0].settings["effort"] == "" and opened[0].closed
+    assert opened[1].settings["effort"] == "max" and opened[1].settings["resume"] == "s-1"   # the same conversation goes on

@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 FPS = 24
+FFMPEG_LIMIT = 2 * 3600   # seconds one ffmpeg may run: far beyond the longest encode of a film, so only a hung one meets it
 
 
 class MediaError(Exception):
@@ -29,17 +30,22 @@ def ffmpeg_path():
         return found
 
 
-async def _ffmpeg(*args, check=True, cwd=None):
+async def _ffmpeg(*args, check=True, cwd=None, limit=FFMPEG_LIMIT):
     """Run ffmpeg and return what it said. cwd: the folder it runs in, so a filter can name its files (subtitles, a
-    font) without the escaping a full Windows path needs inside a filter."""
+    font) without the escaping a full Windows path needs inside a filter. limit: seconds before it is stopped as hung."""
+    # No keyboard: ffmpeg reads keys from stdin, and a "c" reaching the studio's console left one waiting for a command for good.
     process = await asyncio.create_subprocess_exec(
-        ffmpeg_path(), "-hide_banner", "-y", *[str(a) for a in args],
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, cwd=cwd)
+        ffmpeg_path(), "-hide_banner", "-nostdin", "-y", *[str(a) for a in args],
+        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, cwd=cwd)
     try:
-        _, stderr = await process.communicate()
+        _, stderr = await asyncio.wait_for(process.communicate(), limit)
     except asyncio.CancelledError:   # the job this was for was cancelled: don't leave ffmpeg running
         process.kill()
         raise
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise MediaError("ffmpeg stopped responding and was stopped after {:.0f} seconds.".format(limit))
     text = stderr.decode("utf-8", "replace")
     if check and process.returncode != 0:
         raise MediaError("ffmpeg failed: " + text.strip()[-400:])

@@ -16,6 +16,24 @@ const RECALLED = 40;   // how many earlier turns are sent along (the server keep
 // A message that only says to go ahead: under a plan that waits for approval it approves it.
 const GO = /^\W*(approve|approved|start|go|go ahead|yes|ok|okay|proceed|generate|generate it|make it|do it|run it|confirm)\W*$/i;
 const REVIEW_WITHIN = 24 * 3600 * 1000;   // a shot finished longer ago than this is not reviewed when the panel opens
+const OTHER = '\u0000other';   // the pick of a question's card that is the user's own words
+const MAX_RETAKES = 3;   // under "Allow all" a shot that fails its check is made again up to this many times; then the best take goes on
+// Every take of a step in the order they were made: the first, the earlier retakes, the newest retake.
+const takesOf = (step) => [step, ...(step.earlier || []), ...(step.take2 ? [step.take2] : [])];
+const retakesOf = (step) => takesOf(step).length - 1;
+// How far a checked take is from what was asked: its major faults count most, then its minor ones; unchecked is worst.
+const faults = (take) => {
+  if (!take.review) return Infinity;
+  const count = (level) => (take.review.checks || []).filter((c) => c.level === level).length;
+  return (take.review.passed ? 0 : 1000 * Math.max(1, count('major'))) + count('minor');
+};
+// The best take made: the fewest faults, the newer of two as good.
+const bestTake = (step) => takesOf(step).filter((t) => t.made).reduce((best, t) => (!best || faults(t) <= faults(best) ? t : best), null);
+// Whether a step has a line under its grid: a retake being made, or takes to pick from.
+const reviewShown = (step) => (!!step.take2 && !step.take2.made) || takesOf(step).filter((t) => t.made).length > 1;
+// The pictures and clips a plan generates: what the agent checks.
+const shotsOf = (run) => run.steps.filter((s) => !s.skipped && s.settings && (s.kind === 'image' || s.kind === 'video'));
+const REVIEWS_AT_ONCE = 3;   // a batch is checked together, a few requests at a time so the studio's other calls still get through
 // The studio's default model changed (to a local one, 17 October): a model picked before that is forgotten once, so
 // everyone starts on the new default and can still pick another.
 try {
@@ -26,10 +44,9 @@ try {
 } catch { /* storage may be blocked: the server's default is used anyway */ }
 const LONG_REPLY = 700;
 const SAVED_ONLY = 3;     // turns of a long run in a row that only save their work and go on by themselves   // a reply longer than this is folded to a few lines, with Show more
-const MARK = { queued: 'Waiting', running: 'Running', done: 'Done', failed: 'Failed', cancelled: 'Cancelled', waiting: 'Waits for the step before' };
 // Whether a plan runs as soon as it arrives or waits for Approve. The choice is this browser's, kept in localStorage.
 const PERMISSIONS = [
-  { id: 'all', icon: 'forward', label: 'Allow all', about: 'Never asks. The agent decides everything and plans run at once.' },
+  { id: 'all', icon: 'forward', label: 'Allow all', about: 'Never asks. Plans run at once; a failed shot is made again up to 3 times, then the best take goes on.' },
   { id: 'videos', icon: 'handvideo', label: 'Ask before videos', about: 'Runs images and audio. Asks before videos.' },
   { id: 'always', icon: 'hand', label: 'Always ask', about: 'Asks before every generation.' },
 ];
@@ -48,7 +65,6 @@ const WHIMSY = [
 ];
 const SHAPES = [{ id: 'landscape', label: '16:9' }, { id: 'square', label: '1:1' }, { id: 'portrait', label: '9:16' }];
 const SHAPE_NAMES = { landscape: '16:9', portrait: '9:16', square: '1:1' };
-const KIND_ICONS = { video: 'video', image: 'image', audio: 'audio' };
 const KIND_NAMES = { video: 'Video', image: 'Image', audio: 'Audio' };
 
 // A small menu that opens under (or above) a button and closes on a click elsewhere or Escape.
@@ -93,7 +109,7 @@ export function spentBy(runs, jobs = []) {
     spent.llm += llm;
     spent.total += llm;
     for (const step of run.steps || []) {
-      const takes = [[step, step.credits], [step.take2, step.retake && step.retake.credits]];
+      const takes = [[step, step.credits], ...(step.earlier || []).map((t) => [t, t.credits]), [step.take2, step.take2 && (step.take2.credits || (step.retake && step.retake.credits))]];
       for (const [take, credits] of takes) {
         if (!take || !take.job || refunded.has(take.job) || !credits) continue;
         const kind = ['image', 'audio'].includes(step.kind) ? step.kind : 'video';   // motion graphics and edits are videos
@@ -157,20 +173,46 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
 
   const status = el('span', { class: 'agent-status slate-text' }, 'checking…');   // the model's name, or why it is offline
   // Which model answers, and what a message to it costs. The choice is this browser's, kept in localStorage.
-  let models = { list: [], current: null, prices: {}, byTokens: [], shown: (name) => name };
+  let models = { list: [], current: null, prices: {}, byTokens: [], efforts: {}, shown: (name) => name };
   const modelPicker = el('button', { type: 'button', class: 'agent-model-btn hidden', 'aria-haspopup': 'menu', title: 'The model the agent uses',
     onclick: () => openModels() });
   const priceText = (name) => (models.prices[name] ? `${models.prices[name]} cr a message` : models.byTokens.includes(name) ? 'Charged by tokens' : 'Free');
+  // How hard the model thinks before it answers: the levels the model takes (the server says which), kept per model.
+  // Low until the user picks another; a higher level is slower and uses more tokens.
+  const EFFORT_NAMES = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+  const effortsOf = (name) => (models.efforts[name] || { levels: [], default: null });
+  const effortOf = (name) => {
+    const { levels } = effortsOf(name);
+    let picked = '';
+    try { picked = localStorage.getItem('scene.agent.effort.' + name) || ''; } catch { /* storage off */ }
+    return levels.includes(picked) ? picked : levels.includes('low') ? 'low' : levels[0] || '';
+  };
   const drawModel = () => {
-    modelPicker.replaceChildren(el('span', { class: 'agent-model-name' }, models.shown(models.current || '')), icon('down'));
-    modelPicker.title = `The model the agent uses: ${models.shown(models.current || '')} · ${priceText(models.current)}`;
+    const effort = effortOf(models.current);
+    modelPicker.replaceChildren(el('span', { class: 'agent-model-name' }, models.shown(models.current || '')),
+      effort && el('span', { class: 'agent-model-effort' }, EFFORT_NAMES[effort] || effort), icon('down'));
+    modelPicker.title = `The model the agent uses: ${models.shown(models.current || '')} · ${priceText(models.current)}`
+      + (effort ? ` · Effort: ${EFFORT_NAMES[effort] || effort}` : '');
   };
   function openModels() {
+    const { levels } = effortsOf(models.current);
+    const effort = effortOf(models.current);
+    const setEffort = (level) => {
+      try { localStorage.setItem('scene.agent.effort.' + models.current, level); } catch { /* storage off */ }
+      drawModel();
+      box.close();
+    };
     const box = popover(modelPicker, [el('div', { class: 'pop-title' }, 'Agent model'),
       ...models.list.map((name) => el('button', { type: 'button', class: 'pop-item', role: 'menuitemradio', 'aria-checked': String(name === models.current),
         onclick: () => { models.current = name; localStorage.setItem('scene.agent.model', name); drawModel(); box.close(); } },
         el('span', {}, el('b', {}, models.shown(name)), el('span', { class: 'muted small' }, priceText(name))),
-        name === models.current ? icon('check') : el('span')))], 'pop-perm');
+        name === models.current ? icon('check') : el('span'))),
+      levels.length > 0 && el('div', { class: 'pop-effort' },
+        el('div', { class: 'pop-title' }, 'Effort'),
+        el('div', { class: 'effort-levels', role: 'radiogroup', 'aria-label': 'Effort' },
+          levels.map((level) => el('button', { type: 'button', role: 'radio', class: 'effort-level' + (level === effort ? ' on' : ''),
+            'aria-checked': String(level === effort), onclick: () => setEffort(level) }, EFFORT_NAMES[level] || level))),
+        el('p', { class: 'muted small effort-note' }, 'Higher thinks longer before it answers: slower, and uses more tokens.'))], 'pop-perm');
   }
   const permission = () => (PERMISSIONS.find((p) => p.id === localStorage.getItem('scene.agent.permission')) || PERMISSIONS[2]);
   const compactButton = el('button', { type: 'button', class: 'icon-btn agent-compact', onclick: compact }, icon('book'));
@@ -466,7 +508,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     drawSuggest();
   } });
   // "+": attach a file from the computer (it joins the project's library and canvas), from the canvas, or from the library.
-  const upload = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.docx,.pdf,.txt,.md,.srt,.json', multiple: true, hidden: true,
+  const upload = el('input', { type: 'file', accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.docx,.pdf,.txt,.md,.srt,.json,.csv,.tsv', multiple: true, hidden: true,
     onchange: async (e) => {
       const files = [...e.target.files];
       e.target.value = '';
@@ -541,7 +583,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       : 'Fold the conversation into short notes the agent keeps (Direction)';
     compactButton.ariaLabel = 'Compact the conversation';
   }
-  function startedJobs() { return runs.flatMap((r) => r.steps.flatMap((s) => [s.job, s.take2 && s.take2.job])).filter(Boolean); }
+  function startedJobs() { return runs.flatMap((r) => r.steps.flatMap((s) => takesOf(s).map((t) => t.job))).filter(Boolean); }
   // While an approved plan is being made the agent is busy: the box waits and the send button becomes Stop generation.
   function activeJobs() { return startedJobs().filter((id) => { const job = store.jobs.find((j) => j.id === id); return job && (job.status === 'queued' || job.status === 'running'); }); }
   function generating() { return working || activeJobs().length > 0; }
@@ -702,29 +744,6 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     return pills.length ? el('div', { class: 'agent-pills' }, pills) : null;
   }
 
-  // The prompt of a step: three lines and a way to see all of it, and, before approval, a way to edit it.
-  function stepPrompt(run, step) {
-    const editable = run.state === 'proposed' && step.settings && !step.updating;
-    if (step.editing) {
-      const text = el('textarea', { class: 'agent-prompt-edit', rows: Math.min(18, Math.max(8, String(step.prompt).split('\n').length + 3)), 'aria-label': 'Prompt' }, step.prompt);
-      setTimeout(() => text.focus());
-      return el('div', { class: 'agent-prompt' }, text, el('div', { class: 'row' }, el('span', { style: 'flex:1' }),
-        el('button', { class: 'btn small quiet', onclick: () => { step.editing = false; drawLog(); } }, 'Cancel'),
-        el('button', { class: 'btn small primary', onclick: () => {
-          step.editing = false;
-          if (text.value.trim() && text.value.trim() !== step.prompt) changeStep(run, run.steps.indexOf(step), { prompt: text.value.trim() });
-          else drawLog();
-        } }, 'Save')));
-    }
-    return el('div', { class: 'agent-prompt' + (step.open ? ' open' : '') },
-      step.open ? promptSections(step.prompt) : el('p', { class: 'small muted clamp' }, step.prompt),
-      step.prompt && el('span', { class: 'agent-prompt-tools' },
-        editable && el('button', { type: 'button', class: 'icon-btn small', title: 'Edit the prompt', 'aria-label': 'Edit the prompt',
-          onclick: () => { step.editing = true; drawLog(); } }, icon('pencil')),
-        el('button', { type: 'button', class: 'icon-btn small', title: step.open ? 'Show less' : 'Show the whole prompt',
-          'aria-label': step.open ? 'Show less' : 'Show the whole prompt', onclick: () => { step.open = !step.open; drawLog(); } }, icon('expand'))));
-  }
-
   // A whole prompt, opened: each part of its structure (SCENE CONTEXT, REFERENCES, ACTION, CAMERA…) on its own, its
   // heading picked out. A prompt that does not follow the structure is shown as it is.
   function promptSections(prompt) {
@@ -756,21 +775,6 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       : [step.workflow_title, step.facts]).filter(Boolean);
   };
   const linksOf = (step) => [step.start && 'starts on ' + step.start.name, step.after && `continues step ${step.after.step + 1}`].filter(Boolean);
-
-  // The assets a step uses, as small pictures with their names and the slot each one fills, so the user sees before
-  // approving which character, place or voice goes into the shot. The picture it starts on comes first.
-  function usesOf(step) {
-    const shown = [
-      step.start && { url: `/api/library/${step.start.id}/file`, kind: 'image', name: step.start.name, role: 'first frame' },
-      ...(step.uses || []).map((use) => ({ url: use.asset ? `/api/kit/${use.asset}/file` : `/api/library/${use.id}/file`,
-        kind: use.kind || 'image', name: use.name, role: use.label.toLowerCase().split(' (')[0] + (use.cast ? ' · cast' : ''), saved: !!use.asset })),
-    ].filter(Boolean);
-    if (!shown.length) return null;
-    return el('div', { class: 'step-uses' }, shown.map((u) => el('div', { class: 'step-use', 'aria-label': `${u.name}: ${u.role}`,
-      onmouseenter: (e) => previewUse(e.currentTarget, u), onmouseleave: hidePreview },
-      el('span', { class: 'step-use-thumb' }, u.kind === 'image' ? still(u.url, 'image', u.name) : icon(u.kind === 'audio' ? 'audio' : 'video')),
-      el('span', { class: 'step-use-words' }, el('b', {}, u.name), el('span', {}, u.role)))));
-  }
 
   // A bigger look at an asset a step uses, while the pointer is on it. It is fixed to the page, so the scrolling log
   // does not cut it off, and it goes when the chip is gone (the log is drawn again while jobs move).
@@ -807,10 +811,6 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   const keepOf = (step) => step.keep && el('div', { class: 'step-keep' }, icon('memory'),
     `Kept in the ${KIT} as ${step.keep.tag === 'background' ? 'location' : step.keep.tag} “${step.keep.name}”`);
 
-  // An amount of credits on an approval card: the Scene token and the number, in place of "cr".
-  const tokens = (n) => el('span', { class: 'token-amount', title: `${n} credits` },
-    creditMark('credits'), String(n));
-
   // Leave a shot out of the plan, or put it back. A shot that a later one starts on cannot be left out.
   function skipButton(run, step) {
     const index = run.steps.indexOf(step);
@@ -820,32 +820,96 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       onclick: () => { step.skipped = !step.skipped; recount(run); saveRuns(); drawLog(); } }, step.skipped ? 'Include' : 'Skip');
   }
 
-  // One step of a plan waiting for approval (or one that was turned down): what it makes, its settings and its prompt.
-  function drawStep(run, step) {
+  // What a plan makes, in words: "5 images", "1 video", "4 generations" when the kinds are mixed.
+  function planCount(run, kindOnly = false) {
+    const kept = run.steps.filter((s) => !s.skipped);
+    const kinds = new Set(kept.map((s) => (s.assemble || s.motion ? 'video' : s.sound ? 'audio' : s.kind || 'video')));
+    const kind = kinds.size === 1 ? { image: 'image', video: 'video', audio: 'sound' }[[...kinds][0]] || '' : '';
+    if (kindOnly) return kind;
+    const n = kept.length;
+    return `${n} ${kind ? (kind === 'sound' ? (n === 1 ? 'sound' : 'sounds') : kind + (n === 1 ? '' : 's')) : n === 1 ? 'generation' : 'generations'}`;
+  }
+
+  // The assets a step uses as a row of small squares: the picture it starts on first, then the cast, places and props,
+  // a sound as a note. Pointing at one shows it bigger with its name and the slot it fills.
+  function refsOf(step) {
+    const shown = [
+      step.start && { url: `/api/library/${step.start.id}/file`, kind: 'image', name: step.start.name, role: 'first frame' },
+      ...(step.uses || []).map((use) => ({ url: use.asset ? `/api/kit/${use.asset}/file` : `/api/library/${use.id}/file`,
+        kind: use.kind || 'image', name: use.name, role: use.label.toLowerCase().split(' (')[0] + (use.cast ? ' · cast' : ''), saved: !!use.asset })),
+    ].filter(Boolean);
+    if (!shown.length) return null;
+    return el('div', { class: 'approval-refs' }, shown.map((u) => el('span', { class: 'approval-ref' + (u.kind === 'audio' ? ' sound' : ''), 'aria-label': `${u.name}: ${u.role}`,
+      onmouseenter: (e) => previewUse(e.currentTarget, u), onmouseleave: hidePreview },
+      u.kind === 'image' ? still(u.url, 'image', u.name)
+        : u.kind === 'audio' ? icon('music')
+          : el('img', { src: u.saved ? u.url : u.url.replace(/\/file$/, '/poster'), alt: u.name, loading: 'lazy' }))));
+  }
+
+  // One step of a plan waiting for approval (or one that was turned down), as a numbered row: its prompt on one line
+  // with edit and open beside it, and the assets it uses under it. Opened, the row shows the whole prompt, the step's
+  // settings (model, shape, size, length) and why the agent chose them, and a way to leave it out.
+  function approvalRow(run, step) {
     const proposed = run.state === 'proposed';
-    const chipState = step.updating ? ['running', 'Updating'] : step.error ? ['failed', 'Not changed'] : ['price', step.credits ? tokens(step.credits) : 'Free'];
-    const glyph = step.assemble ? 'film' : step.motion ? 'title' : step.sound ? 'audio' : KIND_ICONS[step.kind] || 'video';
-    const editable = proposed && step.menu && !step.editing;
+    const index = run.steps.indexOf(step);
+    const editable = proposed && !!step.settings && !step.updating;
     const links = linksOf(step);
-    return el('div', { class: 'step-card ' + chipState[0] + (step.skipped ? ' skipped' : '') },
-      el('div', { class: 'step-top' }, el('span', { class: 'step-thumb blank' + (step.updating ? ' working' : '') }, icon(glyph)),
-        el('div', { class: 'step-title' },
-          el('b', {}, step.name),
-          !editable && el('div', { class: 'step-tags' }, tagsOf(step).map((t) => el('span', {}, t)))),
-        // The price is shown once, in the Approve button; the corner only says when a step is being changed or could not be.
-        chipState[0] !== 'price' && el('span', { class: 'step-chip ' + chipState[0] }, chipState[0] === 'running' && el('i', { class: 'cell-mark stepping' }), chipState[1]),
-        proposed && run.steps.length > 1 && skipButton(run, step)),
-      editable && stepSettings(run, step),
-      usesOf(step),
-      links.length > 0 && el('div', { class: 'step-links' }, links.join(' · ')),
-      keepOf(step),
-      stepPrompt(run, step),
-      // Hindi or Hinglish words the video model would say wrong, as it is given them to say
-      step.phonetic && step.phonetic.length > 0 && el('div', { class: 'step-why' },
-        'Said as: ' + step.phonetic.map((p) => `${p.word} → ${p.say}`).join(', ')),
-      // What the agent decided that the user did not say, and why: the length, the shape, the quality.
-      step.why && el('div', { class: 'step-why' }, step.why),
-      step.error && el('p', { class: 'small error' }, step.error));
+    // Opened, the row is headed by the step's name, its whole prompt under it.
+    const line = step.open ? step.name : step.prompt || [step.name, step.facts].filter(Boolean).join(' · ');
+    const toggle = () => { step.open = !step.open; drawLog(); };
+    let body;
+    if (step.editing) {
+      const text = el('textarea', { class: 'agent-prompt-edit', rows: Math.min(14, Math.max(6, String(step.prompt).split('\n').length + 2)), 'aria-label': 'Prompt' }, step.prompt);
+      setTimeout(() => text.focus());
+      body = el('div', { class: 'approval-edit' }, text, el('div', { class: 'row' }, el('span', { style: 'flex:1' }),
+        el('button', { class: 'btn small quiet', onclick: () => { step.editing = false; drawLog(); } }, 'Cancel'),
+        el('button', { class: 'btn small primary', onclick: () => {
+          step.editing = false;
+          if (text.value.trim() && text.value.trim() !== step.prompt) changeStep(run, index, { prompt: text.value.trim() });
+          else drawLog();
+        } }, 'Save')));
+    } else {
+      body = el('div', { class: 'approval-line' },
+        el('p', { class: 'approval-prompt', title: step.open ? '' : step.name, onclick: toggle }, line),
+        el('span', { class: 'approval-tools' },
+          editable && step.prompt && el('button', { type: 'button', class: 'icon-btn small', title: 'Edit the prompt', 'aria-label': 'Edit the prompt',
+            onclick: () => { step.editing = true; step.open = false; drawLog(); } }, icon('pencil')),
+          el('button', { type: 'button', class: 'icon-btn small', title: step.open ? 'Show less' : 'Show the whole step',
+            'aria-label': step.open ? 'Show less' : 'Show the whole step', 'aria-expanded': String(!!step.open), onclick: toggle }, icon(step.open ? 'shrink' : 'expand'))));
+    }
+    return el('li', { class: 'approval-row' + (step.skipped ? ' skipped' : '') + (step.open ? ' open' : '') + (step.updating ? ' updating' : '') },
+      el('span', { class: 'approval-num' }, step.updating ? el('i', { class: 'cell-mark stepping' }) : String(index + 1)),
+      el('div', { class: 'approval-body' },
+        body,
+        step.open && !step.editing && el('div', { class: 'approval-more' },
+          el('div', { class: 'approval-name' },
+            proposed && step.menu ? stepSettings(run, step) : el('div', { class: 'step-tags' }, tagsOf(step).map((t) => el('span', {}, t))),
+            proposed && run.steps.length > 1 && skipButton(run, step)),
+          step.prompt && el('div', { class: 'agent-prompt open' }, promptSections(step.prompt)),
+          links.length > 0 && el('div', { class: 'step-links' }, links.join(' · ')),
+          keepOf(step),
+          // Hindi or Hinglish words the video model would say wrong, as it is given them to say
+          step.phonetic && step.phonetic.length > 0 && el('div', { class: 'step-why' },
+            'Said as: ' + step.phonetic.map((p) => `${p.word} → ${p.say}`).join(', ')),
+          // What the agent decided that the user did not say, and why: the length, the shape, the quality.
+          step.why && el('div', { class: 'step-why' }, step.why)),
+        step.skipped ? el('span', { class: 'approval-left' }, 'Left out') : refsOf(step),
+        step.error && el('p', { class: 'small error' }, 'Not changed: ' + step.error)));
+  }
+
+  // A plan waiting for approval, as one card: "Approve 5 image generations" on top (it folds), its numbered steps,
+  // and the bar to say what to change, stop, or generate them all.
+  function approvalCard(run) {
+    const kind = planCount(run, true);
+    const n = run.steps.filter((s) => !s.skipped).length;
+    const what = kind ? `${kind} ${n === 1 ? 'generation' : 'generations'}` : n === 1 ? 'generation' : 'generations';
+    const folded = !!run.ui.folded;
+    return el('div', { class: 'approval' + (folded ? ' folded' : '') },
+      el('button', { type: 'button', class: 'approval-head', 'aria-expanded': String(!folded), onclick: () => { run.ui.folded = !folded; drawLog(); } },
+        icon(kind === 'image' ? 'image' : kind === 'sound' ? 'audio' : 'film'), el('b', {}, `Approve ${n} ${what}`),
+        el('span', { class: 'approval-chevron' + (folded ? ' flip' : '') }, icon('down'))),
+      !folded && el('div', { class: 'agent-dock-steps' }, el('ol', { class: 'approval-list' }, run.steps.map((step) => approvalRow(run, step)))),
+      approveBar(run));
   }
 
   // ------------------------------------------------------------ results: what an approved plan made
@@ -976,12 +1040,13 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       onclick: () => reroll(run, step) }, icon('retry'), step.rollBusy ? 'Pricing…' : 'Roll again'), step.rollError && el('span', { class: 'small error' }, step.rollError));
   }
 
-  // Which take of a shot goes on: the first or the second, once there are two.
+  // Which take of a shot goes on, once there is more than one made.
   function takePick(run, step) {
-    if (!step.take2 || !step.take2.made || !step.made) return null;
-    const now = usedTake(step) === step.take2 ? 2 : 1;
-    return el('div', { class: 'row take-pick' }, el('span', { class: 'small muted' }, 'Goes on with:'), [1, 2].map((n) =>
-      el('button', { class: 'btn small ' + (now === n ? 'primary' : 'quiet'), onclick: () => { step.chosen = n; saveRuns(); drawLog(); } }, 'Take ' + n)));
+    const all = takesOf(step);
+    if (all.filter((t) => t.made).length < 2) return null;
+    const now = all.indexOf(usedTake(step)) + 1;
+    return el('div', { class: 'row take-pick' }, el('span', { class: 'small muted' }, 'Goes on with:'), all.map((t, i) => t.made &&
+      el('button', { class: 'btn small ' + (now === i + 1 ? 'primary' : 'quiet'), onclick: () => { step.chosen = i + 1; saveRuns(); drawLog(); } }, 'Take ' + (i + 1))));
   }
 
   // One result: its information, the clip (or picture, or sound), its frames, where it is, the thumbs and the check.
@@ -1000,11 +1065,12 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         el('span', { class: 'slate-text' }, `${step.credits || 0} cr`)),
       keyframes(step, step),
       step.made && el('div', { class: 'result-foot' }, crumb(step), el('span', { style: 'flex:1' }), rating(run, step)),
+      checkLine(run, [step]),
       drawReview(run, step),
       rollBar(run, step),
-      step.take2 && el('div', { class: 'retake' }, el('div', { class: 'result-name' }, 'Take 2: ' + step.name),
-        resultMedia(step.take2, step), keyframes(step.take2, step),
-        step.take2.made && el('div', { class: 'result-foot' }, crumb(step.take2), el('span', { style: 'flex:1' }), rating(run, step.take2))),
+      ...takesOf(step).slice(1).map((t, i) => el('div', { class: 'retake' }, el('div', { class: 'result-name' }, `Take ${i + 2}: ${step.name}`),
+        resultMedia(t, step), keyframes(t, step),
+        t.made && el('div', { class: 'result-foot' }, crumb(t), el('span', { style: 'flex:1' }), rating(run, t)))),
       takePick(run, step));
   }
 
@@ -1031,12 +1097,12 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
               el('div', { class: 'step-tags' }, tagsOf(step).map((t) => el('span', {}, t)))], 'pop-info') }, icon('info')),
           el('button', { type: 'button', class: 'tile-btn open', title: 'Open it large', 'aria-label': 'Open it large', onclick: () => openLarge(step.made) }, icon('expand')),
           el('span', { class: 'tile-rate' }, rating(run, step)),
-          step.review && el('span', { class: 'tile-check ' + (step.review.passed ? 'passed' : 'failed'),
-            title: step.review.passed ? 'Checked: it is what was asked for' : step.review.problem }, step.review.passed ? '✓' : '!'));
+);
       })),
-      // What the agent found wrong with a picture, with its retake, under the grid.
-      ...steps.filter((s) => s.reviewing || s.reviewError || (s.review && !s.review.passed)).map((s) =>
-        el('div', { class: 'grid-review' }, el('b', {}, s.name), drawReview(run, s))));
+      // One line while the plan's pictures are checked; under it, a picture with a retake being made or more than one take.
+      checkLine(run, steps),
+      ...steps.filter((s) => reviewShown(s)).map((s) =>
+        el('div', { class: 'grid-review' }, el('b', {}, s.name), drawReview(run, s), takePick(run, s))));
   }
 
   // Clips made by the steps of one plan, side by side like pictures: each tile shows the take in use with its length,
@@ -1073,16 +1139,15 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
                 el('div', { class: 'step-tags' }, tagsOf(step).map((t) => el('span', {}, t))), step.why && el('div', { class: 'step-why' }, step.why),
                 rollBar(run, step)], 'pop-info') }, icon('info')),
             el('button', { type: 'button', class: 'tile-btn open', title: 'Open it large', 'aria-label': 'Open it large', onclick: () => openLarge(take.made) }, icon('expand')),
-            el('span', { class: 'tile-rate' }, rating(run, take)),
-            step.review && el('span', { class: 'tile-check ' + (step.review.passed ? 'passed' : 'failed'),
-              title: step.review.passed ? 'Checked: it is what was asked for' : step.review.problem }, step.review.passed ? '✓' : '!')),
+            el('span', { class: 'tile-rate' }, rating(run, take))),
           el('div', { class: 'clip-ends' }, ends(take, step).map((t) => el('button', { type: 'button', class: 'keyframe', title: `At ${clock(t)}: show the clip on the canvas`,
             onclick: () => onFocus(take.made) },
             el('img', { src: `/api/library/${take.made}/frame?at=${t}`, alt: '', loading: 'lazy', onerror: (e) => e.currentTarget.parentNode.remove() }),
             el('span', {}, clock(t))))));
       })),
-      // What a clip of the grid still needs: its check, a retake being priced, the choice between two takes.
-      ...steps.filter((s) => s.reviewing || s.reviewError || (s.review && !s.review.passed) || s.rolling || s.rollBusy || s.rollError || s.take2).map((s) =>
+      // One line while the plan's clips are checked; then what a clip still needs: a retake being priced, the choice between two takes.
+      checkLine(run, steps),
+      ...steps.filter((s) => reviewShown(s) || s.rolling || s.rollBusy || s.rollError).map((s) =>
         el('div', { class: 'grid-review' }, el('b', {}, s.name), drawReview(run, s), (s.rolling || s.rollBusy || s.rollError) && rollBar(run, s), takePick(run, s))));
   }
 
@@ -1113,38 +1178,59 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
 
   // ------------------------------------------------------------ review: the agent looks at what it made
 
-  // What the agent found when it looked at a finished shot, and, for a failed one, its retake (approved by the user).
-  function drawReview(run, step) {
-    if (step.reviewing) return el('div', { class: 'agent-review checking' }, el('i', { class: 'cell-mark stepping' }), 'Checking the result…');
-    if (step.reviewError) return el('div', { class: 'agent-review' }, 'Not checked: ' + step.reviewError);
-    const verdict = step.review;
-    if (!verdict) return null;
-    const take = step.take2;
-    const takeJob = take && take.job && store.jobs.find((j) => j.id === take.job);
-    const balance = Number(store.user.credits ?? 0);
-    const takeState = !take ? '' : take.reviewing ? 'checking…' : take.review
-      ? (take.review.passed ? '✓ passed' : '⚠ ' + take.review.problem + ' Kept: one retake per shot.')
-      : takeJob ? MARK[takeJob.status] || takeJob.status : take.error || 'queued';
-    return el('div', { class: 'agent-review ' + (verdict.passed ? 'passed' : 'failed') },
-      el('div', { class: 'review-line' }, el('span', { class: 'review-mark', 'aria-hidden': 'true' }, verdict.passed ? '✓' : '!'),
-        el('span', {}, verdict.passed ? (minorNotes(verdict) ? 'Looks right. Small things: ' + minorNotes(verdict) : 'Checked: it is what was asked for.') : verdict.problem)),
-      !verdict.passed && !take && !step.kept && step.retake && el('div', { class: 'row' },
-        el('button', { class: 'btn small primary', disabled: working || step.retake.credits > balance,
-          title: step.retake.why || 'Make it again with the fixed prompt', onclick: () => retake(run, step) }, `Retake · ${step.retake.credits} cr`),
-        el('button', { class: 'btn small quiet', onclick: () => { step.kept = true; saveRuns(); drawLog(); carryOn(); } }, 'Keep it')),
-      !verdict.passed && !take && !step.kept && !step.retake && el('span', { class: 'slate-text' }, 'No retake to offer for this one.'),
-      step.kept && el('span', { class: 'slate-text' }, 'Kept with a known flaw.'),
-      take && el('span', { class: 'slate-text' }, 'Take 2: ' + takeState));
+  // Whether a finished take is still to be checked (one finished long ago is not, when the panel opens).
+  function toCheck(take) {
+    if (!take || !take.job || take.review || take.reviewing || take.reviewError) return false;
+    const job = store.jobs.find((j) => j.id === take.job);
+    return !!job && job.status === 'done' && Date.now() - (take.queuedAt || 0) < REVIEW_WITHIN;
+  }
+  // Whether everything a plan queued, retakes too, has come to an end: only then are its shots checked, all together.
+  function allMade(run) {
+    return !working && run.steps.every((step) => step.skipped || takesOf(step).every((take) => {
+      if (!take.job) return take === step || !!take.error;
+      const job = store.jobs.find((j) => j.id === take.job);
+      return !job || (job.status !== 'queued' && job.status !== 'running');
+    }));
+  }
+  const checking = (run) => shotsOf(run).some((s) => takesOf(s).some((t) => t.reviewing || toCheck(t)));
+
+  // One quiet line while the shots of a finished plan are checked.
+  function checkLine(run, steps) {
+    if (!allMade(run)) return null;
+    const left = steps.filter((s) => takesOf(s).some((t) => t.reviewing || toCheck(t))).length;
+    return left > 0 && el('div', { class: 'agent-review checking' }, el('i', { class: 'cell-mark stepping' }), left > 1 ? `Checking ${left} results…` : 'Checking the result…');
   }
 
-  const minorNotes = (verdict) => (verdict.checks || []).filter((c) => c.level === 'minor' && c.note).map((c) => c.note).join('; ');
+  // What is happening to a shot's retake, in quiet words. What the check found is in the work log and, when the user
+  // has a choice to make, in the card above the message box (retakeCard), never here.
+  function drawReview(run, step) {
+    const all = takesOf(step);
+    const newest = all[all.length - 1];
+    if (newest !== step && !newest.made && !newest.error) return el('div', { class: 'agent-review checking' }, el('i', { class: 'cell-mark stepping' }), `Making take ${all.length}…`);
+    if (newest !== step && newest.error) return el('div', { class: 'agent-review' }, `Take ${all.length} could not be made: ${newest.error}`);
+    return step.kept && step.review && !step.review.passed && all.length === 1 ? el('div', { class: 'agent-review' }, 'Kept as it is.') : null;
+  }
 
   // A long skill's run goes on by itself. Once every step of its newest plan has come to an end (made, failed or
   // skipped), the agent is told what each one made, by library id, and carries on from the run's state. Once per plan;
   // it waits while anything is still being made or the agent is busy, and never runs a plan that was stopped.
   function carryOn() {
     const run = runs[runs.length - 1];
+    // Answers given while shots were being made: sent alone once the box is free, when the run does not go on by itself...
+    if (run && run.queuedAnswer && !busy && !generating() && (!run.continues || run.continued)) {
+      const typed = run.queuedAnswer;
+      delete run.queuedAnswer;
+      saveRuns();
+      send(typed);
+      return;
+    }
     if (!run || !run.continues || run.continued || busy || generating() || halted) return;
+    // ...or with the run's next message, when it goes on.
+    const answers = () => {
+      const typed = run.queuedAnswer;
+      delete run.queuedAnswer;
+      return typed ? `\n\nThe user answered your questions meanwhile:\n${typed.text}` : '';
+    };
     // A turn that saved its work and planned nothing to make (a stage of planning) goes on at once, at most
     // SAVED_ONLY times in a row: then the user is waited for, so a model that only keeps saving does not loop.
     if (!run.steps.length) {
@@ -1153,7 +1239,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       if ((inRow === -1 ? tail.length : inRow) > SAVED_ONLY) return;
       run.continued = true;
       saveRuns();
-      send({ text: 'Continue the run: you saved your work and planned nothing to make. Go on from the run\'s status.',
+      send({ text: 'Continue the run: you saved your work and planned nothing to make. Go on from the run\'s status.' + answers(),
         shown: 'Continue the run', ids: [], parts: [{ text: 'Continue the run' }], auto: true });
       return;
     }
@@ -1162,7 +1248,9 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     const lines = [];
     for (const step of run.steps) {
       if (step.skipped) { lines.push(`- “${step.name}”: skipped`); continue; }
-      const take = step.take2 || step;
+      const all = takesOf(step);
+      const newest = all[all.length - 1];
+      const take = newest.made ? usedTake(step) : newest;
       const job = take.job && store.jobs.find((j) => j.id === take.job);
       if (take.made && take.madeAll) {
         lines.push(`- “${step.name}”: ${take.madeAll.map((i) => `item ${i.id} (${i.kind}, “${i.name}”)`).join('; ')}`);
@@ -1179,7 +1267,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     saveRuns();
     const shown = `Continue the run (${run.steps.length} ${run.steps.length === 1 ? 'step' : 'steps'} done)`;
     send({ text: `Continue the run. The steps you planned have come to an end:\n${lines.join('\n')}\n`
-      + 'Write what they made to the run\'s state, then go on from its status.', shown, ids: [], parts: [{ text: shown }], auto: true });
+      + 'Write what they made to the run\'s state, then go on from its status.' + answers(), shown, ids: [], parts: [{ text: shown }], auto: true });
   }
 
   // Whether a step is done with for the run: a picture or a clip once its check is over and, when the check failed,
@@ -1191,6 +1279,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     if (take.reviewing) return false;
     if (take.reviewError) return true;
     if (!take.review) {   // a shot that finished lately is about to be checked; an old one is not
+      if (take !== step && !take.job && !take.error) return false;   // a retake on its way to the queue
       const job = take.job && store.jobs.find((j) => j.id === take.job);
       return !(job && job.status === 'done' && Date.now() - (take.queuedAt || 0) < REVIEW_WITHIN);
     }
@@ -1213,7 +1302,8 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       if (!take.made) {   // not in the library yet: look again in a moment, a few times
         take.reviewing = false;
         take.tries = (take.tries || 0) + 1;
-        if (take.tries < 5) setTimeout(reviewFinished, 4000); else take.reviewError = 'its result is not in the library.';
+        if (take.tries >= 5) take.reviewError = 'its result is not in the library.';
+        setTimeout(reviewFinished, 4000);
         drawLog();
         return;
       }
@@ -1230,48 +1320,73 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         work(run, 'retry', `Retook “${step.name}” on its own · ${found.retaken.credits} cr`);
         onJobs([found.retaken.job]);
         refreshJobs().catch(() => {});
-      }
-      if (take !== step && !found.verdict.passed) {   // the same shot failed twice: no more rewording
-        work(run, 'info', `“${step.name}” failed twice. The model may not manage this shot: ask me for another way (another workflow, a closer framing, your own picture).`);
-      }
-      // The retake runs under the same permission the plan ran under: "Allow all" fixes a failed shot on its
-      // own; "Ask before videos" fixes stills and audio on its own but asks before a video; "Always ask" shows
-      // the Retake button and waits. Still one retake per shot, and never beyond the credits in hand.
-      if (allowRetake && !found.verdict.passed && found.retake && !step.kept && !step.take2) {
-        const mode = permission().id;
-        const auto = retryOnce || mode === 'all' || (mode === 'videos' && step.kind !== 'video');
-        // Reviews of a plan's shots run at once, so count credits already promised to other auto-retakes in this
-        // burst (reservedCredits) as spent. retake() releases the reservation once it has lowered the real balance.
-        const available = Number(store.user.credits ?? 0) - reservedCredits;
-        if (auto && found.retake.credits <= available) {
-          reservedCredits += found.retake.credits;
-          work(run, 'retry', `Retaking ${which} on its own · ${found.retake.credits} cr`);
-          retake(run, step, true);
-        }
+      } else {
+        take.toWeigh = true;   // what it found is dealt with once every shot of the plan is checked (weigh)
+        take.mayRetake = allowRetake;
       }
     } catch (e) {
       take.reviewError = e.message;
     }
     take.reviewing = false;
+    reviewFinished();   // the next shot of the batch, or, the batch checked, what the checks found
     saveRuns();
     drawLog();
     carryOn();   // the run may have been waiting for this check
   }
 
-  // Review every shot of an approved plan that has just finished, once. Edits, sounds and motion graphics are not
-  // reviewed: they are made from what the user already has; nor are songs, voices and transcripts, which have no
-  // picture to look at.
-  function reviewFinished() {
-    for (const run of runs) {
-      if (run.state !== 'approved') continue;
-      for (const step of run.steps) {
-        if (!step.settings || (step.kind !== 'image' && step.kind !== 'video')) continue;
-        for (const [take, first] of [[step, true], [step.take2, false]]) {
-          if (!take || !take.job || take.review || take.reviewing || take.reviewError) continue;
-          const job = store.jobs.find((j) => j.id === take.job);
-          if (job && job.status === 'done' && Date.now() - (take.queuedAt || 0) < REVIEW_WITHIN) reviewStep(run, take, step, first);
+  // Once every shot of a plan is checked, what the checks found is dealt with all together. A retake runs under the
+  // same permission the plan ran under: "Allow all" fixes a failed shot on its own, up to MAX_RETAKES times; "Ask
+  // before videos" fixes stills on its own (once) but asks before a video; "Always ask" asks. What is asked goes in one
+  // card above the message box (retakeCard). Never beyond the credits in hand.
+  function weigh(run) {
+    if (checking(run)) return;
+    const mode = permission().id;
+    for (const step of shotsOf(run)) {
+      const take = step.take2 || step;
+      if (!take.toWeigh) continue;
+      delete take.toWeigh;
+      let retook = false;
+      const first = take === step;
+      const again = !first && mode === 'all' && retakesOf(step) < MAX_RETAKES;
+      if (take.mayRetake && !take.review.passed && step.retake && !step.kept && (first || again)) {
+        const auto = again || retryOnce || mode === 'all' || (mode === 'videos' && step.kind !== 'video');
+        // Count credits already promised to other retakes of this batch (reservedCredits) as spent. retake() releases
+        // the reservation once it has lowered the real balance.
+        const available = Number(store.user.credits ?? 0) - reservedCredits;
+        if (auto && step.retake.credits <= available) {
+          reservedCredits += step.retake.credits;
+          work(run, 'retry', `Making “${step.name}” again (take ${retakesOf(step) + 2}) · ${step.retake.credits} cr`);
+          retake(run, step, true);
+          retook = true;
         }
       }
+      // A retake that failed too and is not made again: the best of the takes goes on, and the run with it.
+      if (!first && !take.review.passed && !retook) {
+        const best = bestTake(step);
+        step.chosen = takesOf(step).indexOf(best) + 1;
+        work(run, 'check', `Going on with take ${step.chosen} of “${step.name}”, the best of ${takesOf(step).length}`);
+      }
+    }
+  }
+
+  // Check the shots of an approved plan once all of them have been made (retakes too), each once. Edits, sounds and
+  // motion graphics are not reviewed: they are made from what the user already has; nor are songs, voices and
+  // transcripts, which have no picture to look at.
+  function reviewFinished() {
+    let free = REVIEWS_AT_ONCE - runs.flatMap((r) => shotsOf(r)).flatMap((s) => takesOf(s)).filter((t) => t.reviewing).length;
+    for (const run of runs) {
+      if (run.state !== 'approved' || !allMade(run)) continue;
+      for (const step of shotsOf(run)) {
+        // A retake is checked with a retake priced too while "Allow all" may still make it again.
+        const more = permission().id === 'all' && retakesOf(step) < MAX_RETAKES;
+        for (const [take, first] of [[step, true], [step.take2, more]]) {
+          if (!toCheck(take)) continue;
+          if (free <= 0) return;   // the rest follow as these come back
+          free -= 1;
+          reviewStep(run, take, step, first);
+        }
+      }
+      weigh(run);
     }
   }
 
@@ -1282,7 +1397,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     const open = [];
     for (const run of runs) {
       for (const step of run.steps) {
-        for (const take of [step, step.take2]) {
+        for (const take of takesOf(step)) {
           if (!take || !take.job || take.made || (take.misses || 0) > 3) continue;
           const job = store.jobs.find((j) => j.id === take.job);
           if (!job || job.status === 'done') open.push([run, step, take]);
@@ -1324,11 +1439,13 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   // Credits promised to auto-retakes queued in the current review burst but not yet reflected in store.user.credits.
   let reservedCredits = 0;
 
-  // The retake of a failed shot: the same workflow and settings with the prompt the review fixed. One retake per shot.
+  // The retake of a failed shot: the same workflow and settings with the prompt the review fixed. A retake made before
+  // it is kept with the earlier takes (step.earlier); the newest is step.take2.
   // `reserved` is true when this retake was already counted against reservedCredits by the auto path above.
   async function retake(run, step, reserved = false) {
     const plan = step.retake;
-    step.take2 = { prompt: plan.prompt, queuedAt: Date.now() };
+    if (step.take2) (step.earlier = step.earlier || []).push(step.take2);
+    step.take2 = { prompt: plan.prompt, queuedAt: Date.now(), credits: plan.credits };
     drawLog();
     try {
       const settings = { ...plan.settings, refs: { ...(plan.settings.refs || {}) } };
@@ -1408,41 +1525,179 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
         icon('memory'), ...run.memoryUsed.map((key) => el('span', { class: 'kit-flag soft' }, key))));
   }
 
-  // A question the agent stopped for (a review, a choice a skill asks): its options as buttons. A click sends the
-  // option as the next message; once answered, or once anything newer is said, the buttons stand as a record.
+  // The questions of a turn, one or several, as one list: [{text, options, details, default}].
+  const questionsOf = (run) => (run.question ? [run.question] : run.questions || []);
+  // A turn's questions wait for an answer while it is the newest turn and they were neither answered nor skipped.
+  const askOpen = (run) => !!run && runs[runs.length - 1] === run && questionsOf(run).length > 0 && !pending
+    && !(run.question ? run.question.answer || run.question.skipped : run.questionsSent || run.questionsSkipped) && !run.queuedAnswer;
+
+  // In the conversation, a question stands as a record: what was asked and what was answered. While it waits, the
+  // card above the message box (askCard) is where it is answered.
   function asked(run) {
-    const open = !run.question.answer && runs[runs.length - 1] === run;
-    return el('div', { class: 'turn-question' },
-      el('p', { class: 'turn-question-text' }, run.question.text),
-      el('div', { class: 'turn-question-options' }, run.question.options.map((option) =>
-        el('button', { type: 'button', class: 'btn small' + (run.question.answer === option ? ' primary' : ''), disabled: !open,
-          'aria-pressed': String(run.question.answer === option),
-          onclick: () => {
-            if (busy || generating()) return;
-            run.question.answer = option;
-            saveRuns();
-            send({ text: option, shown: option, ids: [], parts: [{ text: option }] });
-          } }, option))));
+    const list = questionsOf(run);
+    const answers = run.question ? [run.question.answer] : run.picks || [];
+    const skipped = run.question ? run.question.skipped : run.questionsSkipped;
+    if (askOpen(run)) {
+      return el('div', { class: 'turn-asking' }, el('span', { class: 'turn-asking-dot', 'aria-hidden': 'true' }),
+        el('span', {}, list.length > 1 ? `Asking ${list.length} questions` : 'Asking: ' + list[0].text));
+    }
+    return el('div', { class: 'turn-question' }, list.map((q, i) => el('div', { class: 'turn-question-row' },
+      el('span', { class: 'turn-question-text' }, (list.length > 1 ? `${i + 1}. ` : '') + q.text),
+      el('span', { class: 'turn-question-answer' + (answers[i] ? '' : ' none') },
+        answers[i] || (run.queuedAnswer ? '' : skipped ? 'Skipped' : 'Not answered')))),
+      run.queuedAnswer && el('span', { class: 'slate-text' }, 'Sent as soon as what is being made is done.'));
   }
 
-  // Several questions the agent asked together: each with its options (its default chosen to start with), and one
-  // button that sends every answer in one message. Once sent, or once anything newer is said, they stand as a record.
-  function askedAll(run) {
-    const open = !run.questionsSent && runs[runs.length - 1] === run;
-    run.picks = run.picks || run.questions.map((q) => q.default || q.options[0]);
-    return el('div', { class: 'turn-question' },
-      ...run.questions.map((q, i) => el('div', {},
-        el('p', { class: 'turn-question-text' }, `${i + 1}. ${q.text}`),
-        el('div', { class: 'turn-question-options' }, q.options.map((option) =>
-          el('button', { type: 'button', class: 'btn small' + (run.picks[i] === option ? ' primary' : ''), disabled: !open,
-            'aria-pressed': String(run.picks[i] === option), onclick: () => { run.picks[i] = option; drawLog(); } }, option))))),
-      open && el('div', { class: 'turn-question-options' }, el('button', { type: 'button', class: 'btn small primary', onclick: () => {
-        if (busy || generating()) return;
-        run.questionsSent = true;
-        saveRuns();
-        const text = 'My answers:\n' + run.questions.map((q, i) => `${i + 1}. ${q.text} — ${run.picks[i]}`).join('\n');
-        send({ text, shown: run.picks.join(' · '), ids: [], parts: [{ text }] });
-      } }, 'Send answers')));
+  // Send what was picked: one answer as it is, several as a list. While shots are being made the message box waits,
+  // so the answers are kept and go with the run's next message (carryOn) or on their own once it is free.
+  function answer(run, picked) {
+    const list = questionsOf(run);
+    let typed;
+    if (run.question) {
+      run.question.answer = picked[0];
+      typed = { text: picked[0], shown: picked[0], ids: [], parts: [{ text: picked[0] }] };
+    } else {
+      run.picks = picked;
+      run.questionsSent = true;
+      const text = 'My answers:\n' + list.map((q, i) => `${i + 1}. ${q.text} — ${picked[i]}`).join('\n');
+      typed = { text, shown: picked.join(' · '), ids: [], parts: [{ text }] };
+    }
+    if (busy || generating()) run.queuedAnswer = typed;
+    saveRuns();
+    if (run.queuedAnswer) drawLog(); else send(typed);
+  }
+
+  // The card for the questions of the newest turn, above the message box: one question at a time, its options as a
+  // numbered list (what each does under it, the recommended one marked), and always one more, "Something else", to
+  // write an answer of one's own. Number keys pick, Enter sends, Esc skips.
+  function askCard(run) {
+    const list = questionsOf(run);
+    const ui = run.ui.ask = run.ui.ask || { at: 0, picks: list.map((q) => q.default || null), other: list.map(() => '') };
+    const q = list[ui.at];
+    const last = ui.at === list.length - 1;
+    const answerOf = (i) => (ui.picks[i] === OTHER ? ui.other[i].trim() : ui.picks[i]);
+    const ready = list.every((_, i) => answerOf(i));
+    const again = () => { dock.dataset.run = ''; drawDock(); };
+    const choose = (option) => {
+      ui.picks[ui.at] = option;
+      if (option !== OTHER && !last) ui.at += 1;
+      again();
+      if (option === OTHER) dock.querySelector('.ask-other input')?.focus();
+    };
+    const submit = () => { if (ready && !busy) answer(run, list.map((_, i) => answerOf(i))); };
+    const skip = () => {
+      if (run.question) run.question.skipped = true; else run.questionsSkipped = true;
+      saveRuns();
+      drawLog();
+      input.focus();
+    };
+    const other = el('input', { type: 'text', placeholder: 'Something else', value: ui.other[ui.at], 'aria-label': 'Your own answer',
+      oninput: (e) => { ui.other[ui.at] = e.target.value; ui.picks[ui.at] = e.target.value.trim() ? OTHER : ui.picks[ui.at] === OTHER ? null : ui.picks[ui.at];
+        submitButton.disabled = !list.every((_, i) => answerOf(i)); },
+      onfocus: () => { if (ui.other[ui.at].trim()) ui.picks[ui.at] = OTHER; },
+      onkeydown: (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (ui.other[ui.at].trim() && !last) { ui.at += 1; again(); } else submit(); }
+        if (e.key === 'Escape') { e.preventDefault(); skip(); }
+      } });
+    const submitButton = el('button', { type: 'button', class: 'btn small primary', disabled: !ready || busy, onclick: submit },
+      generating() ? 'Send when ready' : 'Submit', el('kbd', {}, '↵'));
+    const options = q.options.map((option, i) => el('button', { type: 'button', role: 'radio', 'aria-checked': String(ui.picks[ui.at] === option),
+      class: 'ask-option' + (ui.picks[ui.at] === option ? ' on' : ''), onclick: () => choose(option), ondblclick: () => { if (last) submit(); } },
+      el('span', { class: 'ask-num' }, `${i + 1}.`),
+      el('span', { class: 'ask-words' }, el('b', {}, option, q.default === option && el('i', { class: 'ask-rec', title: 'Recommended' }, 'REC')),
+        (q.details || [])[i] && el('span', { class: 'ask-detail' }, q.details[i]))));
+    return el('div', { class: 'ask-card', role: 'group', 'aria-label': 'A question from the agent', tabindex: '-1',
+      onkeydown: (e) => {
+        if (e.target.matches('input')) return;
+        const n = Number(e.key);
+        if (n >= 1 && n <= q.options.length) { e.preventDefault(); choose(q.options[n - 1]); }
+        else if (n === q.options.length + 1) { e.preventDefault(); choose(OTHER); }
+        else if (e.key === 'Enter') { e.preventDefault(); submit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); skip(); }
+      } },
+      el('div', { class: 'ask-head' }, icon('chat'), el('b', {}, q.text),
+        list.length > 1 && el('span', { class: 'ask-count' }, `${ui.at + 1} of ${list.length}`)),
+      el('div', { class: 'ask-options', role: 'radiogroup' }, options,
+        el('label', { class: 'ask-option ask-other' + (ui.picks[ui.at] === OTHER ? ' on' : '') },
+          el('span', { class: 'ask-num' }, `${q.options.length + 1}.`), other)),
+      el('div', { class: 'ask-foot' },
+        list.length > 1 && el('button', { type: 'button', class: 'btn small quiet', disabled: ui.at === 0, onclick: () => { ui.at -= 1; again(); } }, 'Back'),
+        list.length > 1 && !last && el('button', { type: 'button', class: 'btn small quiet', disabled: !answerOf(ui.at), onclick: () => { ui.at += 1; again(); } }, 'Next'),
+        el('span', { style: 'flex:1' }),
+        el('button', { type: 'button', class: 'btn small quiet', onclick: skip }, 'Skip', el('kbd', {}, 'esc')),
+        last && submitButton));
+  }
+
+  // The shots of a plan whose check found a problem and that wait for the user's word.
+  const flagged = (run) => shotsOf(run).filter((s) => s.review && !s.review.passed && !s.take2 && !s.kept && s.retake);
+  // They are asked about once, for the newest turn, when every shot of its plan is made and checked.
+  const retakeOpen = (run) => !!run && runs[runs.length - 1] === run && run.state === 'approved' && !pending && !run.queuedAnswer
+    && allMade(run) && !checking(run) && flagged(run).length > 0;
+
+  // The card for what the check of a plan found, above the message box: each shot with what is wrong with it and its
+  // picture, ticked to be made again. Unticked ones are kept. Words of one's own go to the agent instead. Number keys
+  // tick, Enter makes them again, Esc keeps them all.
+  function retakeCard(run) {
+    const steps = flagged(run);
+    const ui = run.ui.retakes = run.ui.retakes || { off: [], note: '' };
+    const chosen = steps.filter((s) => !ui.off.includes(run.steps.indexOf(s)));
+    const total = chosen.reduce((n, s) => n + s.retake.credits, 0);
+    const balance = Number(store.user.credits ?? 0);
+    const toggle = (step) => {
+      const at = run.steps.indexOf(step);
+      ui.off = ui.off.includes(at) ? ui.off.filter((n) => n !== at) : [...ui.off, at];
+      dock.dataset.run = '';
+      drawDock();
+    };
+    const decided = () => { saveRuns(); drawLog(); carryOn(); };
+    const keepAll = () => { steps.forEach((s) => { s.kept = true; }); decided(); input.focus(); };
+    const make = () => {
+      if (working || !chosen.length || total > balance) return;
+      steps.filter((s) => !chosen.includes(s)).forEach((s) => { s.kept = true; });
+      chosen.forEach((s) => retake(run, s));
+      decided();
+    };
+    const sendNote = () => {
+      const words = ui.note.trim();
+      if (!words) return;
+      const found = steps.map((s) => `- “${s.name}”: ${s.review.problem}`).join('\n');
+      steps.forEach((s) => { s.kept = true; });
+      run.queuedAnswer = { text: `The check of your shots found:\n${found}\n\n${words}`, shown: words, ids: [], parts: [{ text: words }] };
+      decided();
+    };
+    const send = el('button', { type: 'button', class: 'btn small primary' + (ui.note.trim() ? '' : ' hidden'), onclick: sendNote }, 'Send', el('kbd', {}, '↵'));
+    const go = el('button', { type: 'button', class: 'btn small primary' + (ui.note.trim() ? ' hidden' : ''), disabled: working || !chosen.length || total > balance,
+      title: `You have ${balance} credits`, onclick: make },
+      steps.length === 1 ? 'Retake' : chosen.length === steps.length ? 'Retake all' : `Retake ${chosen.length}`, ` · ${total} cr`, el('kbd', {}, '↵'));
+    const note = el('input', { type: 'text', placeholder: 'Something else', value: ui.note, 'aria-label': 'What to do instead',
+      oninput: (e) => { ui.note = e.target.value; send.classList.toggle('hidden', !ui.note.trim()); go.classList.toggle('hidden', !!ui.note.trim()); },
+      onkeydown: (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendNote(); }
+        if (e.key === 'Escape') { e.preventDefault(); keepAll(); }
+      } });
+    return el('div', { class: 'ask-card', role: 'group', 'aria-label': 'Shots the check found a problem with', tabindex: '-1',
+      onkeydown: (e) => {
+        if (e.target.matches('input, .ask-thumb')) return;
+        const n = Number(e.key);
+        if (n >= 1 && n <= steps.length) { e.preventDefault(); toggle(steps[n - 1]); }
+        else if (e.key === 'Enter') { e.preventDefault(); make(); }
+        else if (e.key === 'Escape') { e.preventDefault(); keepAll(); }
+      } },
+      el('div', { class: 'ask-head' }, icon('chat'),
+        el('b', {}, steps.length > 1 ? `${steps.length} shots could be closer to what was asked` : `“${steps[0].name}” could be closer to what was asked`)),
+      el('div', { class: 'ask-options' }, steps.map((step) => {
+        const on = chosen.includes(step);
+        return el('div', { class: 'ask-option ask-shot' + (on ? ' on' : '') },
+          el('button', { type: 'button', class: 'ask-tick', role: 'checkbox', 'aria-checked': String(on), title: step.retake.why || 'Make it again with the fixed prompt', onclick: () => toggle(step) },
+            el('span', { class: 'ask-box' }, on && icon('check')),
+            el('span', { class: 'ask-words' }, el('b', {}, step.name), el('span', { class: 'ask-detail' }, step.review.problem)),
+            el('span', { class: 'ask-price' }, `${step.retake.credits} cr`)),
+          el('button', { type: 'button', class: 'ask-thumb', title: 'Open it large', 'aria-label': `Open “${step.name}” large`, onclick: () => openLarge(step.made) },
+            el('img', { src: `/api/library/${step.made}/${step.kind === 'video' ? 'poster' : 'file'}`, alt: '', loading: 'lazy' })));
+      }), el('label', { class: 'ask-option ask-other' }, note)),
+      el('div', { class: 'ask-foot' }, el('span', { style: 'flex:1' }),
+        el('button', { type: 'button', class: 'btn small quiet', onclick: keepAll }, steps.length > 1 ? 'Keep all' : 'Keep it', el('kbd', {}, 'esc')),
+        send, go));
   }
 
   // The newest plan that waits for approval: its bar goes in the dock.
@@ -1455,8 +1710,14 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   let boarding = false;   // a storyboard or an animation is being planned
 
   // The take of a shot the cut and the next stage use: the first, or the retake when the user (or a failed review) chose it.
-  const usedTake = (step) => (step.take2 && step.take2.made && (step.chosen === 2 || (step.chosen == null && step.review && !step.review.passed))
-    ? step.take2 : step);
+  // step.chosen is the number of a take (1 the first); with none, a shot that failed its check goes on with its newest take.
+  const usedTake = (step) => {
+    const all = takesOf(step);
+    const picked = step.chosen && all[step.chosen - 1];
+    if (picked && picked.made) return picked;
+    const newest = [...all].reverse().find((t) => t.made);
+    return step.chosen == null && step.review && !step.review.passed && newest ? newest : step;
+  };
 
   // A staged plan goes to the conversation as a plan of its own, waiting for approval like any other.
   function stage(from, label, made, reply, rest) {
@@ -1526,10 +1787,11 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     // Instead of approving as it is, the user can say what to do differently ("make the cast first") and the agent
     // plans again with that. The draft lives on the run, since the bar is drawn again while jobs move.
     const change = el('button', { class: 'btn small primary' + (run.ui.note ? '' : ' hidden'), disabled: busy || working, onclick: () => revise(run) }, 'Send change');
-    const go = el('button', { class: 'btn small primary' + (run.ui.note ? ' hidden' : ''), disabled: working || short || run.steps.every((s) => s.skipped), title: `You have ${balance} credits`,
-      onclick: () => approve(run) }, 'Approve · ', tokens(run.total));
+    const several = run.steps.filter((s) => !s.skipped).length > 1;
+    const go = el('button', { class: 'btn small approval-go' + (run.ui.note ? ' hidden' : ''), disabled: working || short || run.steps.every((s) => s.skipped), title: `You have ${balance} credits`,
+      onclick: () => approve(run) }, several ? 'Generate all' : 'Generate', el('span', { class: 'approval-price' }, '· ', String(run.total), creditMark('credits')));
     const note = el('input', { type: 'text', class: 'approve-note', placeholder: short ? `Needs ${run.total} credits, you have ${balance}. Or say what to change…`
-      : 'Type something else… e.g. make the assets first', 'aria-label': 'What to change in this plan', 'data-run': run.at,
+      : 'Type something else…', 'aria-label': 'What to change in this plan', 'data-run': run.at,
       oninput: (e) => { run.ui.note = e.target.value; change.classList.toggle('hidden', !e.target.value.trim()); go.classList.toggle('hidden', !!e.target.value.trim()); },
       onfocus: () => { noteFocus = run.at; }, onblur: () => { if (noteFocus === run.at) noteFocus = null; },
       onkeydown: (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); revise(run); } } });
@@ -1550,35 +1812,51 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   function drawDock() {
     drawSuggest();   // drawn with the log: a tab shown again, a message sent or answered
     const run = pending ? null : docked();
+    // Or the questions of the newest turn, waiting for an answer: their card takes the place of the message box.
+    const ask = !run && askOpen(runs[runs.length - 1]) ? runs[runs.length - 1] : null;
+    // Or what the check of the newest plan found, once all its shots are made and checked.
+    const offer = !run && !ask && retakeOpen(runs[runs.length - 1]) ? runs[runs.length - 1] : null;
+    const key = run ? String(run.at) : ask ? 'ask:' + ask.at : offer ? 'retake:' + offer.at : '';
     const typing = document.activeElement && dock.contains(document.activeElement) && document.activeElement.matches('input, textarea');
-    if (run && dock.dataset.run === String(run.at) && typing) return;
+    if (key && dock.dataset.run === key && typing) return;
+    const focused = !!(ask || offer) && dock.contains(document.activeElement);
     const steps = dock.querySelector('.agent-dock-steps');
-    const scrolled = run && dock.dataset.run === String(run.at) && steps ? steps.scrollTop : 0;
-    const fresh = run && dock.dataset.run !== String(run.at);
-    dock.dataset.run = run ? String(run.at) : '';
-    composer.classList.toggle('hidden', !!run);   // a plan waiting for approval is the only thing to answer: its card has the box
-    dock.replaceChildren(...(run ? [el('div', { class: 'agent-dock-steps' }, el('div', { class: 'step-list' }, run.steps.map((step) => drawStep(run, step)))),
-      approveBar(run)] : []));
+    const scrolled = run && dock.dataset.run === key && steps ? steps.scrollTop : 0;
+    const fresh = key && dock.dataset.run !== key;
+    dock.dataset.run = key;
+    // A plan waiting for approval is the only thing to answer: its card has the box. So are questions, unless something
+    // is being made (the box has Stop then).
+    composer.classList.toggle('hidden', !!run || ((!!ask || !!offer) && !generating()));
+    dock.replaceChildren(...(run ? [approvalCard(run)] : ask ? [askCard(ask)] : offer ? [retakeCard(offer)] : []));
     if (scrolled) dock.querySelector('.agent-dock-steps').scrollTop = scrolled;
-    if (fresh) dock.querySelector('.approve-note')?.focus({ preventScroll: true });
-    dock.classList.toggle('hidden', !run);
+    if (fresh && run) dock.querySelector('.approve-note')?.focus({ preventScroll: true });
+    if ((ask || offer) && (fresh || focused) && !dock.contains(document.activeElement)) dock.querySelector('.ask-card').focus({ preventScroll: true });
+    dock.classList.toggle('hidden', !run && !ask && !offer);
+    dock.classList.toggle('asking', !!ask || !!run || !!offer);
   }
 
   // The plan of a turn: the card to approve, what it made once approved, or, turned down, a folded "Cancelled".
   function plan(run) {
     if (run.state === 'dismissed') {
       return fold({ glyph: 'film', title: 'Generation', sub: run.revised ? 'Changed' : 'Cancelled', state: (run.ui.cancelled = run.ui.cancelled || {}), onToggle: redraw,
-        className: 'cancelled', body: el('div', { class: 'step-list' }, run.steps.map((step) => drawStep(run, step))) });
+        className: 'cancelled', body: el('ol', { class: 'approval-list' }, run.steps.map((step) => approvalRow(run, step))) });
     }
     if (run.state === 'proposed') {
-      // The newest plan waiting for approval is in the dock above the message box, its steps and its bar; an older
-      // plan still waiting stays here with its own bar.
-      if (run === docked()) return null;
-      return el('div', { class: 'agent-plan' }, el('div', { class: 'step-list' }, run.steps.map((step) => drawStep(run, step))), approveBar(run));
+      // The newest plan waiting for approval is in the dock above the message box; the conversation only says it waits.
+      // An older plan still waiting stays here as its own card.
+      if (run === docked()) {
+        return el('div', { class: 'turn-asking' }, el('span', { class: 'turn-asking-dot', 'aria-hidden': 'true' }),
+          el('span', {}, 'Waiting for your approval · ' + planCount(run)));
+      }
+      return el('div', { class: 'agent-plan approval-card' }, approvalCard(run));
     }
     const stills = run.steps.filter((s) => s.stage === 'still' && !s.skipped);
     const ready = stills.length > 0 && !run.animated && stills.every((s) => s.made || progressOf(s, s).state === 'failed') && stills.some((s) => s.made);
+    const waiting = retakeOpen(run) ? flagged(run).length : 0;
     return el('div', { class: 'agent-plan' }, results(run), ready && !working && animateBar(run),
+      // What the check found is in the dock above the message box; the conversation only says it waits.
+      waiting > 0 && el('div', { class: 'turn-asking' }, el('span', { class: 'turn-asking-dot', 'aria-hidden': 'true' }),
+        el('span', {}, `Waiting for your choice · ${waiting} ${waiting === 1 ? 'shot' : 'shots'} could be closer`)),
       // An approved plan with steps still to carry out: it was interrupted, or a step failed. Resume goes on from there.
       run.state === 'approved' && !working && run.steps.some((step) => !step.job && !step.made && !step.skipped) && el('div', { class: 'agent-approve' },
         el('span', { class: 'slate-text' }, 'Not every step was carried out.'),
@@ -1629,8 +1907,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
           tally.length > 0 && el('p', { class: 'work-foot' }, tally.map((e) => e.text).join(' · '))].filter(Boolean) }),
       run.reply && reply(run),
       run === runs[runs.length - 1] && contextNote(run),
-      run.question && asked(run),
-      (run.questions || []).length > 0 && askedAll(run),
+      questionsOf(run).length > 0 && asked(run),
       run.steps.length > 0 && plan(run),
       after.length > 0 && fold({ glyph: 'wrench', title: `Worked ${span((after[after.length - 1].at - (run.approvedAt || after[0].at)) / 1000)}`,
         sub: after[after.length - 1].text, state: (ui.after = ui.after || {}), onToggle: redraw, className: 'work',
@@ -1740,15 +2017,33 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     drawDock();
     // The files the replies hand over (conversation.mediaCard) are kept as they are, in their order: a video playing
     // goes on playing through a redraw (a job or the balance changing), and nothing loads again or changes height.
+    // The new turns go in after the old ones first, so each kept card moves from one place in the page to another
+    // (moveBefore keeps a video playing; a plain move pauses it in some browsers, so it is played again), and only
+    // then are the old turns taken out. A new card stays unloaded (preload "none") until it is known to be kept.
     const shown = new Map();
     for (const card of log.querySelectorAll('.md-media[data-key]')) shown.set(card.dataset.key, [...(shown.get(card.dataset.key) || []), card]);
-    log.replaceChildren(...runs.map(turn), ...(live ? [live] : []));
-    for (const card of log.querySelectorAll('.md-media[data-key]')) {
+    const old = [...log.childNodes];
+    const fresh = [...runs.map(turn), ...(live ? [live] : [])];
+    log.append(...fresh);
+    for (const card of fresh.flatMap((node) => [...node.querySelectorAll('.md-media[data-key]')])) {
       const before = (shown.get(card.dataset.key) || []).shift();
-      if (before) card.replaceWith(before);
+      if (before) keepCard(before, card);
     }
+    old.forEach((node) => node.remove());
+    for (const video of log.querySelectorAll('.md-media video[preload="none"]')) video.preload = 'metadata';
     log.scrollTop = follow ? log.scrollHeight : kept;
     toEnd.classList.toggle('hidden', log.scrollHeight - log.scrollTop - log.clientHeight < 160);
+  }
+
+  // Put a card already in the page where its new copy is, without stopping its video or sound.
+  function keepCard(card, copy) {
+    if (copy.parentNode.moveBefore) {
+      try { copy.parentNode.moveBefore(card, copy); copy.remove(); return; } catch { /* moved the plain way below */ }
+    }
+    const player = card.querySelector('video, audio');
+    const playing = player && !player.paused && !player.ended;
+    copy.replaceWith(card);
+    if (playing && player.paused) player.play().catch(() => {});
   }
 
   // What the user typed under a plan instead of approving it: the plan is set aside and the agent plans again with the
@@ -1802,7 +2097,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
     try {
       let answer = null;
       await apiLines('/api/agent/plan', { signal: controller.signal, json: { instruction: text, project_id: projectId() || null, selection: ids,
-        model: localStorage.getItem('scene.agent.model') || null, direction, run: session || 'main', tab: tabName(), explain, workflows: chatWorkflows,
+        model: localStorage.getItem('scene.agent.model') || null, effort: effortOf(models.current) || null, direction, run: session || 'main', tab: tabName(), explain, workflows: chatWorkflows,
         history: recalled().map((r) => ({ instruction: r.instruction, reply: r.reply,
           steps: r.steps.map((s) => ({ name: s.name, uses: (s.uses || []).map((u) => u.name) })) })) } }, (event) => {
         if (event.type === 'error') throw new Error(event.message);
@@ -1842,7 +2137,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
   }
 
   // Run the approved steps one by one: generations are queued through the same door as the Create page,
-  // edits are made through the timeline export. Stops at the first refusal.
+  // edits are made through the export that joins clips. Stops at the first refusal.
   // The library item a step made, waiting for its job if it is still being rendered. A failed or cancelled job throws.
   // The finished cut: waits for the shots (and the music) of the plan, then queues them in order, the take the user chose of each.
   async function queueCut(run, step) {
@@ -1988,7 +2283,7 @@ export function agentPanel({ projectId = () => 0, onJobs = () => {}, onMemory = 
       // A hosted model is named "<service>/<name>"; it is shown as its name and the service it is asked of.
       const services = Object.fromEntries((state.hosted || []).map((s) => [s.id, s.name]));
       const shown = (name) => { const [sid, ...rest] = name.split('/'); return rest.length && services[sid] ? `${rest.join('/')} · ${services[sid]}` : name; };
-      models = { list: names, current, prices: state.prices || {}, byTokens: state.by_tokens || [], shown };
+      models = { list: names, current, prices: state.prices || {}, byTokens: state.by_tokens || [], efforts: state.efforts || {}, shown };
       drawModel();
       modelPicker.classList.toggle('hidden', !names.length);
       status.classList.toggle('hidden', state.online && names.length > 0);

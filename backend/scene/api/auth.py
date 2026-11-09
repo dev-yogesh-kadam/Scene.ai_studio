@@ -72,9 +72,8 @@ def shown(state, user):
     return user
 
 
-def start_session(request, response, user_id, console=False, view_as=None):
-    """Sign a user in to the studio, or to the admin console (`console`): a session of that site and its cookie.
-    `view_as`: an admin viewing the studio as this user, read only, for an hour."""
+def new_session(request, user_id, console=False, view_as=None):
+    """A new session of the studio or the admin console: (its token, how many seconds it lasts)."""
     state = request.app.state
     token = new_token()
     lifetime = VIEW_SECONDS if view_as else state.settings.console_hours * 3600 if console else state.settings.session_days * 86400
@@ -83,6 +82,14 @@ def start_session(request, response, user_id, console=False, view_as=None):
                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                  (token_hash(token), user_id, time.time(), time.time() + lifetime, int(console), client_address(request),
                   request.headers.get("user-agent", "")[:200], time.time(), view_as))
+    return token, lifetime
+
+
+def start_session(request, response, user_id, console=False, view_as=None):
+    """Sign a user in to the studio, or to the admin console (`console`): a session of that site and its cookie.
+    `view_as`: an admin viewing the studio as this user, read only, for an hour."""
+    state = request.app.state
+    token, lifetime = new_session(request, user_id, console, view_as)
     # Over https the cookie is marked Secure, so the browser never sends it over plain http. The console's is sent
     # only by its own pages: no link from elsewhere arrives signed in.
     response.set_cookie(CONSOLE_COOKIE if console else COOKIE, token, max_age=lifetime, httponly=True,

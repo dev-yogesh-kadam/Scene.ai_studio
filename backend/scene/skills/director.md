@@ -1,105 +1,132 @@
 id: director
-title: Directing a script into scenes and shots
-version: 2
-desc: Use when a script, a story or even one line ("two men fighting") must be directed: what it is about and exactly how to shoot it, scene by scene and shot by shot.
+title: Craft Director
+version: 3
+desc: Plan every shot of a story before anything is generated
+description: Use when a story or script must be planned into shots before generation: episode, then scenes with a type and its camera grammar, then beats, then every shot's picture, who is in frame, motion, move, angle, size and length. Craft skill: works inside any workflow and for any video or image model. Never triggers on its own: load only when the user or another skill explicitly calls for it.
 craft: true
 words: \b(direct|director|directing|shot list|shot plan|break (it|this|the script) down|breakdown|coverage plan|storyboard (it|this))\b
 ---
-Never start with shots. Find the one idea the scene is built on, direct the people, and let the camera serve both;
-whatever doesn't serve the idea is cut. Plan top-down whatever the input's length (one line or a whole script): the
-story (what it is about, each scene's job, where the biggest turn falls), then each scene (1–3 below), then its shots
-(4–6), then the words (7). A small input only makes each level short.
+# Director
 
-1. Read the whole script first, and keep the state, so every tab and every later message works from the same plan
-   (read it first; write it as you go):
-   - /source/script: the script word for word (read_text with "path"). A script keeps its story, events and lines
-     exactly. A bare line ("two men fighting") gets the world it needs (place, how the people look, the rules of their
-     world), each a stated choice; its event lands at full size and plays to its physical end; a few spoken lines only
-     if needed, marked invented.
-   - /style/description: the look in one line (style, palette, light). A look every module shares goes into NeuralCore
-     as a style entry (book_save). Lens, angle, move and light work in every style; a camera body, film stock and grain
-     only in realistic.
-   - The bible, once per script and before any scene: /characters/<name>/description and /locations/<name>/description,
-     one fixed description each, the words every prompt repeats. Take it from NeuralCore first (/cast: say so,
-     "NeuralCore: Maya"), word for word as its pictures show it, and let the text fill only what they don't: one
-     spelling of each name, age, look and outfit in every state they appear in (clean, then soaked, torn, bloodied: a
-     state that recurs is a look in NeuralCore, "Maya - torn sleeve", with "from_scene"); a creature's size against a
-     person and its countable parts (four wings, three eyes); each place with its light and time of day (a time of day
-     that recurs is "Kitchen - night"), and its "palette" word for word; the world's rules that change what we see.
-   - A location's picture: read its layout first (ways in and out, what stands where, the depth, the light sources) and
-     stage every move against named things in it; nothing in a shot contradicts it unless marked invented.
-   - /scenes/<n>: {"summary", "location", "type", "idea", "want", "beats", "turn", "eyes", "withheld"}:
-     - want: "[who] wants [what] from [whom], blocked by [what]", and the pressure from outside the frame (a deadline,
-       someone elsewhere), shown at least once;
-     - beats: 3–6 changes of tactic, each a verb (to corner, bait, beg, give up), never an adjective;
-     - turn: the moment power or knowledge flips, best through what the other side does, with the opposite feeling
-       just before it; after it, one consequence beat (a flight, a second turn), never a stop on the flip;
-     - eyes: whose scene it is (their reactions get the close-ups, and at least one true point-of-view shot);
-     - withheld: what the audience doesn't see until the turn, and whether it knows more than the character
-       (suspense) or less (surprise).
-2. The idea: one sentence per scene, "This scene is shot as ___.", the bold specific choice that makes it unmistakable
-   ("one sideways take that never cuts away from the beating", "two men who never share a frame", "glances that keep
-   missing"). Draft two or three different ones (one take, cut-driven, built on what's withheld, carried by a
-   performance) and keep the boldest that fits. Every later choice serves it or is cut: a bolted-camera idea has no
-   handheld shot. Prefer plain behaviour (a look, a careless act) over a designed device.
-3. People first. The turn is carried by what someone does, at full size, as one honest reaction (a laugh at the
-   blows, a collapse, a refusal), sized to the stakes; everyone present is alive (a listening face, a shift of
-   weight). Camera and props support it, never replace it.
-   Scene presets hold the genre craft: when the scene is a conversation, romance, confrontation, fight, chase,
-   suspense, horror, comedy, reveal, triumph, grief, montage, introduction or performance, run preset_search with its
-   name alone and read it; most scenes mix two or more, so read each that fits. Take only what serves the idea.
-4. Camera grammar, every choice for a reason (search presets for the words to paste):
-   - Size is importance: the biggest thing in frame matters most now; save the tightest shot for the turn.
-   - Angle is power: shift it as power shifts, level when nobody wins, a tilted frame only once someone's world breaks.
-   - Lens: name the focal length. 18–28mm close is inside it, pressure; 35–50mm is present, honest; 85–135mm is
-     isolated, watched, compressed. f/1.4–2.8 cuts the face out of the world; f/8–11 keeps the world in the story.
-   - The move picks the rig, one per shot: locked off = trapped or watched; dolly or slider = a controlled push or pull;
-     Steadicam or gimbal = travelling with someone; handheld = inside the panic; crane or drone = the world's scale.
-     A push-in means it lands, a pull-out means isolation; never move by default.
-   - Composition: doors and windows trap; empty space sits where danger will come from; symmetry is order, broken at
-     the rupture; stage in depth so actors change the shot size without a cut. Keep the 180° line, and cross it on
-     purpose when the relationship flips.
-   - Light only from sources the scene has, one main source. Sound: silence or one rising sound before an impact,
-     offscreen sound to widen the world, the ambience named so the model invents no music.
-   - Rhythm: shots shorten, or time stretches, as tension builds.
-5. Cuts. First weigh one take that moves with the character; about 6 shots in 30 s is a ceiling, not a target. Every
-   cut has a reason: a look (cut to what they see), a reaction (in dialogue, to the listener), an action (mid-move), a
-   reveal, the turn (go tighter), a place, or a stale shot. Never for a new line alone or a set length. To the same
-   subject, change the size and move at least 30°, or it reads as a jump. A held take is written in timed slots
-   (0–3 s, 3–6 s), one change each.
-6. Fit it to the video model:
-   - A clip is one generation: H3 Chunk takes 4–15 s, up to 6 shots, a keyframe per shot for frame-exact cuts. Fill a
-     clip with consecutive beats in one place up to that; a change of place starts a new clip; a beat that runs past
-     it splits at a cut and continues from the last frame.
-   - Timing: a beat lasts as long as its words take (voiceover about 130 words a minute, about 2.5 words a second for
-     dialogue, plus a second) or its action takes; shots run 2–5 s, longer when the moment needs it. A transcript sets
-     the times instead (timing): a cut lands on a line's start, a clip break between lines.
-   - Each shot: one size, one lens, one move with its end state, one main action. Slow weighted movement renders
-     cleanly; fast tangled contact and stacked moves warp. Physical verbs with outcomes ("knuckles whiten on the
-     glass"), never mood words.
-   - /direction/<n>/<shot>: {"what", "who", "size", "angle", "move", "lens", "why", "cut"}: "why" is required (a move or
-     an angle without a reason is left out); "cut" is its reason in one word (look, reaction, action, reveal, turn,
-     place, stale).
-7. Write each clip as a book, present tense, in the script's language, dialogue word for word: each beat a paragraph,
-   each new shot starting "Cut to (<reason>)", the camera inside the sentences ("We open low in the mud on a 24mm,
-   locked off, f/8, rain hammering the roof. Cut to (reveal) an extreme wide on a 50mm: lightning splits the clouds").
-   A scene opens on place, time, weather, the main light and who is there; a person's look is given the first time
-   they appear, then only what changed. A thought or memory becomes behaviour, a short flashback or voiceover.
-   Keep each clip at /clips/<n>: {"scene", "time", "join" (continues | cut | new place), "goal", "cast" (NeuralCore
-   names with the look worn: "Maya - torn sleeve · Kitchen - night"), "scene_state", "opening", "voiceover", "shots"
-   (the book), "end_state", "locks"}. The shot's step prompt is built from it.
-   For stills only: one frame per shot ({"image_description", "cast"}, the exact frozen moment at the peak of the
-   action). For a story only: plain prose, past tense, no camera words.
-8. Simplify before showing it: cut an extra device, a tidy payoff, a shot after the scene has landed, coverage for its
-   own sake, subtext said aloud. Leave something open. Never cut the description: first looks, the place and its light
-   stay.
-9. Show the plan to the user as a short table (scene, shot, what, size and move, why) with each scene's idea in one
-   line, and ask with "question" whether to make it: "Make these shots" or "Change something". Nothing is generated
-   before that.
-10. When they say go, plan the steps of the first scene from /direction and /clips (at most twelve), each with
-    "save_to": "/videos/<scene>_<shot>", "check" naming what must not go wrong in it, the camera fields filled from the
-    plan, the cast's NeuralCore entries (the look the clip names) and the prompt in the studio's prompt structure.
-    Shots in the same place chain.
-11. After each scene is made, read the reviews; a shot that failed is retaken with a changed approach, not only new
-    words. Then plan the next scene, carrying on from what was really made (read /videos/...).
-12. At the end, one "assemble" step puts the kept takes in order with music.
+Top down: episode → scenes → beats → shots. Save the episode and the scene list first, then plan each scene's beats and shots in its own round, saving as you go; each level is built only from the level above. The story is locked; the plan decides only what is seen. Never call `creative_direction_guide`: the plan is written by you, here.
+
+**Inputs** (never ask for one):
+- `story`: the story or script, or its state path. Required.
+- `characters`, `locations`, `props`: their sheet paths, each with its saved look, layout and palette. Positions, entrances and angles use only what each location has. **Studio:** the sheets are NeuralCore entries (/cast: each with its "visual", looks, palette and relatives), or the paths craft-asset-designer kept.
+- `style`: the style prompt. Missing: realistic.
+- `aspect_ratio`: Missing: 16:9.
+
+## 1. Episode
+From the whole story:
+- **Story** — one line: who wants what (or whom), what stands in the way, what has changed by the end.
+- **Arc** — scene by scene, the viewer's feeling (e.g. humiliation → heat → hurt → hope → hook).
+- **Leads** — who holds the power at the start; each lead's tell: one small physical giveaway of what they hide (a jaw tightening, a hand closing, eyes dropping to the lips), an insert whenever the feeling leaks.
+- **World** — who has the money, rank or power and where each lead stands in it; the rival and the secret that can blow it open; any magic or power, what it looks like (where on the body or world it shows, its colour, texture, how its light behaves) and what sets it off; the cast, key locations and the motif as their sheets show them, and any look that changes for good with the shot it changes on. Every recurring element — a look, the motif, a power, a car — has one fixed description, repeated word for word in every shot that shows it. Money, rank and power show through things and bodies, never a caption: wardrobe, cars, rooms, staff, who sits and who stands.
+- **Style** — the `style` input. On realistic, every shot is written as if filmed by a real camera: real skin, fabric, metal and stone, real light and lens depth.
+- **Era** — one era for the whole episode: the story's, else today's world, in the city and country the names and language point to. How worn or rich a place looks follows who owns it; light comes only from real sources (sun, moon, windows, lamps, candles, fire, city lights through glass, a phone screen), never neon signs or glowing strips unless the place is a club. Every place, costume, car, phone and prop belongs to it, every montage place included.
+- **Opening** — the first shot hooks on the leads, already in motion; when the world is the hook, the episode's biggest image at full scale. When the story opens on something that happened (a betrayal, a death, a curse, a public humiliation), even said as a figure, the opening shows it happening, then what it left, then follows the story; never the aftermath alone.
+- **Throughline** — the opening image, the closing image, and the one motif between the two, an object or a gesture from the story, that evolves between them.
+- **Spend** — the hinge scenes (T3) and which scenes echo each other (see Echoes).
+
+## 2. Scenes
+A new scene starts where the story beat changes, usually every 10–30 s of screen time. A run of places or things the story lists (a tour of settings, a list of what was lost) is one montage scene, not one scene each. Per scene:
+- **Type** — what the scene does to the viewer, from the table; one type, the one it ends in. Description is Status when it shows money, rank or power in action, Backstory only when it states how things stand or stood or the world's rules; the other types need a character something happens to. Status stripped before witnesses is Humiliation; one refusing the other is Rejection. Bond only when a new trust or link is made; two people coming back together is Reunion, a tender moment between them Intimacy, the hero wanting what is out of reach Longing; the almost-kiss is Pull, the kiss Surrender, sex Heat.
+- **Tier** — T1 nothing changes, it could be explained away: a lighter grammar — fewer shots, a gentler camera, a small exception. T2 it lands and stays for the scene: the table as written. T3 an option is gone for good: the grammar pushed hardest. A T1 scene shot like a T3 spends the episode too early.
+- **Feeling** — the viewer's feeling in → out; "in" is the previous scene's "out". Every scene opens on impact, already in motion.
+- **Grammar** — height, frame, light and camera from the type. Every shot keeps them; shots vary size, angle, subject and lens inside them.
+- **Exception** — exactly one shot that breaks the grammar (Status has none), on the scene's biggest beat. Micro-cuts are not exceptions.
+- **Tone** — the place's real light, made dramatic by the grammar's light: one strong source, deep shadows with detail, a rim through haze or dust, soft highlights. Colours follow the place's palette from its sheet, muted and filmic; the motif's or the power's colour, when it has one, is the only saturated hue and the same everywhere. Each place keeps its palette and returns with it. Between two people, the light follows them: as they draw together it softens — a soft key, a gentle rim, the palette's warmer side; when the bond breaks it cools and hardens — deeper shadow, more empty space around them.
+- **Pace** — the scene's typical hold: backstory and calm 3–5 s; tender and intimate 2.5–3.5 s; action, lists, reveals 1.5–2.5 s.
+- **Build** — wide to set the place → medium for the action → close or macro on the emotion or the motif; the last shot hands off to the next scene, which opens wide unless a match cut links them (a shape, a motion or the motif carried across the cut).
+
+**Height** under: hero lowest in frame, others tower · level · over: hero shot from below · god: above everyone, nobody's eye · flip: under turns to over, the flip is the turn.
+**Frame** ring: watchers around the hero, closing · door: a threshold the camera won't cross · open: space around the hero · crowd: foreground bodies squeeze the hero · two: two figures held together · tight: both faces filling one frame · tiny: a vast wide, the hero small and still · split: two halves opposed.
+**Light** one: a single warm source in the world · split: two opposing temperatures · above: high, broad, nobody's light · hero: the hero or their power is the brightest thing · rival: the threat is the light · drained: light that favours nobody.
+**Camera** slow: pushes, drifts, slow orbits and cranes · fast: whips, tracking, fast orbits, FPV · handheld · lock: the camera holds, the world in frame keeps moving.
+
+| Type — what the scene does | Height | Frame | Light | Camera | Exception shot |
+|---|---|---|---|---|---|
+| Meet — first sight or a collision, the spark | level | crowd, the two finding each other through it | one | slow, a push as their eyes meet | the first held look: a tight two, the room gone |
+| Friction — enemies spar, heat under the insult | over, with whoever wins the line | two | split | handheld | the insult lands and the eyes drop to the lips: one locked close |
+| Pull — wanting against their will, the almost-kiss | level | tight | one | slow pushes, handheld in close | the interruption: a wide that snaps them apart |
+| Surrender — the kiss, the yielding | level | tight | one | slow orbit around them | one wide of the world around them |
+| Heat — an intimate scene, desire acted on | over with whoever leads, else level | two, then tight; an insert of hands or fabric | one, low and dim | slow drifts and orbits; handheld in close | one wide of the place around them, the two small in it |
+| Rejection — one refuses or shames the other, often before witnesses (a breakup, divorce papers, a public slap) | under: the rejected; the rejecter above | ring, the witnesses | above | fast, on the witnesses | the rejecter's crack: a close where their eyes betray them |
+| Humiliation — status stripped before witnesses, no danger | under | ring, tightening | above | fast, on the mockers | the camera rises to the hero's eye level as they almost recover |
+| Jealousy — a rival closes in on one of them | level | crowd, the rival between the two | rival | handheld | the two lock eyes across the room, the rival out of frame |
+| Protection — one shields the other from a threat | over: the protector | two, the threat in fore- or background | rival | fast; lock as the protector stands | after the threat: the protector looks back, level, face softened |
+| Confession — the feeling is said | level | two, closing in | one | slow push | the answer: one locked two-shot |
+| Betrayal — an ally withdraws | level; the betrayer never from below | door | split | slow | equal-height two-shot, the last intact moment |
+| False hope — a rise, then the drop | under → level → under | crowd | hero on the rise, drained after | slow | the hope as the only light, every face turned to it |
+| Decision — alone, two options, one chosen | level | split | split | slow | the camera holds; the hero crosses the dividing line; it doesn't follow |
+| Comeback — the one looked down on returns changed for good (a new look, a new rank, a hidden identity out) | flip | open, every head in the room turning | hero | lock at the arrival, slow after | the flip itself: the camera below the hero for the first time — spend once |
+| Awakening — what the hero is changes for good | flip | open, the enclosure releases | hero | lock at the change, slow after | the flip itself: the camera below the hero for the first time — spend once |
+| Bond — a new trust or link is made (a deal, a pact, a contract marriage signed, a secret shared) | level | two | one | lock | one slow push as it is accepted — betrayal's look reversed |
+| Reunion — two people come back together | level | two, closing in | one | slow drift and orbit, closing the gap | the first touch, held in one locked close |
+| Intimacy — a tender moment between two, nothing at stake yet | level | two | one | slow drifts, pushes and orbits; handheld in close | one locked hold on the smallest gesture |
+| Longing — the hero alone, wanting what is out of reach | level | open, the hero small | one, from what they want | slow drift toward it | what they want, seen through their eyes |
+| Threat — danger closes in, no answer yet | under | crowd | rival | handheld while chased, lock when cornered | a locked wide as the hero stops running |
+| Trial — a formal test or reckoning, people watching (a boardroom, a court, a family council, a wedding) | god | tiny | above | slow | one shot at the hero's eye level just before the result |
+| Revelation — reframes what came before | level | open | one | slow, one push onto the source | an insert repeating the reframed scene's shot exactly |
+| Claim — one chooses the other before everyone | flip | crowd parting to two | hero | fast | the paired rejection's shot reproduced, outcome reversed |
+| Reversal — the one shamed turns it on whoever shamed them, before witnesses | flip | ring, the witnesses turning | hero | fast | the paired rejection's or humiliation's shot reproduced, roles swapped |
+| Triumph — the hero wins with what they gained | over | the paired loss's frame, inverted | hero | fast | the paired loss's shot reproduced, outcome reversed |
+| Status — someone shows what money, rank or power means (a display of wealth, an order that moves a room, a power in action) | god | open | on the one showing it | fast, the camera enjoys itself | none |
+| Backstory — how things stand or stood, or the world's rules (the family's history, the contract's terms, how a power works), nothing changes | level | open or two | one | slow | an insert of the document, object or record named, after its wide reveal |
+
+The words decide every picture; the type decides only how it is shot.
+
+**Echoes.** A claim or a reversal reuses the setups of the rejection or humiliation it pays off, outcome reversed; a triumph reuses its loss's. A surrender completes a pull's almost-kiss on its framing. A revelation repeats the exact shot it reframes. When the hero later attempts what a Status scene showed, both get identical coverage. A comeback's or awakening's new look is locked on its own look sheet and reused from then on. A type that returns at a bigger scale reuses its earlier setups, pushed further.
+
+## 3. Beats
+Split each scene's text into beats; every sentence belongs to exactly one. Per beat:
+- **Mode** — *sequence*: one place, continuous time; geography, screen direction, props, wounds, looks and power state carry shot to shot. *montage*: the story summarises or lists; each line its own place or moment, everyone dressed for that place and time. *flashback*: the past told through the hero — the version where they are in frame (as a child, a witness, the one left behind), dressed for that time; at least 2 shots and 3 s. *insert*: 1–3 lines on one detail. *intercut*: two places at once; each keeps its own grammar and tone and resumes where it left off.
+- **Instruction** — one line: what is visible — what it must make the viewer feel, the harder feeling first. Name the specific thing seen, never its abstraction ("the cost", "the pain"); show it through the leads, never report what others feel.
+
+## 4. Shots
+Spend the scene's shots on its strongest words — the ones that name a thing, a feeling or a turn; a shot can carry several lines. Pick the picture by what the line means (a figure of speech is pictured by the real thing it stands for, never literally: "the kingdom bleeds" is its war and its dead) and by what the line is:
+
+| The line is | The picture |
+|---|---|
+| a thing or event — a place, creature, object, company, war, scandal | the thing doing what the line says about it. An event and what it left gets both, in order — the event happening, then the aftermath: a wedding called off, then the emptied hall; a plague spreading, then the empty town |
+| a state or abstract line about the hero | the strongest situation that proves it, in one frame: put them against the people or world the line is about, or mark it on their body (a price paid — a slap's red mark, a ring gone from a finger, a fresh scar). Never just their face, never a metaphor |
+| the first naming of a major place, family, company, being or power | its biggest image, one of the leads in it for scale |
+| a list | one quick shot per item |
+| a short line stating the theme | 2–3 quick cuts, fresh images of it — never an echo |
+| addressed to "you" | the hero faces the lens |
+| a question or mystery | the object, then the hero's reaction |
+| a memory or a past moment named ("since the day they met") | that moment itself, as a flashback beat with the hero in it — never a present-day close-up |
+
+**Dialogue.** A character's line shows its speaker mid-line, mouth moving, the body acting it (a threat leans in, a plea opens the hands). A line that lands — threat, reveal, insult, order, question — cuts to the listener's reaction before the next line. A line past ~3 s splits: speaker, then the listener or an insert of what they speak of. Two people: over-the-shoulder back and forth; the sequence fixes who stands on which side, eyelines match across cuts (one looks right, the other left), and the camera crosses that line only on a move the viewer sees. A character recounting something is seen speaking first, then what they describe.
+
+Every shot then names:
+- **Picture** — what the line calls for, the props in hand.
+- **In frame** — everyone and everything the camera sees, by their sheet names, each with where they are in the place and which way they face. A shot shows only who it names: someone present but not named is not drawn, so a wide names everyone in the place.
+- **Motion** — what the subject does and what the world does (rain on glass, curtains, steam, traffic, cloth, hair, embers, fog, sparks). No still frames. Every sequence but a tender or intimate one has at least one shot where someone moves through the frame and the camera moves because of them (follows, reveals, walks with them).
+- **Move** — push in, pull out, orbit, crane, track, whip pan, dolly zoom, FPV fly-through, rack focus, handheld, snorricam (rigged to the body, the face locked in frame, the world swinging behind), tracking the feet at ankle height, at the scene's camera. A beat's action sets the move over the scene's camera: a landing, a run, a fall, a gust is followed by a moving camera even in a scene that locks. Never more than 2 locked shots in a row; a held shot past 4 s drifts, pushes or orbits. The camera stops only on a lock, and even a lock keeps a faint handheld sway — a breath of movement, never a dead-still frame. A romantic scene (Meet, Friction, Pull, Bond, Reunion, Intimacy, Confession, Surrender, Heat, Longing) keeps the camera calm: its type's camera is spent as one signature move, on the beat where the bond wakes or resolve breaks; every other shot is a lock or gentle handheld, mixed, and the 2-lock and 4 s drift limits don't apply. Never a descent from above onto a character (craning or pushing down to them).
+- **Angle** — never a size: low, ultra-low at ground level, high, overhead, three-quarter, dutch, over the shoulder, through a foreground, a character's or creature's POV, silhouette, reflection, inside the scene's height. Dutch only for unease, threat, action and power, at least once in such a scene of 3+ shots, never in a tender one. Every action, threat or power scene of 3+ shots has one body or ground shot (snorricam, POV, the feet, ultra-low); a tender or intimate one spends it on hands, breath and fabric instead.
+- **Size** — its place in the build, with a lens for the feeling: long and shallow for intimacy and closes, normal for dialogue, wide and close to the subject for spectacle, action and ground shots.
+- **Length** — as long as what plays in it needs at a natural pace (a look about a second, a line at speaking pace, a walk as long as it takes), near the scene's pace, never under 1.5 s (video models merge shorter shots). Never shorten the blow or the turn; tighten the setup instead.
+
+Compose for the `aspect_ratio`: 16:9 spreads subjects across the frame, 9:16 stacks them in depth and height, 1:1 centres the subject; build depth front to back.
+
+Status is pushed only when the line or scene is about it, or at the peak of a Rejection, Humiliation, Status, Claim, Reversal, Comeback or Triumph. Magic and creatures appear only when the line or scene is about them, always on the hero or in a real place — through their body, their gear, a creature, the architecture — never floating in a void. A secret, a debt, a contract or a power with no body of its own is carried by one recurring object the story gives it. Every frame is cinematic: foreground, subject and a lit background with depth, never a black void; light from sources in the world through haze, rain or glass, a rim on the subject; shallow focus on closes and macros. Show the world through the recurring cast and props before inventing extras; one of the leads is in frame wherever the line allows; others are shown through what they do to the leads. No readable text in any picture: phone screens, contracts, headlines and signs show as light, layout and shapes. Never the same angle and move twice in a row (in a romantic scene, only the angle must change); at least 3 angles in a scene of 3+ shots. Neighbouring shots differ in place or framing and never morph into each other, so every cut is a visible hard cut. No picture shows what the story has not yet reached.
+
+**Last**, mark each scene's exception and apply the echoes. They change how a picture is filmed — height, frame, light, move — never the picture the words call for; an echo shot repeats its source shot's size, angle and move word for word.
+
+**Check each scene before saving:** every sentence in exactly one beat; every line of dialogue word for word from the story; every picture shows its words or the hero's reaction to them and serves its beat's instruction; every shot names everyone in its frame; every shot keeps the grammar except the one exception; the feeling chain holds; echoes reuse the setups they name; no filler ("epic landscape").
+
+## State
+```
+/director/episode                 story, arc, leads, world, style, era, opening, throughline, hinges, echoes
+/director/scenes/<n>              type, tier, feeling, grammar, exception, tone, pace, location, text
+/director/scenes/<n>/beats/<b>    text, mode, instruction
+/director/scenes/<n>/shots/<m>    beat, words, picture, in_frame, motion, move, angle, size, length_s, exception, echo_of
+```
+
+## Studio: on its own
+Inside script-to-video, its steps make the plan into clips. When this skill runs on its own:
+1. Once the plan is saved, show it to the user as a short table (scene, shot, picture, in frame, size · angle · move, length), each scene's type and tier in one line, and ask with "question" whether to make it: "Make these shots" or "Change something". Nothing is generated before that.
+2. When they say go, plan the shots of the first scene (at most twelve steps), each a "generate" step with "save_to" "/videos/<scene>_<shot>", "check" naming what must not go wrong in it, the camera fields filled from the shot (shot_size, angle, move, end_state), the cast's NeuralCore entries in the looks the shot names, and the prompt in its workflow's prompt guide. Shots in the same place chain.
+3. After each scene is made, read the reviews; a shot that failed is retaken with a changed approach, not only new words. Then plan the next scene, carrying on from what was really made (read /videos/...).
+4. At the end, one "assemble" step puts the kept takes in order with music.

@@ -87,7 +87,8 @@ def test_the_agent_reads_and_writes_its_run_and_cuts_media(client, monkeypatch):
     assert '"duration": 2.0' in sliced
     assert any("state_reference_unresolved" in t for t in told)        # a path not written yet is refused, not guessed
     assert any('"missing": ["audio"]' in t for t in told)
-    assert plan["question"] == {"text": "Review the anchors — any corrections?", "options": ["I have corrections in the anchors", "Looks good, next step"]}
+    assert plan["question"] == {"text": "Review the anchors — any corrections?", "options": ["I have corrections in the anchors", "Looks good, next step"],
+                                "details": ["", ""], "default": ""}
     assert plan["run"] == "pm-1"
     # the slice is the run's working file: kept to the run, not in the library
     assert [i["name"] for i in client.get("/api/library", params={"run": "pm-1"}).json()["items"]] == ["Audio slice"]
@@ -105,7 +106,7 @@ def test_a_question_needs_two_options():
     assert agent.clean_question({"text": "Go on?", "options": ["Yes"]}) is None
     assert agent.clean_question({"text": "", "options": ["Yes", "No"]}) is None
     assert agent.clean_question({"text": "Go on?", "options": ["Yes", "yes", "No", "Later", "Never", "Maybe"]}) == \
-        {"text": "Go on?", "options": ["Yes", "No", "Later", "Never"]}
+        {"text": "Go on?", "options": ["Yes", "No", "Later", "Never"], "details": ["", "", "", ""], "default": ""}
 
 
 def test_a_model_named_earlier_in_the_conversation_stays_offered(client, monkeypatch):
@@ -192,7 +193,7 @@ def test_a_long_skill_goes_first_and_the_tokens_are_counted(client, monkeypatch,
     monkeypatch.setattr(agent_, "_service_of", lambda name: ({"name": "Test"}, name))
     monkeypatch.setattr(agent, "PREFLIGHT_CHARS", 0)
     monkeypatch.setattr(agent_, "preflight", lambda *a, **k: asyncio.sleep(0, {"ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}))
-    plan = client.post("/api/agent/plan", json={"instruction": "run pocket motion", "run": "pm-1"}).json()
+    plan = client.post("/api/agent/plan", json={"instruction": "/pm run", "run": "pm-1"}).json()
     system, message = seen[0][0]["content"], seen[0][1]["content"]
     assert "A rule of the run." in system and "A rule of the run." not in message
     assert plan["tokens"] == {"prompt": 18000, "cached": 8000, "written": 0, "answer": 100}

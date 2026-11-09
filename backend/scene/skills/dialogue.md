@@ -8,8 +8,8 @@ words: \b(dialogue|dialog|speak\w*|says?|talk\w*|voice|voices|lip.?sync\w*|monol
    character's name (a "voice" asset). When there is one, put it in "uses" in the voice slot of every shot that person
    speaks in. When there is none, say in "reply" that a short voice sample kept under the character's name keeps the
    voice the same in every shot, and offer to make one; plan the shots anyway.
-2. The words go in the prompt exactly as the user wrote them, in quotation marks after "Audio:", with the name of who
-   says them ("Audio: Maya says: \"We are late.\""). Give the shot the time the words need (about 2.5 words a second,
+2. The words go in the prompt exactly as the user wrote them, in quotation marks, with the name of who
+   says them ("Maya says: \"We are late.\""), where the workflow's guide puts the sound. Give the shot the time the words need (about 2.5 words a second,
    plus a second before and after). One speaker per shot unless the user asks for a conversation in one frame.
 3. Show the speaker's face when they speak: a medium close-up or a close-up, facing the camera or at three quarters, so
    the mouth is seen. Cut to the listener for the reaction in the next shot.

@@ -256,6 +256,8 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     settings["shot_number"] = placement.clean_shot_number(settings.get("shot_number"))
     settings["board"] = placement.clean_board(settings.get("board"))
     settings["placement_group"] = placement.clean_group(settings.get("placement_group"))
+    # The voice track has music or noise under it: the voice is taken out first, when the job runs (jobs._clean_voice).
+    settings["clean_voice"] = settings.get("clean_voice") is True and bool(schema["slots"].get("voice_track"))
 
     # The length of a video the user brought to an upscaler or a lip sync, measured here: it is what the job is charged by.
     videos = {r["id"] for r in schema["refs"] if r["kind"] == "video"} if by_source(wf) else set()
@@ -369,7 +371,8 @@ async def ref_preview(name: str, request: Request, user: dict = Depends(current_
 @router.websocket("/events")
 async def events(ws: WebSocket):
     state = ws.app.state
-    user = user_for_token(state.db, ws.cookies.get(COOKIE))
+    token = ws.cookies.get(COOKIE)
+    user = user_for_token(state.db, token)
     if user is None or not same_origin(ws):   # another site's page must not open a connection with the user's cookie
         await ws.close(code=4401)
         return
@@ -384,7 +387,7 @@ async def events(ws: WebSocket):
                 said = json.loads(await ws.receive_text())
                 if said.get("ping"):
                     # The session is checked again: one signed out, ended by an admin or of a disabled account stops here.
-                    if user_for_token(state.db, ws.cookies.get(COOKIE)) is None:
+                    if user_for_token(state.db, token) is None:
                         await ws.close(code=4401)
                         return
                     await ws.send_text(state.live_message(user["id"]))

@@ -39,7 +39,7 @@ export function render(view) {
   const queue = el('div');
   const recent = el('div', { class: 'media-grid compact' });
 
-  // Opened from the canvas (All settings, Re-run): a way back to it, like the Timeline's.
+  // Opened from the canvas (All settings, Re-run): a way back to it.
   const from = store.from;
   store.from = null;
   view.replaceChildren(

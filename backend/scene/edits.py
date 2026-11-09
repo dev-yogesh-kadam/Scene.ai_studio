@@ -8,7 +8,7 @@ The request that queues one checks it and writes what is to be done into the job
 import time
 from pathlib import Path
 
-from . import core, credits, detect, film, media, montage, motion, reframe, runs
+from . import core, credits, detect, ffjob, film, media, montage, motion, reframe, runs
 from .db import as_everyone
 
 TIMELINE = "edit/timeline"   # the clips of a timeline joined into one video
@@ -38,7 +38,10 @@ FILM = {
     "gif": ("edit/gif", "Looping GIF", ".gif", "image"),
     "composite": ("edit/composite", "Overlay laid on", ".mp4", "video"),
     "audio_check": ("edit/audio_check", "Sound checked", ".json", "text"),
+    "html": ("edit/html", "Motion page", ".mp4", "video"),           # a page written whole, drawn by HyperFrames
+    "ffmpeg": ("edit/ffmpeg", "ffmpeg command", ".txt", "text"),     # a command written whole; each output files as its type
 }
+ANY = ("video", "image", "audio", "text")   # what an ffmpeg command may take in
 TITLES = {TIMELINE: "Timeline export", SOUND: "Sound on a video", MOTION: "Motion graphics", ASSEMBLE: "Final cut",
           **{workflow: title for workflow, title, _, _ in FILM.values()}}
 
@@ -52,13 +55,13 @@ async def run(job, folder, db, node_path="", tmp_dir=None):
     Returns what was made: [(file, kind in the library, context: length and frame size)], most often one file."""
     def item(item_id, kind="video"):
         """One of the user's library items and its file. It may have been deleted since the job was queued.
-        kind: "video", "image", "audio", or "sound" for an audio item or a video whose sound is wanted."""
-        kinds = ("audio", "video") if kind == "sound" else (kind,)
+        kind: "video", "image", "audio", "sound" for an audio item or a video whose sound is wanted, or a tuple of kinds."""
+        kinds = ("audio", "video") if kind == "sound" else kind if isinstance(kind, tuple) else (kind,)
         row = db.one("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind IN ({})".format(", ".join("?" * len(kinds))),
                      (item_id, job["user_id"], *kinds))
         if row is None or not (folder / row["filename"]).is_file():
             raise media.MediaError("{} this was to be made from is no longer in the library.".format(
-                {"video": "A video", "image": "A picture"}.get(kind, "The sound")))
+                {"video": "A video", "image": "A picture", "audio": "The sound", "sound": "The sound"}.get(kind, "A file")))
         return folder / row["filename"]
 
     op = next((name for name, entry in FILM.items() if entry[0] == job["workflow"]), None)
@@ -83,7 +86,8 @@ async def run(job, folder, db, node_path="", tmp_dir=None):
                         {str(n): span for n, span in found.items()}, op or "edit", replace=True)
     context = {"duration": round(made["seconds"], 1), "width": made["width"], "height": made["height"],
                **{k: v for k, v in made.items() if k not in ("seconds", "width", "height")}}
-    return [(path, kind, dict(context, **extra)) for path, extra in zip(files, each)]
+    # A file that is not of the op's kind says its own ("_kind": an ffmpeg command's audio output, a page made a GIF).
+    return [(path, extra.pop("_kind", kind), dict(context, **extra)) for path, extra in zip(files, each)]
 
 
 def keep_at(db, job, item_id, path, extra=None):
@@ -248,6 +252,10 @@ async def _film(settings, item, target, node_path, tmp_dir):
         return await reframe.prepare(item(settings["video"]), settings["shape"], target)
     if op == "outpaint_join":
         return await reframe.join(item(settings["video"]), [item(i) for i in settings["parts"]], settings["shape"], target)
+    if op == "html":
+        return await _html(settings, item, target, node_path, tmp_dir)
+    if op == "ffmpeg":
+        return await _ffmpeg(settings, item, target, tmp_dir)
     more = {"shots": _shots, "keyframes": _keyframes, "board": _board, "beats": _beats, "beat_cut": _beat_cut,
             "multicam": _multicam, "gif": _gif, "composite": _composite, "audio_check": _audio_check}.get(op)
     if more:
@@ -343,6 +351,33 @@ async def _composite(settings, item, target):
     overlay = item(settings["overlay"], settings["overlay_kind"])
     made = await montage.composite(item(settings["video"]), overlay, target, settings["at"], settings["x"], settings["y"], settings["scale"])
     return dict(made, measured=await media.measure(target))
+
+
+async def _html(settings, item, target, node_path, tmp_dir):
+    """A page the agent wrote whole, drawn by HyperFrames (motion.render_page): a video, a see-through WebM, a GIF or a
+    still of its last moment, filed as its type."""
+    files = {m["name"]: item(m["item"], ANY) for m in settings.get("media") or []}
+    made = await motion.render_page(settings["html"], settings["width"], settings["height"], settings["duration"], target,
+                                    settings["fps"], settings["format"], files, node_path, tmp_dir)
+    file = made.pop("file", None) or target
+    return dict(made, files=[file], each=[{"_kind": "image" if settings["format"] in ("gif", "png") else "video"}])
+
+
+async def _ffmpeg(settings, item, target, tmp_dir):
+    """An ffmpeg command written whole (ffjob.py), checked when it was queued and again here. Each output is filed as
+    its type, under its own name when there are several; a command with none (a measurement) files what ffmpeg said."""
+    argv, sidecars, timeout = ffjob.check(settings["argv"], settings["inputs"], settings.get("sidecars") or [],
+                                          settings["outputs"], settings.get("timeout"))
+    names = [o["name"] for o in settings["outputs"]]
+    made = await ffjob.run(argv, {i["name"]: item(i["item"], ANY) for i in settings["inputs"]}, sidecars, names, target, timeout, tmp_dir)
+    each = []
+    for path, name in zip(made["files"], names or ["log.txt"]):
+        kind = ffjob.kind_of(name)
+        found = await media.probe(path) if kind != "text" else {"seconds": 0.0, "width": 0, "height": 0}
+        each.append({"_kind": kind, "output": name, "duration": round(found["seconds"], 1), "width": found["width"],
+                     "height": found["height"], **({"_name": "{} · {}".format(settings["workflow_title"], name)} if len(names) > 1 else {})})
+    each[0]["log"] = made["log"]   # once: what ffmpeg said (a measurement is read from it)
+    return {"seconds": each[0]["duration"], "width": each[0]["width"], "height": each[0]["height"], "files": made["files"], "each": each}
 
 
 async def _audio_check(settings, item, target):

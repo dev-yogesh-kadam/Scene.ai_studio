@@ -33,6 +33,7 @@ CLIP_BREAK = re.compile(r"^\s*-{3,}\s*$", re.M)  # a line of dashes separates pe
 RESUMES = 3          # times a render cut off by the render server going away goes back in the queue before it fails
 JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever came after it (the canvas waits for its result)
 OFFLINE_CHECK = 10  # seconds between asking whether the render server answers again, while renders wait for it
+CLEAN_VOICE = "audio/audio_separate_voice"   # takes the voice out of music and effects, for a job that asks ("clean_voice")
 
 
 class Cancelled(Exception):
@@ -424,10 +425,11 @@ class JobManager:
         client_id = uuid.uuid4().hex
         listener = asyncio.create_task(self._listen(job, live, client_id))
         try:
+            settings = await self._clean_voice(job, live, schema, client_id)
             if clips > 1:
-                await self._run_chain(job, live, wf, schema, clips, client_id)
+                await self._run_chain(job, live, wf, schema, clips, client_id, settings)
                 return
-            entry, ctx = await self._render(job, live, wf, job["settings"], client_id)
+            entry, ctx = await self._render(job, live, wf, settings, client_id)
         finally:
             listener.cancel()
 
@@ -453,8 +455,38 @@ class JobManager:
         if not saved:
             raise ComfyError("ComfyUI finished but saved no image, video or sound. Does the workflow have a Save node?")
 
-    async def _run_chain(self, job, live, wf, schema, clips, client_id):
-        settings, slots = job["settings"], schema["slots"]
+    async def _clean_voice(self, job, live, schema, client_id):
+        """The job's settings, with its voice track swapped for the voice alone when it asks for that ("clean_voice": the
+        track has music, effects or other people under the voice). The separation workflow runs first on the same server
+        and its voice stem goes in the voice track's slot: lips follow a voice best with nothing under it. The job keeps
+        its own settings as they were, so making it again cleans the original track again."""
+        settings = job["settings"]
+        slot = (schema.get("slots") or {}).get("voice_track")
+        given = (settings.get("refs") or {}).get(slot) if slot and settings.get("clean_voice") is True else None
+        if not given or not given.get("comfy_name"):
+            return settings
+        separate = await self.catalog.load(CLEAN_VOICE)
+        takes = next(r["id"] for r in workflows.describe(separate)["refs"] if r["kind"] == "audio")
+        live["node"] = "Taking the voice out of the music"
+        self.notify(job["user_id"])
+        entry, _ = await self._render(job, live, separate, {"values": {}, "options": {}, "refs": {takes: given},
+                                                            "name": "{} voice".format(job["name"])}, client_id)
+        outputs = list(_outputs(entry))
+        voice = next((item for (item, kind, _), label in zip(outputs, _output_labels(separate, outputs))
+                      if kind == "audio" and "VOICE" in str(label or "").upper()), None)
+        if voice is None:
+            raise ComfyError("The voice could not be taken out of the voice track: the separation saved no voice stem.")
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self.tmp_dir) as tmp:
+            stem = Path(tmp) / ("voice" + (Path(voice["filename"]).suffix or ".wav"))
+            await self._fetch(voice, stem, comfy=live["comfy"])
+            name = await live["comfy"].upload("scene_voice_{}{}".format(job["id"], stem.suffix), stem.read_bytes(), "audio/wav")
+        live.update(node="", step=0, steps=0)
+        live.pop("first_step", None)
+        return dict(settings, refs=dict(settings["refs"], **{slot: {"comfy_name": name, "name": "the voice of {}".format(given.get("name") or "the track")}}))
+
+    async def _run_chain(self, job, live, wf, schema, clips, client_id, settings=None):
+        settings, slots = settings or job["settings"], schema["slots"]
         roles = {c["role"]: c for c in schema["controls"] if c["role"]}
         full_ctx = workflows.context(schema, settings)
         prompt = str((settings.get("values") or {}).get(roles["prompt"]["id"], roles["prompt"]["default"]) or "")
@@ -600,7 +632,7 @@ class JobManager:
             "context, seconds, size, run, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job["user_id"], job["id"], job.get("project_id"), job["workflow"], kind, name or job["name"], filename,
              job["summary"], json.dumps({k: v for k, v in job["settings"].items() if k != "turn"}), json.dumps(ctx), round(time.time() - job["started"], 1),
-             target.stat().st_size, str((job.get("settings") or {}).get("run") or ""), time.time()))
+             target.stat().st_size, placement.run_of(job), time.time()))
         if kind in ("image", "video"):   # its thumbnail, made now rather than when the canvas first asks for it
             try:
                 asyncio.get_running_loop().create_task(media.make_poster_soon(target))

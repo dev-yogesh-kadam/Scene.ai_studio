@@ -6,16 +6,16 @@ import { KIT } from '../components/kit.js';
 
 const SECTIONS = [
   { id: 'start', title: 'Getting started', body: [
-    ['p', 'Scene.ai turns what you describe into pictures, videos, music and voice, and puts them together into finished videos. Work happens in projects: each project has its own canvas, timeline, agent conversations and its ' + KIT + '.'],
+    ['p', 'Scene.ai turns what you describe into pictures, videos, music and voice, and puts them together into finished videos. Work happens in projects: each project has its own canvas, agent conversations and its ' + KIT + '.'],
     ['steps', ['Open Projects from the menu at the top left and make a project.',
       'Open its main canvas, or add a module for a separate part of the work, such as an episode.',
       'Ask the agent for what you want, or make something yourself from the panel beside the canvas.',
-      'Put the shots in order on the timeline and export the finished video.']],
+      'Ask the agent to put the shots in order and make the finished video.']],
     ['tip', 'Everything you make costs credits; your balance is at the top right. A job that fails or that you cancel gives its credits back.'],
   ] },
   { id: 'projects', title: 'Projects and modules', body: [
     ['p', 'A project holds one piece of work. Its page shows its modules, what it has spent, and its details.'],
-    ['p', 'A module is a canvas of its own inside a project, with its own timeline and agent tabs: use one per episode, scene or version. Every module of a project shares the project\'s ' + KIT + '.'],
+    ['p', 'A module is a canvas of its own inside a project, with its own agent tabs: use one per episode, scene or version. Every module of a project shares the project\'s ' + KIT + '.'],
     ['list', ['Add module makes a new one; the project\'s own canvas is the main canvas.',
       'View analytics shows what the project spent and made, by day, by kind and by module.',
       'Duplicate project starts a copy with the same modules and ' + KIT + ', but none of what was made.',
@@ -45,9 +45,6 @@ const SECTIONS = [
     ['list', ['For a long video, write one prompt per clip with a line of three dashes (---) between them: each clip starts on the last frame of the one before.',
       'Re-run in the library opens an item with the settings it was made with.',
       'Continue a video from its last frame to make the next shot match.']],
-  ] },
-  { id: 'timeline', title: 'The timeline', body: [
-    ['p', 'The timeline puts videos in order. Drag clips into place, trim their start and end, put music or a voice under them, and export the cut as one video, which goes into your library.'],
   ] },
   { id: 'library', title: 'The library', body: [
     ['p', 'The library holds everything you have made, in every project. Search by name or prompt, filter by kind or project, rate results with a thumbs up or down (the agent learns from them), and download or delete what you no longer need.'],

@@ -50,8 +50,10 @@ class WorkflowError(Exception):
         self.needs_info = needs_info
 
 
-def video_size(resolution, orientation):
-    short, long_ = SHORT_EDGE[resolution], LONG_EDGE[resolution]
+def video_size(resolution, orientation, multiple=32):
+    """Width and height; a workflow whose model needs a coarser grid (an IC-LoRA guide halves the latent: 64) rounds
+    both down to its "size_multiple"."""
+    short, long_ = SHORT_EDGE[resolution] // multiple * multiple, LONG_EDGE[resolution] // multiple * multiple
     if orientation == "landscape":
         return long_, short
     if orientation == "portrait":
@@ -452,6 +454,7 @@ def describe(wf):
         size = {
             "orientation": "landscape" if w > h else "portrait" if h > w else "square",
             "resolution": min(SHORT_EDGE, key=lambda r: abs(SHORT_EDGE[r] - min(w, h))),
+            "multiple": int(profile.get("size_multiple") or 32),
         }
 
     confirm = profile.get("confirm") or []
@@ -465,6 +468,8 @@ def describe(wf):
         "id": wf["id"],
         "title": profile.get("title") or wf["id"].rsplit("/", 1)[-1].replace("_", " "),
         "description": profile.get("description", ""),
+        # When to pick this workflow over the others of its kind (the presets file's "pick_when"), for the agent.
+        "pick_when": str(profile.get("pick_when") or ""),
         "controls": controls,
         "refs": refs,
         "options": [final_first(o) for o in profile.get("options", [])],
@@ -557,7 +562,7 @@ def context(schema, settings):
             raise WorkflowError("Unknown resolution: {}".format(resolution))
         ctx["resolution"] = resolution
         ctx["orientation"] = settings.get("orientation") or schema["size"]["orientation"]
-        ctx["width"], ctx["height"] = video_size(resolution, ctx["orientation"])
+        ctx["width"], ctx["height"] = video_size(resolution, ctx["orientation"], schema["size"].get("multiple", 32))
     elif "resolution" in roles:
         ctx["resolution"] = _cast("int", values.get(roles["resolution"]["id"], roles["resolution"]["default"]))
     clips = clip_count(schema, settings)

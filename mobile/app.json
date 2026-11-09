@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Scene.ai",
+    "slug": "scene-ai",
+    "version": "1.2.0",
+    "scheme": "sceneai",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["web"],
+    "web": {
+      "output": "single",
+      "bundler": "metro",
+      "favicon": "./assets/images/favicon.png",
+      "name": "Scene.ai",
+      "shortName": "Scene.ai",
+      "themeColor": "#000000",
+      "backgroundColor": "#000000"
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true,
+      "baseUrl": "/m"
+    }
+  }
+}

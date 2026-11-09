@@ -38,7 +38,7 @@ const typeSelect = (current, onChange) => el('select', { class: 'kit-type', 'ari
 // Resolves with the new entry, or null if the dialog is closed.
 export function addToKitDialog({ project = 0, file = null, item = null, script = false, type = '' } = {}) {
   if (!project) {   // a NeuralCore belongs to a project: there is none for all work
-    alert(`The ${KIT} belongs to a project. Open a project from All projects and keep its characters, places and props there; every module of it shares them.`);
+    alert(`The ${KIT} belongs to a project. Open a project from All projects and keep its characters, places and props there; each module keeps its own.`);
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
@@ -125,7 +125,7 @@ export function pickFromKit(kind, project = 0) {
             el('div', { class: 'asset-thumb' }, kitThumb(entry)),
             el('div', { class: 'asset-name' }, entry.name),
             el('div', { class: 'muted' }, entry.type))))
-        : el('p', { class: 'muted' }, `Nothing in this project's ${KIT} fits here yet. Add characters, locations and voices in the ${KIT} tab of the canvas.`),
+        : el('p', { class: 'muted' }, `Nothing in this module's ${KIT} fits here yet. Add characters, locations and voices in the ${KIT} tab of the canvas.`),
       el('div', { class: 'dialog-buttons' }, el('button', { class: 'btn', onclick: () => dialog.close() }, 'Close')));
     dialog.addEventListener('close', () => resolve(chosen));
   });
@@ -210,7 +210,7 @@ function cardDialog(entry, onSaved, entries = []) {
 
 // projectId(): the current project or module, or 0. selected(): the one canvas item selected, or null. onChange(): the
 // kit changed. The panel is NeuralCore's memory of the module open now, as a tree in the manner of Frameo's: the cast
-// (the project's entries as this module uses them, with their controls), the assets (every file of the module, by its
+// (this module's entries, with their controls), the assets (every file of the module, by its
 // record) and the notes the agent and its skills keep. "You" is what the agent remembers of the user everywhere.
 export function kitPanel({ projectId = () => 0, selected = () => null, onChange = () => {} } = {}) {
   let found = null;            // what /api/kit gave (the cast's entries with their controls), or null while it loads
@@ -233,11 +233,14 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
   const tools = el('div', { class: 'kit-tools' }, search, kinds);
   const upload = el('input', { type: 'file', hidden: true, accept: 'image/*,video/*,audio/*,.heic,.heif,.avif,.txt,.md,.docx,.pdf,.srt,.json',
     onchange: async (e) => { const file = e.target.files[0]; e.target.value = ''; if (file && await addToKitDialog({ project: projectId(), file })) changed(); } });
+  // An asset sheet (a CSV a spreadsheet exports: type, name, image link and notes a row): every row's picture is fetched.
+  const sheetPick = el('input', { type: 'file', hidden: true, accept: '.csv,.tsv,text/csv',
+    onchange: (e) => { const file = e.target.files[0]; e.target.value = ''; if (file) importSheet(file); } });
   const addButton = el('button', { class: 'btn small primary', type: 'button', title: 'Add to the cast', onclick: (e) => openAdd(e.currentTarget) }, icon('plus'), 'Add');
   const body = el('div', { class: 'kit-body' });
   const node = el('div', { class: 'kit-panel memory-panel' },
     el('div', { class: 'memory-head' }, el('b', {}, 'Memory'), el('span', { style: 'flex:1' }), stamp,
-      el('button', { class: 'icon-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: () => load() }, '↻'), addButton, upload),
+      el('button', { class: 'icon-btn', title: 'Refresh', 'aria-label': 'Refresh', onclick: () => load() }, '↻'), addButton, upload, sheetPick),
     scopes, body);
 
   function openAdd(anchor) {
@@ -249,13 +252,27 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
         if (await addToKitDialog({ project: projectId(), item: one })) changed();
       } },
       { icon: 'book', label: 'Paste a script', run: async () => { if (await addToKitDialog({ project: projectId(), script: true })) changed(); } },
+      { icon: 'queue', label: 'Import an asset sheet', hint: 'CSV: type, name, image link, notes', run: () => sheetPick.click() },
     ]);
   }
 
-  // In a module, an entry of the project's NeuralCore is changed for this module only (always on here, hidden here).
-  async function changeHere(entry, json) {
-    try { Object.assign(entry, await api('/api/kit/' + entry.id + '/here', { method: 'PUT', json: { project_id: projectId(), ...json } })); } catch (e) { alert(e.message); }
-    changed(false);
+  async function importSheet(file) {
+    const data = new FormData();
+    data.append('file', file, file.name);
+    data.append('project_id', String(projectId() || ''));
+    stamp.textContent = 'fetching the sheet’s pictures…';
+    let done;
+    try { done = await api('/api/kit/sheet', { method: 'POST', body: data }); } catch (e) { stamp.textContent = ''; alert(e.message); return; }
+    changed();
+    const fresh = done.added.filter((a) => a.new).length;
+    const problems = [...done.failed.map((f) => `Row ${f.row}, “${f.name}”: ${f.reason}`),
+      ...done.left_out.map((f) => `Row ${f.row}${f.name ? `, “${f.name}”` : ''}: left out, ${f.reason}`)];
+    const dialog = openDialog(
+      el('h2', {}, `Brought into the ${KIT}`),
+      el('p', {}, `${fresh} new ${fresh === 1 ? 'entry' : 'entries'}` + (done.added.length > fresh ? `, ${done.added.length - fresh} already here` : '') +
+        (done.looks.length ? `, ${done.looks.length} linked as looks of another` : '') + '.'),
+      problems.length ? el('ul', {}, problems.map((line) => el('li', {}, line))) : null,
+      el('div', { class: 'dialog-buttons' }, el('button', { class: 'btn primary', onclick: () => dialog.close() }, 'OK')));
   }
 
   async function change(entry, json) {
@@ -264,13 +281,8 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
   }
 
   async function remove(entry) {
-    if (found.module) {   // a module hides it for itself; the project keeps it
-      if (!await ask({ title: `Hide “${entry.name}” in this module?`, confirm: 'Hide here',
-        message: 'The agent will not use it in this module. The project and its other modules keep it.' })) return;
-      return changeHere(entry, { removed: true });
-    }
     if (!await ask({ title: `Take “${entry.name}” out of the cast?`, danger: true, confirm: 'Take it out',
-      message: 'The agent will no longer know it by this name, in any module of the project.' })) return;
+      message: 'The agent will no longer know it by this name in this module.' })) return;
     try { await api('/api/kit/' + entry.id, { method: 'DELETE' }); } catch (e) { alert(e.message); }
     changed();
   }
@@ -349,25 +361,20 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
   function row(entry) {
     const name = el('input', { class: 'kit-name', value: entry.name, maxlength: 60, 'aria-label': 'Name',
       onchange: (e) => { if (e.target.value.trim()) change(entry, { name: e.target.value }); } });
-    const here = found.module;
-    const line = el('div', { class: 'kit-row' + (entry.named ? '' : ' unnamed') + (entry.always ? ' always' : '') + (entry.hidden ? ' hidden-here' : '') },
+    const line = el('div', { class: 'kit-row' + (entry.named ? '' : ' unnamed') + (entry.always ? ' always' : '') },
       el('span', { class: 'kit-grip', title: 'Drag to change the order', 'aria-hidden': 'true', onpointerdown: (e) => dragRow(e, entry) }, '⋮⋮'),
       el('span', { class: 'memory-thumb kit-thumb' }, kitThumb(entry)),
       el('div', { class: 'kit-main' },
-        el('div', { class: 'kit-line' }, name, !entry.named && el('span', { class: 'kit-flag', title: 'The agent will ask who or what this is' }, 'needs a name'),
-          entry.hidden && el('span', { class: 'kit-flag', title: 'The project keeps it; this module does not use it' }, 'hidden here'),
-          !entry.hidden && entry.changed_here && el('span', { class: 'kit-flag soft', title: 'This module changed it for itself' }, 'changed here')),
+        el('div', { class: 'kit-line' }, name, !entry.named && el('span', { class: 'kit-flag', title: 'The agent will ask who or what this is' }, 'needs a name')),
         el('div', { class: 'kit-line' }, typeSelect(entry.type, (type) => change(entry, { type })),
           entry.kind !== 'text' && el('label', { class: 'kit-always', title: 'Put it into every shot that has a place for it' },
-            el('input', { type: 'checkbox', checked: entry.always, onchange: (e) => (here ? changeHere(entry, { always: e.target.checked }) : change(entry, { always: e.target.checked })) }),
-            el('span', {}, here ? 'Always on here' : 'Always on'))),
+            el('input', { type: 'checkbox', checked: entry.always, onchange: (e) => change(entry, { always: e.target.checked }) }),
+            el('span', {}, 'Always on'))),
         el('button', { type: 'button', class: 'kit-about small muted', title: 'What it shows, how to use it, and how it fits with the rest', onclick: () => cardDialog(entry, load, found.entries) },
           entry.use_note || entry.about || (entry.kind === 'image' || entry.kind === 'video' ? 'Being looked at…' : 'Add what it is')),
         linksLine(entry, found.entries) && el('div', { class: 'kit-links-line small muted' }, linksLine(entry, found.entries))),
-      entry.hidden
-        ? el('button', { class: 'btn small', title: 'Use it in this module again', onclick: () => changeHere(entry, { removed: false }) }, 'Show here')
-        : el('button', { class: 'icon-btn kit-remove', title: here ? 'Hide it in this module' : 'Take it out of the cast',
-          'aria-label': here ? `Hide ${entry.name} in this module` : `Take ${entry.name} out of the cast`, onclick: () => remove(entry) }, '×'));
+      el('button', { class: 'icon-btn kit-remove', title: 'Take it out of the cast',
+        'aria-label': `Take ${entry.name} out of the cast`, onclick: () => remove(entry) }, '×'));
     line.kitEntry = entry;   // the entry a dragged row stands for
     return line;
   }
@@ -535,9 +542,7 @@ export function kitPanel({ projectId = () => 0, selected = () => null, onChange 
     const on = shown.filter((e) => e.always);
     const rest = shown.filter((e) => !e.always);
     return folder('cast', entries.length, memory && memory.cast ? kilobytes(memory.cast) : '', 0, () => el('div', { class: 'mem-inner' }, ...[
-      el('p', { class: 'small muted' }, found && found.module
-        ? 'The project\'s characters, places and props, shared by all its modules. Hide one or make it always on here, and only this module changes.'
-        : 'The project\'s characters, places and props, shared by all its modules. Always on goes into every shot that has a place for it.'),
+      el('p', { class: 'small muted' }, 'This module\'s characters, places and props; other modules have their own. Always on goes into every shot that has a place for it.'),
       entries.length > 3 && tools,
       !found && el('p', { class: 'small muted' }, 'Loading…'),
       found && !entries.length && el('p', { class: 'small muted' }, 'Nothing yet. Add a character, a place or a prop with Add, or name one in a message to the agent: "Maya - @1".'),

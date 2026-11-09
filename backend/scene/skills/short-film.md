@@ -21,8 +21,8 @@ words: \b(film|movie|story|stories|scene|script|episode|drama|trailer|dialogue|s
    the dog, the camera still".
 6. Shots that follow one another in the same place with the same people chain: each starts on the last frame of the
    one before ("after"). A shot in another place does not chain.
-7. Spoken lines go in the prompt in quotation marks after "Audio:", in the language the user wrote them in, and give
-   the shot the time they need.
+7. Spoken lines go in the prompt in quotation marks, tied to who says them ("Maya says: ..."), in the language the
+   user wrote them in, and give the shot the time they need.
 8. When the film is meant to be finished, end the plan with one "assemble" step (title card, end card, music): it puts
    the kept takes in order. Speaking characters keep one voice each (see the dialogue skill).
 9. All the shots of one film keep one shape. At most twelve shots are planned at once: for a longer story, plan the first

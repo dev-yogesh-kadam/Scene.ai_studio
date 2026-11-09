@@ -1,6 +1,7 @@
 {
   "title": "Text to Image: FLUX.2 dev",
   "description": "FLUX.2 dev text-to-image (FLUX Non-Commercial (outputs usable)). 32B model, larger than VRAM: runs with offloading, slow.",
+  "pick_when": "The best picture overall in the studio's test of all six models (first on a product shot and a street scene, third on a portrait and a poster): finals, hero pictures and client work, and pictures built from several references (up to 16). About a minute a picture.",
   "output_name": "9.filename_prefix",
   "labels": {},
   "required_refs": [],

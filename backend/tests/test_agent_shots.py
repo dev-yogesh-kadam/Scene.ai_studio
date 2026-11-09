@@ -11,13 +11,22 @@ def test_camera_fields_become_prompt_words_once():
     assert cam == {"shot_size": "CU", "angle": "low", "move": "push in", "end_state": "she ends kneeling"}
     said = camera.apply("A girl opens a door.", cam)
     assert "close-up shot" in said and "low angle looking up" in said and "slow push in" in said
-    assert said.endswith("It ends with she ends kneeling.")
+    assert said.endswith("At the end: she ends kneeling.")
     # words the prompt already has are not added again
     again = camera.apply("A close-up of a girl, slow push in on her face.", dict(cam, end_state=""))
     assert again.count("close-up") == 1 and "push in" in again and "slow push in on" in again and "Camera: low angle" in again
     assert camera.clean({"shot_size": "nonsense"})["shot_size"] == ""
     assert camera.apply("A still.", {"shot_size": "WS", "move": "pan"}, "image") == "A still. Camera: wide shot."
     assert camera.apply("", cam) == ""
+
+
+def test_camera_words_keep_to_a_prompt_laid_out_in_parts():
+    cam = {"shot_size": "MS", "angle": "", "move": "push in", "end_state": "she sits"}
+    parts = "ACTION: She walks in.\nCAMERA: handheld, 35mm.\nAUDIO: rain."
+    said = camera.apply(parts, cam)
+    assert "CAMERA: handheld, 35mm; medium shot, slow push in.\nAUDIO: rain." in said and said.endswith("\nAt the end: she sits.")
+    beats = "GOAL\nShe sits.\n\nSHOTS\n[0-3s] wide shot → she sits → static\n\nEND STATE\nShe sits at the table."
+    assert camera.apply(beats, cam) == beats   # the beats carry the camera, and the end has its own part
 
 
 def test_a_planned_shot_has_an_id_and_the_camera_in_its_prompt(client, monkeypatch):

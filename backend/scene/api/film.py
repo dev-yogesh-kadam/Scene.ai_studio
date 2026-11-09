@@ -8,7 +8,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import core, detect, edits, film, montage, reframe, runs, sharing
+from .. import core, detect, edits, ffjob, film, montage, motion, reframe, runs, sharing
 from ..media import FPS, MediaError
 from .deps import current_user
 from .workspace import _project_id
@@ -181,6 +181,8 @@ def queue(request, user, body):
             facts = "{} parts · {}".format(len(settings["parts"]), shape)
         else:
             facts = "{} · parts of {} frames at {} fps".format(shape, reframe.PART_FRAMES, reframe.GEN_FPS)
+    elif op in ("html", "ffmpeg"):
+        facts = _written(op, body, settings, own)
     elif op in MONTAGE_OPS:
         facts = _montage(op, body, settings, own, size, kind_of)
         if body.get("save_to"):
@@ -200,6 +202,49 @@ def queue(request, user, body):
     name = _text(body.get("name"), 80) or title
     job_id = state.jobs.add(user["id"], name, workflow, settings, facts, None, 0, project_id)
     return {"job": job_id, "name": name}
+
+
+def _written(op, body, settings, own):
+    """Check a page (html) or an ffmpeg command (ffmpeg) written whole into `settings`, as far as it can be before it
+    runs: everything the page or the command names, and what it may reach. Returns the facts shown with the job."""
+    named = lambda entry, what: own(entry.get("item") if isinstance(entry, dict) else None, edits.ANY, what)
+    if op == "html":
+        width = _number(body.get("width", 1080), *motion.PAGE_SIDE, "width", whole=True)
+        height = _number(body.get("height", 1920), *motion.PAGE_SIDE, "height", whole=True)
+        seconds = _number(body.get("duration"), *motion.PAGE_SECONDS, "duration")
+        fps = _number(body.get("fps", 30), min(motion.PAGE_FPS), max(motion.PAGE_FPS), "fps", whole=True)
+        fmt = body.get("format", "mp4")
+        if fps not in motion.PAGE_FPS or fmt not in motion.PAGE_FORMATS:
+            raise HTTPException(400, "fps is one of {} and format one of {}.".format(", ".join(map(str, motion.PAGE_FPS)), ", ".join(motion.PAGE_FORMATS)))
+        if fmt in ("mp4", "webm") and (width % 2 or height % 2):
+            raise HTTPException(400, "A video's width and height are even numbers.")
+        given = body.get("media") or []
+        if not isinstance(given, list) or len(given) > motion.MEDIA_MOST:
+            raise HTTPException(400, "media is a list of at most {} {{\"name\", \"item\"}}.".format(motion.MEDIA_MOST))
+        media_list = []
+        for entry in given:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not isinstance(name, str) or not motion.MEDIA_NAME.match(name):
+                raise HTTPException(400, "Each media file needs a bare name like bg.mp4 (letters, digits, - and _, then its type).")
+            media_list.append({"name": name, "item": named(entry, "the media file {}".format(name))})
+        page = body.get("html")
+        try:
+            motion.check_page(page, width, height, seconds, {m["name"] for m in media_list})
+            if fmt != "png":
+                motion.page_budget(page, width, height, seconds, fps)
+        except motion.MotionError as error:
+            raise HTTPException(400, str(error))
+        settings.update(html=page, width=width, height=height, duration=seconds, fps=fps, format=fmt, media=media_list)
+        return "{}x{} · {:g} s · {}".format(width, height, seconds, fmt)
+    try:
+        ffjob.check(body.get("argv"), body.get("inputs") or [], body.get("sidecars") or [], body.get("outputs") or [], body.get("timeout"))
+    except ffjob.JobError as error:
+        raise HTTPException(400, str(error))
+    settings.update(argv=[str(a) for a in body["argv"]], sidecars=body.get("sidecars") or [], outputs=body.get("outputs") or [],
+                    inputs=[{"name": i["name"], "item": named(i, "the input {}".format(i["name"]))} for i in body.get("inputs") or []],
+                    timeout=body.get("timeout") or 300, reason=_text(body.get("reason"), 200))
+    outputs = [o["name"] for o in settings["outputs"]]
+    return "{} → {}".format(", ".join(i["name"] for i in settings["inputs"]) or "nothing", ", ".join(outputs) or "a measurement")
 
 
 def _stretch(body, settings):

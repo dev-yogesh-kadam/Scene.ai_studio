@@ -5,7 +5,7 @@ from scene import memory
 from test_agent_conversation import model
 from test_api import register
 
-MESSAGE = ("@1 @2 /pocket-motion-seedance-v2\ncharacters-\nVoilet - @3 ,\nAlice Parker - @4 ,\n"
+MESSAGE = ("@1 @2 /script-to-video\ncharacters-\nVoilet - @3 ,\nAlice Parker - @4 ,\n"
            "Madelyn Hill - @5 , Madelyn's Vlog Camera - @6 ,\nlocation - Bonfire Party Clearing - @7 ,\n\n"
            "i provided characters , props and location let me know if any thing needed")
 

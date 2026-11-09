@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, skills, staff, vault, versions
+from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..config import ROOT
@@ -591,6 +591,65 @@ async def delete_library_item(item_id: int, request: Request, user: dict = Depen
     return {"ok": True}
 
 
+
+# ---------------------------------------------------------------- the Home page's showcase (showcase.py)
+
+def _showcase(request):
+    data = showcase.load(request.app.state.db)
+    return {"sections": data["sections"], "items": data["items"], "limit": showcase.MAX_ITEMS}
+
+
+@router.get("/showcase")
+async def get_showcase(request: Request, user: dict = Depends(admin_user)):
+    return _showcase(request)
+
+
+@router.post("/showcase")
+async def add_to_showcase(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """Put a library item on every user's Home page: {item_id, section?, name?}. Its file is copied."""
+    try:
+        row, path = _item(request, int(body.get("item_id") or 0))
+        item = showcase.add(request.app.state.db, request.app.state.showcase_dir, row, path, body.get("section") or "", body.get("name") or "")
+    except (TypeError, ValueError) as error:
+        raise HTTPException(400, str(error) or "No such item.")
+    audit.record(request, user, "Added to the Home page", row["user_email"], item["name"])
+    return _showcase(request)
+
+
+@router.put("/showcase")
+async def change_showcase(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """Sections, order, names and sections of the items: see showcase.change."""
+    showcase.change(request.app.state.db, body)
+    audit.record(request, user, "Changed the Home page")
+    return _showcase(request)
+
+
+@router.delete("/showcase/{key}")
+async def remove_from_showcase(key: str, request: Request, user: dict = Depends(admin_user)):
+    try:
+        item = showcase.remove(request.app.state.db, request.app.state.showcase_dir, key)
+    except showcase.ShowcaseError as error:
+        raise HTTPException(404, str(error))
+    audit.record(request, user, "Took off the Home page", "", item["name"])
+    return _showcase(request)
+
+
+@router.get("/showcase/{key}/file")
+async def showcase_file(key: str, request: Request, user: dict = Depends(admin_user)):
+    item = showcase.find(request.app.state.db, key)
+    path = item and showcase.path_of(request.app.state.showcase_dir, item)
+    if not path or not path.is_file():
+        raise HTTPException(404, "No such item on the Home page.")
+    return FileResponse(path)
+
+
+@router.get("/showcase/{key}/poster")
+async def showcase_poster(key: str, request: Request, user: dict = Depends(admin_user)):
+    item = showcase.find(request.app.state.db, key)
+    if not item:
+        raise HTTPException(404, "No such item on the Home page.")
+    return await poster_response(request, showcase.path_of(request.app.state.showcase_dir, item))
+
 # ---------------------------------------------------------------- credits
 
 @router.get("/credits")
@@ -1016,7 +1075,7 @@ async def list_projects(request: Request, q: str = "", user: dict = Depends(admi
     rows = request.app.state.db.all(
         "SELECT * FROM (SELECT p.id, p.ref, p.name, p.created, u.id AS user_id, u.name AS user_name, u.email AS user_email, "
         "(SELECT COUNT(*) FROM projects m WHERE m.parent_id = p.id) AS modules, "
-        "(SELECT COUNT(*) FROM assets a WHERE a.project_id = p.id) AS kit, "
+        "(SELECT COUNT(*) FROM assets a WHERE " + IN_PROJECT.format("a") + ") AS kit, "
         "(SELECT COUNT(*) FROM generations g WHERE " + IN_PROJECT.format("g") + ") AS items, "
         "(SELECT COALESCE(SUM(g.size), 0) FROM generations g WHERE " + IN_PROJECT.format("g") + ") AS bytes, "
         "(SELECT COUNT(*) FROM jobs j WHERE " + IN_PROJECT.format("j") + ") AS jobs, "
@@ -1039,8 +1098,9 @@ async def project_detail(project_id: int, request: Request, user: dict = Depends
                      (project["parent_id"] or project_id,))
     root = project["parent_id"] or project_id
     return {"project": project, "modules": modules,
-            "kit": [{k: e[k] for k in ("id", "name", "type", "kind", "about", "use_note", "always", "named", "origin", "size", "created")}
-                    for e in kit.entries(db, project["user_id"], root)],
+            "kit": [dict({k: e[k] for k in ("id", "name", "type", "kind", "about", "use_note", "always", "named", "origin", "size", "created")},
+                         module=where["name"] if where["id"] != root else "")   # each module's NeuralCore is its own
+                    for where in [{"id": root, "name": ""}, *modules] for e in kit.entries(db, project["user_id"], where["id"])],
             "items": db.all("SELECT g.id, g.kind, g.name, g.filename, g.created FROM generations g, projects p WHERE p.id = ? AND "
                             + IN_PROJECT.format("g") + " ORDER BY g.created DESC LIMIT 12", (root,))}
 
