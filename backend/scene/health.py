@@ -1,19 +1,25 @@
-"""Whether the studio is well: its render server (ComfyUI), the agent's model (Claude, through Claude Code on this
-machine), its disk, its backups, its queue and the sending of the agent's calls to Langfuse (`langfuse`).
+"""Whether the studio is well: its database, its render server (ComfyUI), the agent's model (Claude, through Claude Code
+on this machine, installed and signed in), the programs it renders and edits with (FFmpeg, HyperFrames for motion
+graphics), its disk, its backups, its queue and the sending of the agent's calls to Langfuse (`langfuse`).
 
 `problems` says what is wrong right now; the admin console's Overview lists it. The `Watcher` asks it every minute
 while the app runs, so nobody has to have the console open: a problem found twice in a row becomes an alert (the
 `alerts` table), which is sent to the admins' phones (phone.py), and is closed, and said so, once it is gone.
+
+A database that does not answer can keep no alert, nor say where the phones are: the Watcher then sends it with the
+phone settings it read last, and keeps the alert (already ended) once the database is back.
 """
 
 import asyncio
 import json
+import os
 import shutil
+import subprocess
 import time
 
 import httpx
 
-from . import backup, langfuse_trace, phone, retention, versions
+from . import backup, langfuse_trace, media, motion, phone, retention, versions
 from .db import offload
 
 CHECK_EVERY = 60     # seconds between checks
@@ -23,6 +29,7 @@ DAY = 86400
 
 # What is said when a problem is gone, by its key.
 RESOLVED = {
+    "database": "The database answers again",
     "render": "The render server answers again",
     "model": "Claude is set up for the agent again",
     "disk": "There is enough disk space again",
@@ -32,8 +39,12 @@ RESOLVED = {
     "slow": "The slow job is no longer running",
     "failures": "Jobs have stopped failing",
     "langfuse": "Langfuse takes the agent's calls again",
+    "ffmpeg": "FFmpeg is there again",
+    "motion": "Motion graphics can be rendered again",
 }
 LANGFUSE_DOWN = 300  # seconds Langfuse may not take the calls before it is a problem (a restart of it takes a minute or two)
+DATABASE_WAIT = 10   # seconds the database has to answer `SELECT 1`
+SIGN_IN_EVERY = 300  # seconds between two asks of Claude Code whether it is signed in (`claude auth status`: no message, no usage)
 
 
 def clock(timestamp):
@@ -101,6 +112,93 @@ async def _render_server(state):
     return found
 
 
+async def database(state):
+    """Whether the database answers: {"online", "seconds": how long `SELECT 1` took, "detail": why not}."""
+    started = time.time()
+    try:
+        await asyncio.wait_for(state.db.aone("SELECT 1 AS ok"), DATABASE_WAIT)
+        return {"online": True, "seconds": round(time.time() - started, 3), "detail": ""}
+    except asyncio.TimeoutError:
+        return {"online": False, "seconds": round(time.time() - started, 3),
+                "detail": "it did not answer within {} seconds".format(DATABASE_WAIT)}
+    except Exception as error:   # whatever the driver or the pool raises: the check says so, it never fails
+        said = str(error).splitlines()[0] if str(error) else type(error).__name__
+        return {"online": False, "seconds": round(time.time() - started, 3), "detail": langfuse_trace.redact(said)[:300]}
+
+
+_signed_in = {}   # the claude program -> (when it was asked, what it said)
+UNKNOWN = {"signed_in": None, "plan": ""}
+
+
+async def signed_in(program):
+    """Whether Claude Code is signed in, by `claude auth status --json` (it reads its own files: no message, no usage):
+    {"signed_in": True, False, or None when it can't be told (an older Claude Code, no answer), "plan": the account's
+    subscription}. Asked again at most every SIGN_IN_EVERY seconds."""
+    if not program:
+        return dict(UNKNOWN)
+    hit = _signed_in.get(program)
+    if hit and time.time() - hit[0] < SIGN_IN_EVERY:
+        return dict(hit[1])
+    found = await _auth_status(program)
+    _signed_in[program] = (time.time(), found)
+    return dict(found)
+
+
+async def _auth_status(program):
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}   # the studio may itself be started from Claude Code
+    try:
+        process = await asyncio.create_subprocess_exec(
+            program, "auth", "status", "--json", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, ValueError):
+        return dict(UNKNOWN)
+    try:
+        output, _ = await asyncio.wait_for(process.communicate(), 20)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        return dict(UNKNOWN)
+    try:
+        said = json.loads(output.decode("utf-8", "replace"))
+    except ValueError:
+        return dict(UNKNOWN)
+    if not isinstance(said, dict) or not isinstance(said.get("loggedIn"), bool):
+        return dict(UNKNOWN)
+    return {"signed_in": said["loggedIn"], "plan": str(said.get("subscriptionType") or "")[:40]}
+
+
+def programs(state):
+    """The programs the studio renders and edits with: {"ffmpeg": {"ready", "detail"}, "motion": {"ready", "detail"}}
+    (motion: Node.js and HyperFrames, for motion graphics). Sync: it looks at files."""
+    try:
+        media.ffmpeg_path()
+        ffmpeg = {"ready": True, "detail": ""}
+    except media.MediaError as error:
+        ffmpeg = {"ready": False, "detail": str(error)}
+    try:
+        hyperframes = motion.status(getattr(state.settings, "node_path", ""))
+    except OSError as error:
+        hyperframes = {"ready": False, "detail": str(error)}
+    return {"ffmpeg": ffmpeg, "motion": hyperframes}
+
+
+async def checks(state):
+    """Every check in one answer, for the console's System section: {"database", "render", "model", "programs",
+    "disk": {"folder", "free", "total"}, "backup": {"folder", "last", "check", "restore_test"}, "langfuse"}."""
+    alive = await database(state)
+    render, model = await asyncio.gather(render_server(state), model_server(state))
+    state.output_dir.mkdir(parents=True, exist_ok=True)
+    disk = shutil.disk_usage(state.output_dir)
+    found = {"database": alive, "render": render, "model": model, "programs": await asyncio.to_thread(programs, state),
+             "disk": {"folder": str(state.output_dir), "free": disk.free, "total": disk.total},
+             "backup": {"folder": str(state.backup_dir), "last": backup.newest(state.backup_dir), "check": None, "restore_test": None},
+             "langfuse": None}
+    if alive["online"]:
+        found["backup"].update(check=await offload(backup.last_check, state.db), restore_test=await offload(backup.last_restore_test, state.db))
+        found["langfuse"] = await langfuse(state)
+    return found
+
+
 async def model_server(state, fresh=False):
     """The agent's model: Claude, through Claude Code on this machine. {"online": whether Claude Code is there and models
     are named for it, "url": the claude program, "models", "limits": its usage as last reported, "detail", "since"}."""
@@ -111,10 +209,13 @@ async def _model_server(state):
     agent = state.agent
     s = agent.services.get("claude")
     online = bool(s and s.get("models"))
+    account = await signed_in(s.get("cli", "")) if online else dict(UNKNOWN)
+    detail = "" if online else "Claude Code isn't installed on the studio's PC, or claude_models is empty in config.json."
+    if online and account["signed_in"] is False:
+        online, detail = False, "Claude Code on the studio's PC is not signed in: run claude in a terminal there and type /login."
     _mark(state.model_seen, online)
-    detail = "" if online else ("Claude Code isn't installed on the studio's PC, or claude_models is empty in config.json.")
     return {"online": online, "url": (s or {}).get("cli", ""), "models": ["claude/" + m for m in (s or {}).get("models", [])],
-            "limits": agent.claude_limits, "detail": detail, "since": state.model_seen["since"]}
+            "limits": agent.claude_limits, "detail": detail, "since": state.model_seen["since"], **account}
 
 
 async def langfuse(state):
@@ -140,6 +241,10 @@ async def problems(state, render=None, model=None):
     """What is wrong now with the servers, the disk, the backups and the queue, the worst first. `render` and `model`
     are what render_server and model_server found, when the caller has asked already."""
     db, now = state.db, time.time()
+    alive = await database(state)
+    if not alive["online"]:   # nothing below can be asked of it
+        return [problem("database", "critical", "The database does not answer ({}). Nobody can sign in, and no job is "
+                        "started or finished.".format(alive["detail"]), "system")]
     render = render or await render_server(state)
     model = model or await model_server(state)
     found = []
@@ -149,6 +254,12 @@ async def problems(state, render=None, model=None):
     if model["online"] is False:
         found.append(problem("model", "serious", "{} The agent can't plan and image prompts get no captions.".format(
             model["detail"]), "system"))
+    tools = await asyncio.to_thread(programs, state)
+    if not tools["ffmpeg"]["ready"]:
+        found.append(problem("ffmpeg", "serious", "FFmpeg is missing: {} Edits, posters and the films' cuts fail.".format(
+            tools["ffmpeg"]["detail"]), "system"))
+    if not tools["motion"]["ready"]:
+        found.append(problem("motion", "warning", "Motion graphics can't be rendered: {}".format(tools["motion"]["detail"]), "system"))
     state.output_dir.mkdir(parents=True, exist_ok=True)
     disk = shutil.disk_usage(state.output_dir)   # finished work is what fills a disk
     if disk.free < 10 * 1024 ** 3:
@@ -184,6 +295,16 @@ async def problems(state, render=None, model=None):
     return found
 
 
+class _Remembered:
+    """The phone settings read last, standing in for the database while it does not answer (phone.config reads them)."""
+
+    def __init__(self, phones):
+        self.phones = phones
+
+    def setting(self, key, default=None):
+        return self.phones if key == "phone_alerts" else default
+
+
 def maintenance(db):
     """Maintenance mode, while it is on: {text, since}. New jobs are refused (jobs.JobManager.add); the waiting ones
     still run, and the studio shows its message."""
@@ -201,16 +322,21 @@ class Watcher:
     def __init__(self, state):
         self.state = state
         self.streak = {}   # problem key -> checks in a row it was found in
+        self.phones = None   # the phone settings as last read (phone_alerts), for when the database does not answer
+        self.down = None     # the database's outage being told: {"started", "text", "sent"}
         self.http = httpx.AsyncClient(timeout=10)
         self.moved = 0.0   # when the Claude sessions' old events were last moved to Langfuse (retention.move_events)
 
     async def step(self, found, now=None):
         """One check's problems in; the messages it sent out, as (level, text)."""
+        if any(p["key"] == "database" for p in found):
+            return await self.database_down(found[0], now)
         db, now = self.state.db, now or time.time()
+        messages = await self.database_back(now)
+        self.phones = await db.asetting("phone_alerts", "")
         current = {p["key"]: p for p in found}
         self.streak = {key: self.streak.get(key, 0) + 1 for key in current}
         opened = {a["key"]: a for a in await db.aall("SELECT * FROM alerts WHERE ended IS NULL")}
-        messages = []
         for key, p in current.items():
             if key in opened:
                 await db.arun("UPDATE alerts SET text = ? WHERE id = ?", (p["text"], opened[key]["id"]))   # its numbers move on
@@ -228,6 +354,34 @@ class Watcher:
             self.state.hub.tell({"alerts": len(await db.aall("SELECT id FROM alerts WHERE ended IS NULL")),
                                  "news": [{"level": level, "text": text} for level, text in messages]})
         return messages
+
+    async def database_down(self, p, now=None):
+        """The database does not answer: nothing can be kept in it, so the alert is held here and sent with the phone
+        settings read last, once it was found CONFIRM checks in a row."""
+        now = now or time.time()
+        self.streak = {"database": self.streak.get("database", 0) + 1}
+        if self.down is None:
+            self.down = {"started": now, "text": p["text"], "sent": False}
+            print(p["text"])
+        if self.down["sent"] or self.streak["database"] < CONFIRM:
+            return []
+        self.down["sent"] = True
+        if self.phones is not None:
+            await phone.send(self.http, _Remembered(self.phones), p["level"], p["text"])
+        return [(p["level"], p["text"])]
+
+    async def database_back(self, now):
+        """The database answers again after it did not: its alert is kept (started and ended), and the phones told."""
+        down, self.down = self.down, None
+        if not down or not down["sent"]:
+            return []
+        db = self.state.db
+        try:
+            await db.arun("INSERT INTO alerts (key, level, text, tab, started, ended) VALUES (?, ?, ?, ?, ?, ?)",
+                          ("database", "critical", down["text"], "system", down["started"], now))
+        except Exception as error:   # the alert is a record: its loss must not stop the checks
+            print("The database's outage could not be kept as an alert: {}".format(error))
+        return [("resolved", "{} (after {}).".format(RESOLVED["database"], minutes(now - down["started"])))]
 
     async def workflows(self, found):
         """Note what the render PC changed in the workflow files, and fetch its node list again when it answers and the
@@ -258,10 +412,15 @@ class Watcher:
         try:
             while True:
                 try:
-                    found = await problems(self.state, await render_server(self.state, fresh=True),   # asked now: alerts
-                                           await model_server(self.state, fresh=True))
+                    alive = await database(self.state)
+                    if alive["online"]:
+                        found = await problems(self.state, await render_server(self.state, fresh=True),   # asked now: alerts
+                                               await model_server(self.state, fresh=True))
+                    else:
+                        found = await problems(self.state)   # the database's problem alone
                     await self.step(found)
-                    await self.workflows(found)
+                    if alive["online"]:
+                        await self.workflows(found)
                 except Exception as error:   # a check that fails must not stop the next one
                     print("The health check failed: {}".format(error))
                 await asyncio.sleep(CHECK_EVERY)
