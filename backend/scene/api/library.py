@@ -98,6 +98,19 @@ def _shown(item, user):
     return item
 
 
+def _listing(rows, user, **more):
+    """The library's answer as JSON: {"items": [...], **more}. Its rows hold only plain values (str, int, float, None),
+    and the settings and context read from JSON, so they are written out as they are: FastAPI's jsonable_encoder walked
+    every value of every item first, two thirds of the time of a canvas of 20,000 items."""
+    return json.dumps({"items": [_shown(item, user) for item in rows], **more}, ensure_ascii=False, allow_nan=False,
+                      separators=(",", ":")).encode("utf-8")
+
+
+async def _listed(rows, user, **more):
+    """_listing, made off the event loop (a canvas's whole list is megabytes), as the response."""
+    return Response(await offload(_listing, rows, user, **more), media_type="application/json")
+
+
 @router.get("/library")
 async def list_items(request: Request, kind: str = "", q: str = "", project: str = "", run: str = "", modules: int = 0,
                      all: int = 0, limit: int = 0, cursor: str = "", job: str = "", meaning: int = 0,
@@ -135,8 +148,8 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
                 near = await offload(semantic.nearest, request.app.state.db, embedder, q, "g.id = ANY(?)", [ids],
                                      min(limit, LIBRARY_PAGE_MOST) if limit > 0 else 60)
                 rows = {r["id"]: r for r in await request.app.state.db.aall(sql + " AND g.id = ANY(?)", params + [near])}
-            items = [_shown(rows[i], user) for i in near if i in rows]
-            return {"items": items, "next_cursor": None} if limit > 0 else {"items": items}
+            items = [rows[i] for i in near if i in rows]
+            return await (_listed(items, user, next_cursor=None) if limit > 0 else _listed(items, user))
         except semantic.SemanticError:
             pass   # the embedding API can't be reached: the words are searched instead, below
     found, values = search_sql(q)   # every word in its name, summary, workflow or prompt; or a name typed a little wrong
@@ -150,10 +163,10 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
             rows = await request.app.state.db.aall(sql + " ORDER BY g.created DESC, g.id DESC LIMIT ?", params + [limit + 1])
         page = rows[:limit]
         after = "{!r}:{}".format(page[-1]["created"], page[-1]["id"]) if len(rows) > limit else None
-        return {"items": [_shown(item, user) for item in page], "next_cursor": after}
+        return await _listed(page, user, next_cursor=after)
     with as_everyone() if shared else contextlib.nullcontext():
         items = await request.app.state.db.aall(sql + " ORDER BY g.created DESC" + ("" if all else " LIMIT 500"), params)
-    return {"items": [_shown(item, user) for item in items]}
+    return await _listed(items, user)
 
 
 @router.get("/library/placement")
