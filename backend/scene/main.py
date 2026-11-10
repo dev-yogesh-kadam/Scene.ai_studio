@@ -375,8 +375,10 @@ def create_app(settings=None):
     with as_everyone():
         versions.look(app.state)   # what arrived while the app was stopped
     app.state.backup_dir = settings.path("backup_dir") if settings.backup_dir else storage / "backups"
-    # The files a lost disk would take with it: the finished work and the kit's uploads. Copied into files/ beside the backups.
-    app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir, "showcase": app.state.showcase_dir}
+    # The files a lost disk would take with it: the finished work, the kit's uploads, the motion projects and film pages
+    # (pages.root). Copied into files/ beside the backups.
+    app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir, "showcase": app.state.showcase_dir,
+                              "motion": storage / "motion"}
     # Whether the render server answered the last time anyone asked, and since when that has been so.
     app.state.server_seen = {"online": None, "since": time.time()}
     app.state.model_seen = {"online": None, "since": time.time()}   # the same for the agent's model, Claude (health.py)

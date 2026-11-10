@@ -871,6 +871,7 @@ async def system(request: Request, user: dict = Depends(admin_user)):
     return {
         "server": server,
         "model_server": model,
+        "checks": await health.checks(state),   # every check in one answer: database, Claude, programs, disk, backup, Langfuse
         "maintenance": dict(closed, on=True, left=(await db.aone("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')"))["n"])
                        if closed else {"on": False},
         "alerts": await db.aall("SELECT * FROM alerts WHERE ended IS NULL ORDER BY started"),

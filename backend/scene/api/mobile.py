@@ -1,4 +1,4 @@
-"""What the phone app (mobile/) reads that the studio's pages don't need: lighter lists, a page at a time, and running
+"""What the phone app (apps/mobile/) reads that the studio's pages don't need: lighter lists, a page at a time, and running
 a failed job again. Every route here only reads or makes what the studio's own routes would; none of them changes how
 those behave."""
 

@@ -259,6 +259,14 @@ def test_the_files_copied_with_the_backups_include_the_kits_uploads(client):
     state = client.app.state
     assert state.backup_files["assets"] == state.assets_dir
     assert state.backup_files["outputs"] == state.output_dir
+    assert state.backup_files["motion"] == state.storage_dir / "motion"   # motion projects and film pages (pages.root)
+
+
+def test_the_consoles_system_section_carries_every_check(client):
+    from test_api import console, register
+    register(client)
+    checks = console(client).get("/api/admin/system").json()["checks"]
+    assert {"database", "render", "model", "programs", "disk", "backup", "langfuse"} <= set(checks)
 
 
 # ---------------------------------------------------------------- Docker
