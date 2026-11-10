@@ -210,7 +210,7 @@ export default function HomeScreen() {
                     haptic="light"
                     scaleTo={0.94}
                     style={styles.quickButton}
-                    accessibilityLabel={`Make ${q.kind === 'audio' ? 'music' : `a ${q.label.toLowerCase()}`}`}
+                    accessibilityLabel={`Make ${q.kind === 'audio' ? 'music' : q.kind === 'image' ? 'an image' : `a ${q.label.toLowerCase()}`}`}
                   >
                     <Icon name={q.icon} size={22} color={kindColors[q.kind]} />
                     <Text style={styles.quickLabel}>{q.label}</Text>

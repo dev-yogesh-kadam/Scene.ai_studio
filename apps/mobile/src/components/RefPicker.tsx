@@ -66,7 +66,7 @@ export function RefSlot({ label, kind, optional, value, onChange }: Props) {
           {value && 'item' in value ? (
             <Thumb id={value.item.id} kind={value.item.kind} style={StyleSheet.absoluteFill} iconSize={22} />
           ) : value && 'phone' in value && value.phone.kind === 'image' ? (
-            <Image source={{ uri: value.phone.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            <Image source={{ uri: value.phone.uri }} accessibilityLabel="" style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : value ? (
             <Icon name={kindIcons[value.phone.kind] ?? 'document'} size={26} color={tint} />
           ) : (

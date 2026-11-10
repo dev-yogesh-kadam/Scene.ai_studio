@@ -25,7 +25,7 @@ export function ItemTile({ item, onPress, onLongPress }: Props) {
       delayLongPress={320}
       scaleTo={0.96}
       style={styles.tile}
-      accessibilityLabel={[item.name, kindWords[item.kind] ?? item.kind, length, item.rating > 0 ? 'best take' : null, timeAgo(item.created)].filter(Boolean).join(', ')}
+      // no accessibilityLabel: named by what it shows (the length, the name, the line, the star), so a voice user can say it
       accessibilityHint="Opens it. Touch and hold to mark it as a best take.">
       <View style={styles.art}>
         <Thumb id={item.id} kind={item.kind} style={StyleSheet.absoluteFill} />
@@ -36,7 +36,7 @@ export function ItemTile({ item, onPress, onLongPress }: Props) {
         ) : null}
         {item.rating > 0 ? (
           <View style={[styles.badge, styles.star]}>
-            <Icon name="star" size={12} color={colors.star} />
+            <Icon name="star" size={12} color={colors.star} accessibilityLabel="best take" />
           </View>
         ) : null}
       </View>

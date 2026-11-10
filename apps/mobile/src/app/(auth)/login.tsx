@@ -56,7 +56,7 @@ export default function LoginScreen() {
               <Image
                 source={require('@/assets/images/logo.png')}
                 style={styles.logo}
-                accessibilityLabel="Scene.ai logo"
+                accessibilityLabel="" // the logo beside the name "Scene.ai" (alt="")
               />
             </View>
             <Text style={styles.title}>Scene.ai</Text>

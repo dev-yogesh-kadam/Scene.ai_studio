@@ -5,9 +5,31 @@
 import { devices, expect, test, type Page } from '@playwright/test';
 import { ACCOUNTS } from './accounts';
 import { axe } from './axe';
+import { seedCanvas } from './seed';
+import { done, makeImage, signIn } from './signin';
 import { watch } from './watch';
 
 test.use({ viewport: devices['iPhone 13'].viewport, userAgent: devices['iPhone 13'].userAgent, hasTouch: true });
+
+// Home with something on it, whatever ran before: the user's own project with pictures (covers, latest work), and a
+// project the admin shares with them (its card shows the owner's badge).
+test.beforeAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  await signIn(page);
+  await seedCanvas(page, 'Canvas test');
+  await signIn(page, 'admin');
+  const known = (await (await page.request.get('/api/projects')).json()) as { projects: { name: string }[] };
+  if (!known.projects.some((p) => p.name === 'Shared with the phone')) {
+    const made = await page.request.post('/api/projects', { data: { name: 'Shared with the phone' } });
+    const place = (await made.json()) as { id: number };
+    await done(page, (await makeImage(page, { name: 'Their shot', project_id: place.id })).id);
+    const shared = await page.request.post(`/api/projects/${place.id}/members`, {
+      data: { people: [{ email: ACCOUNTS.user.email, role: 'viewer' }] },
+    });
+    expect(shared.ok()).toBe(true);
+  }
+  await page.close();
+});
 
 /** The site's CSS applies: the page's own file (reset.css), and the libraries' rules in adopted sheets. */
 async function styled(page: Page) {
@@ -41,6 +63,7 @@ test('a phone opening a studio page is sent to the phone site, and signs in ther
   await page.getByPlaceholder('Password').fill(password);
   await page.getByText('Sign In', { exact: true }).click();
   await expect(page.getByPlaceholder('Email')).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText('Shared with the phone').first()).toBeVisible({ timeout: 15_000 });
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(600);
   await styled(page);

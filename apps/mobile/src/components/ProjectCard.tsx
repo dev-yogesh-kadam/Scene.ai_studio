@@ -20,7 +20,8 @@ export function ProjectCard({ project, onPress, style, compact }: { project: Pro
       onPress={onPress}
       scaleTo={0.97}
       style={[styles.card, compact && styles.compact, style]}
-      accessibilityLabel={[project.name, project.owner_name ? `shared by ${project.owner_name}` : null, ...parts].filter(Boolean).join(', ')}>
+      // no accessibilityLabel: named by what it shows (the owner's badge, the name, the line), so a voice user can say it
+    >
       {project.cover_id ? (
         <Thumb id={project.cover_id} kind={project.cover_kind ?? 'image'} style={StyleSheet.absoluteFill} iconSize={40} />
       ) : (
@@ -31,7 +32,7 @@ export function ProjectCard({ project, onPress, style, compact }: { project: Pro
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} style={styles.shade} />
       {project.owner_name ? (
         <View style={styles.shared}>
-          <Icon name="people" size={12} color="#fff" />
+          <Icon name="people" size={12} color="#fff" accessibilityLabel="Shared by" />
           <Text style={styles.sharedText}>{project.owner_name}</Text>
         </View>
       ) : null}
