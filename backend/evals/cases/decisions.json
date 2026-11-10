@@ -1,0 +1,559 @@
+[
+ {
+  "id": "en-go-ahead-after-idea",
+  "lang": "en",
+  "about": "'yes, go' after an idea plans that idea",
+  "tags": [
+   "go-ahead"
+  ],
+  "ask": {
+   "instruction": "yes, go",
+   "history": [
+    {
+     "instruction": "an idea for a poster",
+     "reply": "A lighthouse on a cliff in a storm, waves breaking.",
+     "steps": []
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Planning it.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "image/image_t2i_flux2_dev",
+      "name": "Lighthouse",
+      "prompt": "A lighthouse on a cliff in a storm, waves breaking.",
+      "uses": [],
+      "clips": 1,
+      "after": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": true
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "told": [
+    "A lighthouse on a cliff in a storm"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "en-go-ahead-said-but-nothing-planned",
+  "lang": "en",
+  "about": "A go-ahead the model approved without steps is asked again, once",
+  "tags": [
+   "go-ahead"
+  ],
+  "ask": {
+   "instruction": "make it",
+   "history": [
+    {
+     "instruction": "an idea",
+     "reply": "A steam train crosses a stone viaduct in the mist.",
+     "steps": []
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Sure!",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": true
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "One shot of the train.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Train",
+      "prompt": "A steam train crosses a viaduct.",
+      "duration": 6,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": true
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "asked": 2,
+   "priced": true
+  }
+ },
+ {
+  "id": "en-sound-on-video",
+  "lang": "en",
+  "about": "A sound put on a video is the sound step with the newest video and audio, free",
+  "tags": [
+   "sound"
+  ],
+  "ask": {
+   "instruction": "attach the generated audio to the video"
+  },
+  "setup": {
+   "items": [
+    {
+     "ref": "clip",
+     "kind": "video",
+     "name": "Clip",
+     "seconds": 6,
+     "video": true
+    },
+    {
+     "ref": "tune",
+     "kind": "audio",
+     "name": "Tune",
+     "seconds": 1
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Adding it.",
+    "steps": [
+     {
+      "tool": "sound",
+      "name": "Clip with sound",
+      "source": 0,
+      "audio": 999,
+      "replace": false
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "sound": true,
+   "priced": true
+  }
+ },
+ {
+  "id": "en-sound-asked-model-only-talks",
+  "lang": "en",
+  "about": "A sound asked for while the model only talks is still made",
+  "tags": [
+   "sound"
+  ],
+  "ask": {
+   "instruction": "put the music on the video"
+  },
+  "setup": {
+   "items": [
+    {
+     "ref": "clip",
+     "kind": "video",
+     "name": "Clip",
+     "seconds": 6,
+     "video": true
+    },
+    {
+     "ref": "tune",
+     "kind": "audio",
+     "name": "Tune",
+     "seconds": 1
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "I cannot use ffmpeg.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": true,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "sound": true
+  }
+ },
+ {
+  "id": "en-split-in-two",
+  "lang": "en",
+  "about": "A split in two of the selected clip is two free parts",
+  "tags": [
+   "split"
+  ],
+  "ask": {
+   "instruction": "split it in two",
+   "selection": [
+    "@clip"
+   ]
+  },
+  "setup": {
+   "items": [
+    {
+     "ref": "clip",
+     "kind": "video",
+     "name": "Clip",
+     "seconds": 6,
+     "video": true
+    },
+    {
+     "ref": "tune",
+     "kind": "audio",
+     "name": "Tune",
+     "seconds": 1
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Two halves.",
+    "steps": [
+     {
+      "tool": "trim",
+      "name": "Halves",
+      "source": "@clip",
+      "start": 0,
+      "end": 3,
+      "parts": 2
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 2,
+   "names": [
+    "Clip part 1 of 2",
+    "Clip part 2 of 2"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "en-trim",
+  "lang": "en",
+  "about": "A trim of the selected clip is one free edit",
+  "tags": [
+   "edit"
+  ],
+  "ask": {
+   "instruction": "cut the first two seconds",
+   "selection": [
+    "@clip"
+   ]
+  },
+  "setup": {
+   "items": [
+    {
+     "ref": "clip",
+     "kind": "video",
+     "name": "Clip",
+     "seconds": 6,
+     "video": true
+    },
+    {
+     "ref": "tune",
+     "kind": "audio",
+     "name": "Tune",
+     "seconds": 1
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Trimmed.",
+    "steps": [
+     {
+      "tool": "trim",
+      "name": "Trimmed",
+      "source": "@clip",
+      "start": 2,
+      "end": 6
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "priced": true
+  }
+ },
+ {
+  "id": "en-clarifying-question",
+  "lang": "en",
+  "about": "A message that needs a choice gets a question card, not choices in the reply",
+  "tags": [
+   "question"
+  ],
+  "ask": {
+   "instruction": "make an ad for my shop"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "A couple of things first.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "How long should the ad be?",
+     "options": [
+      "15 s",
+      "30 s",
+      "60 s"
+     ],
+     "default": "15 s",
+     "details": [
+      "Short, for Reels",
+      "Standard",
+      "Long, for YouTube"
+     ]
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": true
+  }
+ },
+ {
+  "id": "en-several-questions",
+  "lang": "en",
+  "about": "Several first questions come together; one with a single option is dropped",
+  "tags": [
+   "question"
+  ],
+  "ask": {
+   "instruction": "an ad"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "A few things first.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false,
+    "questions": [
+     {
+      "text": "How long?",
+      "options": [
+       "15 s",
+       "30 s"
+      ],
+      "default": "30 s"
+     },
+     {
+      "text": "Shape?",
+      "options": [
+       "Reels",
+       "YouTube"
+      ],
+      "default": "Reels"
+     },
+     {
+      "text": "Bad",
+      "options": [
+       "one"
+      ],
+      "default": "one"
+     }
+    ]
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "questions": 2,
+   "question": false
+  }
+ },
+ {
+  "id": "en-question-other-dropped",
+  "lang": "en",
+  "about": "An 'Other' option the model adds is left out (the card has its own)",
+  "tags": [
+   "question",
+   "checks"
+  ],
+  "ask": {
+   "instruction": "fix the assets?"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "One thing.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "Fix the assets?",
+     "options": [
+      "No corrections",
+      "Corrections",
+      "Something else"
+     ]
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": true
+  }
+ },
+ {
+  "id": "en-question-one-option-is-none",
+  "lang": "en",
+  "about": "A question with a single option is no question",
+  "tags": [
+   "question",
+   "checks"
+  ],
+  "ask": {
+   "instruction": "anything?"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Hmm.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "Which one?",
+     "options": [
+      "Only this"
+     ]
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": false
+  }
+ },
+ {
+  "id": "en-claim-without-plan-caught",
+  "lang": "en",
+  "about": "'I'm making it now' with no steps is caught and said plainly",
+  "tags": [
+   "checks"
+  ],
+  "ask": {
+   "instruction": "a horse galloping on a beach, please"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "I'm making it now!",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "I'm making it now!",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "reply_is": "EMPTY_CLAIM",
+   "asked": 2
+  }
+ }
+]

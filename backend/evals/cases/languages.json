@@ -1,0 +1,620 @@
+[
+ {
+  "id": "hi-plan-dog-video",
+  "lang": "hi",
+  "about": "A Hindi request for a dog video becomes a priced shot",
+  "tags": [
+   "plan",
+   "language"
+  ],
+  "ask": {
+   "instruction": "पार्क में दौड़ते कुत्ते का एक वीडियो बना दो"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "पार्क में दौड़ते कुत्ते का एक शॉट।",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "कुत्ता",
+      "prompt": "A brown dog runs across a green park in the morning.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "kinds": [
+    "video"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "hi-claim-without-plan-caught",
+  "lang": "hi",
+  "about": "A Hindi reply that claims work with no plan is asked again, then said plainly",
+  "tags": [
+   "checks",
+   "language"
+  ],
+  "ask": {
+   "instruction": "एक कुत्ते का वीडियो बना दो"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "मैं इसे अभी बना रहा हूँ।",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "मैं इसे अभी बना रहा हूँ।",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "reply_is": "EMPTY_CLAIM",
+   "asked": 2
+  }
+ },
+ {
+  "id": "hi-go-ahead-after-idea",
+  "lang": "hi",
+  "about": "A Hindi go-ahead after an idea carries the idea and plans it",
+  "tags": [
+   "go-ahead",
+   "language"
+  ],
+  "ask": {
+   "instruction": "इसे बना दो",
+   "history": [
+    {
+     "instruction": "a pet ad",
+     "reply": "A puppy runs across a lawn chasing a red ball.",
+     "steps": []
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "ठीक है!",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": true
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "पिल्ले का एक शॉट।",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Puppy",
+      "prompt": "A puppy runs across a lawn chasing a red ball.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": true
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "names": [
+    "Puppy"
+   ],
+   "told": [
+    "A puppy runs across a lawn"
+   ],
+   "asked": 2,
+   "priced": true
+  }
+ },
+ {
+  "id": "hi-question-asked",
+  "lang": "hi",
+  "about": "A Hindi request too open to plan gets a question with options",
+  "tags": [
+   "question",
+   "language"
+  ],
+  "ask": {
+   "instruction": "मेरी दुकान के लिए एक विज्ञापन"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "कुछ बातें पहले।",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "विज्ञापन कितना लंबा हो?",
+     "options": [
+      "15 सेकंड",
+      "30 सेकंड"
+     ],
+     "default": "15 सेकंड"
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": true
+  }
+ },
+ {
+  "id": "hi-music-plan",
+  "lang": "hi",
+  "about": "Hindi: music for a wedding video is an audio step, priced",
+  "tags": [
+   "plan",
+   "music",
+   "language"
+  ],
+  "ask": {
+   "instruction": "शादी के वीडियो के लिए 30 सेकंड का संगीत"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "शादी के लिए एक धुन।",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "audio/audio_minimax_music_3",
+      "name": "Wedding music",
+      "prompt": "Joyful shehnai and dhol, festive.",
+      "uses": [],
+      "clips": 1,
+      "after": 0,
+      "duration": 30,
+      "choices": [
+       {
+        "setting": "37:13:max_duration",
+        "value": "30"
+       }
+      ]
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "kinds": [
+    "audio"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "hi-greeting",
+  "lang": "hi",
+  "about": "A Hindi greeting gets words, no steps",
+  "tags": [
+   "talk",
+   "language"
+  ],
+  "ask": {
+   "instruction": "नमस्ते, आप क्या कर सकते हैं?"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "नमस्ते! मैं तस्वीरें, वीडियो और संगीत बनाता हूँ।",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": false
+  }
+ },
+ {
+  "id": "es-plan-two-shots",
+  "lang": "es",
+  "about": "A Spanish request for two shots becomes two priced shots",
+  "tags": [
+   "plan",
+   "language"
+  ],
+  "ask": {
+   "instruction": "dos tomas de una playa al atardecer, para Reels"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Dos tomas de la playa.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Playa",
+      "prompt": "Waves roll onto an empty beach at sunset.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Gaviotas",
+      "prompt": "Seagulls fly low over the water at sunset.",
+      "duration": 5,
+      "orientation": "portrait",
+      "after": 1,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 2,
+   "kinds": [
+    "video",
+    "video"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "es-go-ahead-after-idea",
+  "lang": "es",
+  "about": "A Spanish go-ahead (hazlo) carries the last idea and is planned on the second ask",
+  "tags": [
+   "go-ahead",
+   "language"
+  ],
+  "ask": {
+   "instruction": "hazlo",
+   "history": [
+    {
+     "instruction": "a pet ad",
+     "reply": "A puppy runs across a lawn chasing a red ball.",
+     "steps": []
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "¡Claro!",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": true
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "Un plano del cachorro.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Puppy",
+      "prompt": "A puppy runs across a lawn.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": true
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "names": [
+    "Puppy"
+   ],
+   "asked": 2,
+   "told": [
+    "A puppy runs across a lawn chasing a red ball"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "es-sound-on-video",
+  "lang": "es",
+  "about": "Spanish: music asked for a video makes the sound step though the model only talked",
+  "tags": [
+   "sound",
+   "language"
+  ],
+  "ask": {
+   "instruction": "ponle la música al vídeo"
+  },
+  "setup": {
+   "items": [
+    {
+     "ref": "clip",
+     "kind": "video",
+     "name": "Clip",
+     "seconds": 6,
+     "video": true
+    },
+    {
+     "ref": "tune",
+     "kind": "audio",
+     "name": "Tune",
+     "seconds": 1
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "No puedo hacerlo.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": true,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "sound": true,
+   "priced": true
+  }
+ },
+ {
+  "id": "es-split-in-three",
+  "lang": "es",
+  "about": "Spanish: a split in three is three parts of the clip, free",
+  "tags": [
+   "split",
+   "language"
+  ],
+  "ask": {
+   "instruction": "divídelo en tres",
+   "selection": [
+    "@clip"
+   ]
+  },
+  "setup": {
+   "items": [
+    {
+     "ref": "clip",
+     "kind": "video",
+     "name": "Clip",
+     "seconds": 6,
+     "video": true
+    },
+    {
+     "ref": "tune",
+     "kind": "audio",
+     "name": "Tune",
+     "seconds": 1
+    }
+   ]
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "En tres partes.",
+    "steps": [
+     {
+      "tool": "trim",
+      "name": "Tres partes",
+      "source": "@clip",
+      "start": 0,
+      "end": 2,
+      "parts": 3
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 3,
+   "names": [
+    "Clip part 1 of 3",
+    "Clip part 2 of 3",
+    "Clip part 3 of 3"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "es-question-length",
+  "lang": "es",
+  "about": "Spanish: an open request gets a card with the length to pick",
+  "tags": [
+   "question",
+   "language"
+  ],
+  "ask": {
+   "instruction": "un anuncio para mi cafetería"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Primero, un par de cosas.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "¿Cuánto dura?",
+     "options": [
+      "15 s",
+      "30 s"
+     ],
+     "default": "15 s"
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": true
+  }
+ },
+ {
+  "id": "es-claim-without-plan-caught",
+  "lang": "es",
+  "about": "A Spanish reply that says it is making something with no plan is caught",
+  "tags": [
+   "checks",
+   "language"
+  ],
+  "ask": {
+   "instruction": "haz un vídeo de un gato"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Lo estoy haciendo ahora.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "Lo estoy haciendo ahora.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "reply_is": "EMPTY_CLAIM",
+   "asked": 2
+  }
+ }
+]
