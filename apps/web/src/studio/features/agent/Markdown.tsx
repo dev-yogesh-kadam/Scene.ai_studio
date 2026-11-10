@@ -5,6 +5,7 @@ import { Fragment, useLayoutEffect, useRef, useState, type ReactNode, type RefOb
 import { createPortal } from 'react-dom';
 import { Icon } from '../../../common/components/Icon/Icon';
 import { Still } from '../../../common/components/Still';
+import { useRetryOnce } from '../../../common/components/retryOnce';
 import { cx } from '../../../common/cx';
 import { SoundPlayer } from './SoundPlayer';
 import type { Chip as Known, Chips } from './types';
@@ -216,6 +217,8 @@ function csvRow(line: string) {
 /** A link to one of the user's library items shows its picture (a video its poster, found when the file is not one). */
 function MediaCell({ text, found }: { text: string; found: RegExpExecArray }) {
   const [tried, setTried] = useState<'file' | 'poster' | 'none'>('file');
+  // the poster may not be made yet (503): once more a second later, then the word "open"
+  const poster = useRetryOnce(`/api/library/${found[2]}/poster`, () => setTried('none'));
   return (
     <td className={s['md-cell-media']}>
       <a href={text} target="_blank" rel="noopener noreferrer" title={tried === 'none' ? undefined : text}>
@@ -223,10 +226,14 @@ function MediaCell({ text, found }: { text: string; found: RegExpExecArray }) {
           'open'
         ) : (
           <img
-            src={tried === 'poster' ? `/api/library/${found[2]}/poster` : text}
+            src={tried === 'poster' ? poster.src : text}
             alt=""
             loading="lazy"
-            onError={() => setTried(found[1] === 'library' && tried === 'file' ? 'poster' : 'none')}
+            onError={
+              tried === 'poster'
+                ? poster.onError
+                : () => setTried(found[1] === 'library' && tried === 'file' ? 'poster' : 'none')
+            }
           />
         )}
       </a>

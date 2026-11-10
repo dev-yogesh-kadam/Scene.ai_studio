@@ -5,6 +5,7 @@
 // the item's size the thumbnail keeps its place before it loads (width and height), so nothing below it jumps.
 
 import { Icon } from './Icon/Icon';
+import { useRetryOnce } from './retryOnce';
 import { classesOf } from '../cx';
 import css0 from './Shared3.module.css';
 import css1 from '../../studio/features/agent/Composer.module.css';
@@ -21,14 +22,40 @@ type Props = { url: string; kind: string; name?: string; width?: number; height?
 
 export function Still({ url, kind, name = '', width, height }: Props) {
   if (kind === 'audio' || kind === 'text') {
-    return (
-      <div className={css('sound')}>
-        <Icon name={kind === 'audio' ? 'audio' : 'book'} />
-        <span>{name}</span>
-      </div>
-    );
+    return <Mark kind={kind} name={name} />;
   }
-  const src = kind === 'video' ? url.replace(/\/file$/, '/poster') : thumbUrl(url);
+  return (
+    <Picture
+      src={kind === 'video' ? url.replace(/\/file$/, '/poster') : thumbUrl(url)}
+      name={name}
+      width={width}
+      height={height}
+    />
+  );
+}
+
+function Mark({ kind, name }: { kind: string; name: string }) {
+  return (
+    <div className={css('sound')}>
+      <Icon name={kind === 'audio' ? 'audio' : 'book'} />
+      <span>{name}</span>
+    </div>
+  );
+}
+
+/** The poster or picture: one more try a second later when it isn't ready yet (503), then quietly its alt text. */
+function Picture({ src, name, width, height }: { src: string; name: string; width?: number; height?: number }) {
+  const shown = useRetryOnce(src);
   const size = width && height ? { width, height } : {};
-  return <img src={src} alt={name} loading="lazy" decoding="async" draggable={false} {...size} />;
+  return (
+    <img
+      src={shown.src}
+      alt={name}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      onError={shown.onError}
+      {...size}
+    />
+  );
 }
