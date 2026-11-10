@@ -708,6 +708,17 @@ def native_rules():
             "A state_write and a call that names that path by $state: may go together: the write is done first.\n\n" + TOOL_RULES)
 
 
+FILM_MOVED = {"html": "render_html", "ffmpeg": "ffmpeg"}   # the film tool's ops that are tools of their own now
+FILM_MOVED_NOTE = "\n(film's {op} op is the {tool} tool now: call {tool} next time, with the same fields.)"
+
+
+def film_op_unknown(op):
+    """The film tool's answer to an op it does not have: what to call instead (a session from before render_html and
+    ffmpeg were tools of their own may still name them in other words)."""
+    return ("film has no op {}. A page or a motion project is drawn with the render_html tool, and your own ffmpeg command "
+            "runs with the ffmpeg tool. film's ops are: {}.").format(json.dumps(op, ensure_ascii=False)[:80], ", ".join(agent_tools.FILM_OPS))
+
+
 def native_tools(names):
     """{name: (what it does, its input schema)} of the studio's tools named, for claude.converse (agent_tools.TOOLS)."""
     return {name: agent_tools.TOOLS[name] for name in TOOLS if name in names and name in agent_tools.TOOLS}

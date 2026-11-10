@@ -1941,18 +1941,21 @@ async def _planning(request, user, body, instruction, project):
 
     async def film_op(call):
         """One film operation, queued and waited for (they are quick, free and made on this machine). html and ffmpeg
-        are tools of their own now (render_html, ffmpeg); a session begun before still names them here."""
-        if call.get("op") not in edits.FILM:
-            return "op must be one of: {}.".format(", ".join(edits.FILM))
+        are tools of their own now (render_html, ffmpeg); a session begun before still names them here: they still run,
+        and the answer says which tool to call next time. An op there is not gets the list, and those two tools named."""
+        op = call.get("op")
+        if op not in edits.FILM:
+            return agent.film_op_unknown(op)
         try:
             settings = _structured(call.get("settings"))
             if not isinstance(settings, dict):
                 raise ValueError
         except ValueError:
             return "settings must be an object of the operation's fields."
-        if call["op"] == "html" and not settings.get("html"):   # the page came as it is in "value", not inside the JSON
+        if op == "html" and not settings.get("html"):   # the page came as it is in "value", not inside the JSON
             settings["html"] = call.get("value") or ""
-        return await film_done(call["op"], settings)
+        done = await film_done(op, settings)
+        return done + agent.FILM_MOVED_NOTE.format(op=op, tool=agent.FILM_MOVED[op]) if op in agent.FILM_MOVED else done
 
     async def render_html(call):
         """A page or a motion project drawn by HyperFrames: the film tool's html op."""
