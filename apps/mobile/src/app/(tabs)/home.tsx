@@ -76,7 +76,13 @@ export default function HomeScreen() {
       title="Home"
       scrollY={scrollY}
       actions={
-        <Tap onPress={() => router.push('/account')} haptic="light" scaleTo={0.9} accessibilityLabel="Account">
+        <Tap
+          onPress={() => router.push('/account')}
+          haptic="light"
+          scaleTo={0.9}
+          // the name holds the initials the button shows, so "tap EU" works by voice too (WCAG 2.5.3)
+          accessibilityLabel={`Account, ${initials(user?.name ?? '') || '?'}`}
+        >
           <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.avatar}>
             <Text style={styles.avatarText}>{initials(user?.name ?? '') || '?'}</Text>
           </LinearGradient>
@@ -204,7 +210,7 @@ export default function HomeScreen() {
                     haptic="light"
                     scaleTo={0.94}
                     style={styles.quickButton}
-                    accessibilityLabel={`Make ${q.kind === 'audio' ? 'music' : `a ${q.label.toLowerCase()}`}`}
+                    accessibilityLabel={`Make ${q.kind === 'audio' ? 'music' : q.kind === 'image' ? 'an image' : `a ${q.label.toLowerCase()}`}`}
                   >
                     <Icon name={q.icon} size={22} color={kindColors[q.kind]} />
                     <Text style={styles.quickLabel}>{q.label}</Text>

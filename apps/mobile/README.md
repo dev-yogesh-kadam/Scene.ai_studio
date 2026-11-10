@@ -23,6 +23,11 @@ screen*), it opens full screen like an app.
   area), its types and formatting are in `packages/shared`.
 - **Served by the studio.** `npm run build` writes the site to `apps/mobile/dist/`; the studio serves it at `/m/`
   (`backend/scene/phone_site.py`, setting `mobile_site_dir`). `scripts/start.bat` builds it the first time.
+- **Under the studio's Content-Security-Policy** (no inline script, no inline style). The page's reset is a file
+  (`public/reset.css`), and the entry (`index.ts`) first runs `src/lib/cspStyles.ts`: the `<style>` elements React
+  Native Web, Reanimated, expo-font and expo-image make are held out of the page and their CSS goes into adopted
+  constructed style sheets, which the policy allows. A library that writes styles some other way would show up in
+  `apps/web/tests/e2e/phone.spec.ts` (a CSP violation, or the page drawn unstyled).
 - **Phones are sent here.** A phone (not a tablet) opening one of the studio's pages is redirected to the same place on
   `/m/` (a project's or module's link too). `/?desktop=1` (Account › Open the Full Studio) keeps that phone on the full
   studio until it opens `/m/` again.

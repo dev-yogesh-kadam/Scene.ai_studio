@@ -1,0 +1,32 @@
+/* The page around the phone site (index.html links it: the site's policy allows no inline <style>). */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  /* No grey flash when a finger lands on something, no zoom on a double tap, no pull-to-refresh of the page. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+@media (prefers-color-scheme: light) {
+  html,
+  body {
+    background: #f2f2f7;
+  }
+}
+body {
+  overflow: hidden;
+}
+/* No scrollbars, as on a phone: lists scroll by touch. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+#root {
+  display: flex;
+  height: 100%;
+  flex: 1;
+}

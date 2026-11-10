@@ -356,7 +356,7 @@ function Cast({ moduleId }: { moduleId: number }) {
           <Tap onPress={() => setOpen(entry)} scaleTo={0.95} accessibilityLabel={`${entry.name}, ${entry.type}${entry.always ? ', in every shot' : ''}`}>
             <View style={styles.castPicture}>
               {entry.kind === 'image' || entry.kind === 'video' ? (
-                <Image source={{ uri: apiUrl(entry.url) }} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+                <Image source={{ uri: apiUrl(entry.url) }} accessibilityLabel="" style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
               ) : (
                 <Icon name={castIcons[entry.type] ?? 'sparkles'} size={30} color={colors.textMuted} />
               )}
@@ -379,7 +379,7 @@ function Cast({ moduleId }: { moduleId: number }) {
       <Sheet open={!!open} onClose={() => setOpen(null)} title={open?.name}>
         {open ? (
           <View style={{ gap: spacing.lg }}>
-            {open.kind === 'image' ? <Image source={{ uri: apiUrl(open.url) }} style={styles.castLarge} contentFit="cover" /> : null}
+            {open.kind === 'image' ? <Image source={{ uri: apiUrl(open.url) }} accessibilityLabel={open.name} style={styles.castLarge} contentFit="cover" /> : null}
             {open.about ? <Text style={styles.castAbout}>{open.about}</Text> : null}
             {open.use_note ? (
               <View style={styles.castNote}>

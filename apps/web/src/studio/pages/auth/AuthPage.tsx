@@ -45,7 +45,13 @@ export function AuthPage({
       tag={TAGS[mode]}
       below={below?.(openForm)}
     >
-      <AuthForm mode={mode} onMode={setMode} info={info} onSignedIn={onSignedIn} />
+      <AuthForm
+        mode={mode}
+        onMode={setMode}
+        info={info}
+        onSignedIn={onSignedIn}
+        closedNote="New accounts are closed on this studio. Ask its admin for access."
+      />
     </SignInSet>
   );
 }

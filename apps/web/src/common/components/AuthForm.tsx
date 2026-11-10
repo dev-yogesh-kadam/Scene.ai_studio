@@ -11,14 +11,14 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import type { Me } from '@scene/shared/types/api';
+import type { AuthInfo, Me } from '@scene/shared/types/api';
 import { ApiError, api } from '../api';
 import { classesOf } from '../cx';
 import css0 from './AuthForm.module.css';
 const css = classesOf(css0);
 
 export type AuthMode = 'login' | 'register' | 'code';
-export type AuthInfo = { first_run: boolean; signup_open: boolean };
+export type { AuthInfo };
 
 const FIELDS = ['input', 'select', 'textarea'];
 
@@ -51,6 +51,7 @@ export function AuthForm({
   loginPath = '/api/auth/login',
   registerPath = '/api/auth/register',
   copy = {},
+  closedNote,
 }: {
   mode: AuthMode;
   onMode: (mode: AuthMode) => void;
@@ -60,12 +61,17 @@ export function AuthForm({
   registerPath?: string;
   /** The words of the sign-in, where they differ (the admin console's). */
   copy?: { title?: string; sub?: string; codeSub?: string; emailAutocomplete?: string };
+  /** Said under the sign-in form while new accounts are closed (the studio's; the console says nothing of it). */
+  closedNote?: string;
 }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const second = useRef<{ email: string; password: string } | null>(null); // the password was right; a code is asked for
   const first = useRef<HTMLInputElement>(null);
   const register = mode === 'register';
+  // A link with ?invite=CODE (an admin's) fills the invite code in.
+  const [invite] = useState(() => new URLSearchParams(window.location.search).get('invite') ?? '');
+  const askInvite = register && !info.first_run && !!info.invite_required;
   const [shownMode, setShownMode] = useState(mode);
   if (shownMode !== mode) {
     // another form: no error from the last one, and its button ready
@@ -90,7 +96,12 @@ export function AuthForm({
       }
       const user = await api<Me>(register ? registerPath : loginPath, {
         method: 'POST',
-        json: { name: value('name'), email: value('email'), password: value('password') },
+        json: {
+          name: value('name'),
+          email: value('email'),
+          password: value('password'),
+          ...(askInvite ? { invite: value('invite').trim() } : {}),
+        },
       });
       onSignedIn(user);
     } catch (err) {
@@ -185,11 +196,30 @@ export function AuthForm({
             placeholder={register ? 'At least 8 characters' : 'Your password'}
           />
         </Field>
+        {askInvite && (
+          <Field label="Invite code">
+            <input
+              name="invite"
+              type="text"
+              required
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={200}
+              defaultValue={invite}
+              placeholder="The code an admin gave you"
+            />
+          </Field>
+        )}
         <p className="error notice">{error}</p>
         <button className="btn primary block" type="submit" disabled={busy}>
           {register ? 'Create account' : 'Sign in'}
         </button>
       </form>
+      {!info.signup_open && !info.first_run && closedNote && (
+        <p className={css('auth-switch muted')} role="note">
+          {closedNote}
+        </p>
+      )}
       {info.signup_open && (
         <div className={css('auth-switch muted')}>
           {register ? 'Already have an account? ' : 'New here? '}

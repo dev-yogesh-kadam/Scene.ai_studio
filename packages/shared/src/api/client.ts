@@ -19,6 +19,11 @@ export function setOnUnauthorized(handler: ((path: string) => void) | null) {
   onUnauthorized = handler;
 }
 
+/** Says that this call was refused for want of a sign-in (request() does; so does a streamed call, stream.ts). */
+export function unauthorized(path: string) {
+  onUnauthorized?.(path);
+}
+
 /** A path on the studio, for players, pictures and downloads (the same address the site is on). */
 export function apiUrl(path: string) {
   return path;
@@ -54,7 +59,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     );
   }
   const body = await response.json().catch(() => null);
-  if (response.status === 401) onUnauthorized?.(path);
+  if (response.status === 401) unauthorized(path);
   if (!response.ok) throw new ApiError(response.status, reasonOf(response.status, body), body);
   // A slow answer (a model loading) is sent late, after its status: an error then says its status as "failed".
   const failed = (body as { failed?: number } | null)?.failed;

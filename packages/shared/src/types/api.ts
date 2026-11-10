@@ -18,6 +18,10 @@ export type Me = User & {
   console?: { url: string; port: number };
 };
 
+/** GET /api/auth/state (backend/scene/api/auth.py, auth_state): what the sign-in page needs before anyone is signed in.
+ *  `invite_required`: new accounts are open but ask for the studio's invite code (sent as `invite` to register). */
+export type AuthInfo = { first_run: boolean; signup_open: boolean; invite_required?: boolean };
+
 /** POST /api/auth/mobile/login, when the password (and code, if asked) is right. */
 export type MobileLogin = {
   token: string;

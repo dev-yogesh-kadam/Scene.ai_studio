@@ -22,6 +22,7 @@ type Current = {
   daily_cap: number;
   admin_mfa: boolean;
   langfuse_words: boolean;
+  langfuse_owns_words: boolean;
   langfuse_grade_share: number;
 };
 type News = { text?: string; level?: string; until?: number };
@@ -53,6 +54,11 @@ function Accounts({
         <input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} />
         Anyone who can open this site may create an account
       </label>
+      <p className="muted small" style={{ margin: '6px 0 0 25px' }}>
+        {signup
+          ? 'When config.json sets an invite code (signup_invite), the sign-up form also asks for it; a link with ?invite=CODE fills it in.'
+          : 'Closed (as on a new studio): nobody can make an account, and the sign-in page says so.'}
+      </p>
       <label className="check">
         <input type="checkbox" checked={mfa} onChange={(e) => setMfa(e.target.checked)} />
         Admins must use two-step sign-in to open the admin console
@@ -168,6 +174,7 @@ function Announcement({ current }: { current: News }) {
 /** What goes to Langfuse with the agent's calls, when one is set in Servers & APIs (docs/langfuse.md). */
 function Langfuse({ current }: { current: Current }) {
   const [words, setWords] = useState(current.langfuse_words);
+  const [owns, setOwns] = useState(!!current.langfuse_owns_words);
   const [share, setShare] = useState(String(current.langfuse_grade_share));
   const { notice, run } = useNotice();
   return (
@@ -186,6 +193,15 @@ function Langfuse({ current }: { current: Current }) {
       <p className="muted small" style={{ margin: '6px 0 0 25px' }}>
         Off: only names, models, tokens, costs and times are sent. Saving a call to a dataset needs it on.
       </p>
+      <label className="check">
+        <input type="checkbox" checked={owns} onChange={(e) => setOwns(e.target.checked)} />
+        Keep the words in Langfuse only
+      </label>
+      <p className="muted small" style={{ margin: '6px 0 0 25px' }}>
+        A call&apos;s words file is deleted here once Langfuse has it, and the agent&apos;s session events older than
+        30 days go to Langfuse and are kept here only in short. Works only while a Langfuse is set and the words are
+        sent (docs/observability.md).
+      </p>
       <Field label="Turns graded by the fast model (%)">
         <input type="number" min={0} max={100} step={1} value={share} onChange={(e) => setShare(e.target.value)} />
       </Field>
@@ -199,7 +215,7 @@ function Langfuse({ current }: { current: Current }) {
         style={{ marginTop: 12 }}
         onClick={() =>
           void run(async () => {
-            await putSettings({ langfuse_words: words, langfuse_grade_share: share || 0 });
+            await putSettings({ langfuse_words: words, langfuse_owns_words: owns, langfuse_grade_share: share || 0 });
             return 'Saved.';
           })
         }

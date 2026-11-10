@@ -24,11 +24,6 @@ export type Backups = {
 };
 
 const RESTORE: Record<string, (b: Backups) => string[]> = {
-  sqlite: (b) => [
-    'Stop the studio app (Ctrl+C in its window).',
-    `Copy the scene_<date>.db you want from ${b.folder} over scene.db in ${b.storage}. Keep the old scene.db aside until you have checked.`,
-    'Start the app again and sign in to check.',
-  ],
   postgres: (b) => [
     'Stop the studio app (Ctrl+C in its window).',
     'In a Command Prompt, as the postgres account: pg_restore -h localhost -U postgres --clean --if-exists -d scene ' +
@@ -124,7 +119,7 @@ export function BackupsCard({ b }: { b: Backups }) {
       )}
       <h3>To put a copy back</h3>
       <ol className={css('steps')}>
-        {(RESTORE[b.database_kind] || RESTORE.sqlite)(b).map((step) => (
+        {(RESTORE[b.database_kind] || RESTORE.postgres)(b).map((step) => (
           <li key={step}>{step}</li>
         ))}
       </ol>

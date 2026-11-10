@@ -23,6 +23,7 @@ export function Thumb({ id, kind, style, iconSize = 30 }: { id: number; kind: st
     <View style={[styles.box, style]} importantForAccessibility="no-hide-descendants">
       <Image
         source={{ uri: posterUrl(id) }}
+        accessibilityLabel="" // a picture of what the tile or card around it names (alt="")
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         transition={250}

@@ -21,7 +21,7 @@ const ABOUT: Record<string, string> = {
   langfuse:
     "Every call of the agent's models is sent here too: the words, the answer, the tokens and what they cost, one trace per turn and one session per Agent tab. The keys are the project's, from Langfuse's Settings → API keys.",
 };
-const PLACEHOLDER: Record<string, string> = { comfy: 'http://100.123.221.34:8188', langfuse: 'http://127.0.0.1:3000' };
+const PLACEHOLDER: Record<string, string> = { comfy: 'http://192.168.1.20:8188', langfuse: 'http://127.0.0.1:3000' };
 
 type Endpoint = {
   id: number;

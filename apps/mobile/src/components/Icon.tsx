@@ -6,8 +6,23 @@ import { colors } from '@/theme';
 // Ionicons: drawn in the style of Apple's SF Symbols (filled for "on", outlined for "off").
 export type IconName = ComponentProps<typeof Ionicons>['name'];
 
-export function Icon({ name, size = 22, color = colors.text }: { name: IconName; size?: number; color?: string }) {
-  return <Ionicons name={name} size={size} color={color} />;
+/** An icon. With `accessibilityLabel` it is a picture with that name (a meaning nothing else says, as a tile's star). */
+export function Icon({
+  name,
+  size = 22,
+  color = colors.text,
+  accessibilityLabel,
+}: {
+  name: IconName;
+  size?: number;
+  color?: string;
+  accessibilityLabel?: string;
+}) {
+  return accessibilityLabel ? (
+    <Ionicons name={name} size={size} color={color} accessibilityRole="image" accessibilityLabel={accessibilityLabel} />
+  ) : (
+    <Ionicons name={name} size={size} color={color} />
+  );
 }
 
 /** The icon for each kind of work. */
