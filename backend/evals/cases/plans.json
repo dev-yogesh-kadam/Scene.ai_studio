@@ -408,12 +408,13 @@
    "checks"
   ],
   "ask": {
-   "instruction": "a 20 shot montage of a city waking up"
+   "instruction": "a 20 shot montage of a city waking up",
+   "direction": "Brief: a city's own followers on YouTube; landscape; calm, hopeful; real streets, no people's faces close."
   },
   "recorded": [
    {
     "thought": "Reading the message.",
-    "concept": "",
+    "concept": "A city waking up street by street, from the first light on empty roads to the morning rush.",
     "reply": "Twenty shots of the city.",
     "steps": [
      {
@@ -657,7 +658,262 @@
       "start_from": 0
      }
     ],
-    "direction": "",
+    "direction": "Brief: a city's own followers on YouTube; landscape; calm, hopeful; real streets, no people's faces close.",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   },
+   {
+    "thought": "The studio's note asks for stills first; a montage of streets needs no character stills, so I keep the shots.",
+    "concept": "A city waking up street by street, from the first light on empty roads to the morning rush.",
+    "reply": "Twenty shots of the city.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 0",
+      "prompt": "The city at dawn, view 0.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 1",
+      "prompt": "The city at dawn, view 1.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 2",
+      "prompt": "The city at dawn, view 2.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 3",
+      "prompt": "The city at dawn, view 3.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 4",
+      "prompt": "The city at dawn, view 4.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 5",
+      "prompt": "The city at dawn, view 5.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 6",
+      "prompt": "The city at dawn, view 6.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 7",
+      "prompt": "The city at dawn, view 7.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 8",
+      "prompt": "The city at dawn, view 8.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 9",
+      "prompt": "The city at dawn, view 9.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 10",
+      "prompt": "The city at dawn, view 10.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 11",
+      "prompt": "The city at dawn, view 11.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 12",
+      "prompt": "The city at dawn, view 12.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 13",
+      "prompt": "The city at dawn, view 13.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 14",
+      "prompt": "The city at dawn, view 14.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 15",
+      "prompt": "The city at dawn, view 15.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 16",
+      "prompt": "The city at dawn, view 16.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 17",
+      "prompt": "The city at dawn, view 17.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 18",
+      "prompt": "The city at dawn, view 18.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 19",
+      "prompt": "The city at dawn, view 19.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "Brief: a city's own followers on YouTube; landscape; calm, hopeful; real streets, no people's faces close.",
     "question": {
      "text": "",
      "options": []

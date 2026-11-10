@@ -16,6 +16,8 @@ with no restart):
 - guard_sessions_per_user: the live Claude sessions one user may hold at once, of claude.LIVE (3).
 - guard_tool_calls: the most tool calls the agent may make while answering one message (200).
 - guard_turn_seconds: the longest one message to the agent's live session may take (3600).
+- creative_big_job_credits: a plan priced above this is a big job (agent.big_job): it gets the brief, the concept, the
+  stills first and the automatic second opinion (600). 0: a big job by its number of shots alone.
 
 Functions that read the database are sync: async code calls them with db.offload, as everything else does.
 """
@@ -36,6 +38,7 @@ DEFAULTS = {
     "guard_sessions_per_user": 3,
     "guard_tool_calls": 200,
     "guard_turn_seconds": 3600,
+    "creative_big_job_credits": 600,
 }
 # What each may be set to: (lowest, highest). 0 is "no limit" where the lowest is 0.
 RANGES = {
@@ -45,6 +48,7 @@ RANGES = {
     "guard_sessions_per_user": (1, 50),
     "guard_tool_calls": (5, 5_000),
     "guard_turn_seconds": (60, 86_400),
+    "creative_big_job_credits": (0, 10_000_000),
 }
 # Seconds a tool may run before the agent is told it was stopped: the film operations wait up to FILM_WAIT (900 s) for
 # their job, and a tool that asks a model (page_build, second_opinion) waits up to claude_timeout (600 s).

@@ -136,8 +136,9 @@ def test_an_asset_saved_from_the_library_keeps_what_the_model_saw_and_notes_can_
 
 
 def test_only_the_user_picks_a_skill_and_a_video_gets_the_default(tmp_path):
-    # a message's words never pick a skill: only the ones the user chose are given, in their order
-    assert skills.pick("a short film: a girl finds a stray dog in the rain") == []
+    # a message's words never pick a skill: only the ones the user chose are given, in their order; the one exception is
+    # the director, which comes on its own (marked "auto") for multi-shot story work (skills.wants_directing)
+    assert [(s["id"], s.get("auto")) for s in skills.pick("a short film: a girl finds a stray dog in the rain")] == [("director", True)]
     assert skills.pick("make a 20 second Reel ad for our coffee product") == []
     assert [s["id"] for s in skills.pick("x", force=["product-ad", "no-such-skill", "product-ad"])] == ["product-ad"]
     # a message asking for a video is one for the default skill; an edit of a video already there is not

@@ -66,9 +66,26 @@ def test_a_deep_look_studies_a_picture_and_keeps_its_facts(client, monkeypatch, 
 
 
 def test_craft_skills_are_never_picked_by_their_words_alone():
-    # a craft skill is loaded by a skill that calls for it, or named with /<id>; its words alone do not pick it
+    # a craft skill is loaded by a skill that calls for it, or named with /<id>; its words alone do not pick it. The
+    # director is the one that comes on its own, and only for multi-shot story work (skills.wants_directing)
     assert "camera-coverage" not in [s["id"] for s in skills.pick("give me different angles of this cafe")]
-    assert "director" not in [s["id"] for s in skills.pick("direct this script for me")]
+    assert [s.get("auto") for s in skills.pick("direct this script for me") if s["id"] == "director"] == [True]
     assert "sound-pass" not in [s["id"] for s in skills.pick("add background music to it")]
+
+
+def test_the_director_comes_on_its_own_for_multi_shot_story_work_only():
+    def directs(said, history=()):
+        return "director" in [s["id"] for s in skills.pick(said, history)]
+    for said in ("a short film: two brothers fix their father's boat", "plan the shots of this scene: she enters, argues and leaves",
+                 "a music video for my song about the monsoon", "turn this story into scenes", "write me a three minute drama"):
+        assert directs(said), said
+    for said in ("a single shot of a cat on a windowsill", "make a 5 second video of a dog running", "trim this film to 10 seconds",
+                 "a kinetic typography video of our story", "make a logo reveal for our brand film", "a picture of a dragon",
+                 "I always make short films for clients", "hello, what can you do?", "split the movie in three"):
+        assert not directs(said), said
+    # a short follow-up is read with the message before it
+    assert directs("yes, portrait", [{"instruction": "a short film about a lighthouse keeper", "reply": "Which shape?"}])
+    # a user who names the director gets it as theirs, not as the studio's own; a long skill named is the whole procedure
+    assert [s.get("auto") for s in skills.pick("a short film about rain", force=["director"])] == [None]
     assert [s["id"] for s in skills.pick("angles please", force=["camera-coverage"])][0] == "camera-coverage"
     assert all(s["craft"] for s in skills.load() if s["id"] in ("director", "camera-coverage", "continuity-recall", "sound-pass"))

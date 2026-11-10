@@ -2,8 +2,9 @@ id: director
 title: Craft Director
 version: 3
 desc: Plan every shot of a story before anything is generated
-description: Use when a story or script must be planned into shots before generation: episode, then scenes with a type and its camera grammar, then beats, then every shot's picture, who is in frame, motion, move, angle, size and length. Craft skill: works inside any workflow and for any video or image model. Never triggers on its own: load only when the user or another skill explicitly calls for it.
+description: Use when a story or script must be planned into shots before generation: episode, then scenes with a type and its camera grammar, then beats, then every shot's picture, who is in frame, motion, move, angle, size and length. Craft skill: works inside any workflow and for any video or image model. Loads on its own for multi-shot film and story work (a short film, a story or script, a scene of several shots, a music video); never for a single shot, an edit or motion graphics, and beside a long skill only when that skill calls for it.
 craft: true
+auto: story
 words: \b(direct|director|directing|shot list|shot plan|break (it|this|the script) down|breakdown|coverage plan|storyboard (it|this))\b
 ---
 # Director

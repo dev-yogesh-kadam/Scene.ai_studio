@@ -844,15 +844,17 @@ async def _planning(request, user, body, instruction, project):
     # A run keeps its long skill, named or picked by the message's words, and the files attached to it: the messages
     # that follow carry on with both. Without them a "continue" has no sound attached, and the workflows that work on
     # one (transcribe, separate a voice) are not offered.
-    following = next((s["id"] for s in picked if len(s["text"]) > CHECKED_SKILL), None)
+    # The director, come on its own for multi-shot story work (skills.wants_directing), is a craft beside the work: never
+    # the run's skill, never checked before it starts, and never what makes the message a long run.
+    following = next((s["id"] for s in picked if len(s["text"]) > CHECKED_SKILL and not s.get("auto")), None)
     if run_id and following:
         await offload(runs.keep_skill, state.db, user["id"], run_id, following)
         await offload(runs.keep_attached, state.db, user["id"], run_id, [s["id"] for s in selection])
     for skill in picked:
-        yield activity("skill", "Read the skill “{}”".format(skill["title"]))
+        yield activity("skill", "Read the skill “{}”{}".format(skill["title"], " (multi-shot story work)" if skill.get("auto") else ""))
     # A long skill asks the user which models to use, so it is shown every one; and a model named anywhere in the
     # conversation (the message, its notes, the turns before) stays offered for the rest of it.
-    long_skill = any(len(s["text"]) > CHECKED_SKILL for s in picked)
+    long_skill = any(len(s["text"]) > CHECKED_SKILL and not s.get("auto") for s in picked)
     said = " ".join([instruction, str(body.get("direction") or "")] + [
         "{} {}".format(t.get("instruction") or "", t.get("reply") or "") for t in (body.get("history") or [])[-agent.MAX_HISTORY:]
         if isinstance(t, dict)]).lower()
@@ -960,7 +962,7 @@ async def _planning(request, user, body, instruction, project):
     # anything is planned: what it requires that is not here, and what it names that this studio cannot do, is said at once.
     adaptation = ""
     for skill in picked:
-        if not (skill["id"] in forced or len(skill["text"]) > CHECKED_SKILL):
+        if not (skill["id"] in forced or len(skill["text"]) > CHECKED_SKILL) or skill.get("auto"):
             continue
         if skill["id"] == carried:
             continue   # checked when its run began: the run goes on, with what that message had
@@ -1023,7 +1025,7 @@ async def _planning(request, user, body, instruction, project):
 
     with_tools = body.get("tools", True) is not False
     # A long run (a long skill) keeps its state under the conversation's id and works in many more tool calls.
-    rounds = agent.RUN_ROUNDS if run and any(len(s["text"]) > CHECKED_SKILL for s in picked) else agent.TOOL_ROUNDS
+    rounds = agent.RUN_ROUNDS if run and long_skill else agent.TOOL_ROUNDS
     tool_events = []   # what the tools did, shown as the agent's work once the answer is in
     noted = lambda glyph, text: tool_events.append((glyph, text))
     saved_direction = []
@@ -1178,10 +1180,78 @@ async def _planning(request, user, body, instruction, project):
             noted("retry", "The model said what it would do but did not do it, so it was asked to")
             return agent.SAID_NOT_DONE.format(" ".join(reply.split())[:300])
         if not left:
-            return None
+            return await creative(answer, built)
         noted("retry", "A step could not run, so the model was asked to fix it: {}".format("; ".join(r for _, r in left)[:160]))
         return "These steps cannot run: {}. Fix them or leave them out, and finish again.".format(
             "; ".join("“{}”: {}".format(name, reason) for name, reason in left))
+
+    hinted = set()   # the creative hints given in this message, each once: "brief", "notes"
+    opinions = []    # the automatic second opinion: asked at most once a message
+    big_limit = await offload(guardrails.limit, state.db, "creative_big_job_credits")
+
+    async def kept(path):
+        """What the memory keeps at a path, or None: nothing there, or a conversation that keeps no memory."""
+        if not shared.keeps_state:
+            return None
+        try:
+            found = await offload(shared.read, path)
+        except runs.RunError:
+            return None
+        return None if found.get("missing") else found.get("value", found)
+
+    async def creative(answer, built):
+        """The creative process's hints for a plan whose steps can all run (docs/creative-director.md), each given once
+        a message, never a block. A big job (agent.big_job) with no brief is sent back to ask one first. Then, once, the
+        studio's notes in one hint: the concept a big job lacks, its stills first, the quality gates, and a senior
+        creative director's review (the automatic second opinion). None while a long skill runs: the skill is the
+        process, with its own questions and stages."""
+        if not built or long_skill:
+            return None
+        big = agent.big_job(built, instruction, body.get("history"), big_limit)
+        if big and "brief" not in hinted:
+            if shared.keeps_state:
+                briefed = await kept("/brief") is not None
+            else:   # no memory: the brief is a "Brief:" line of the direction
+                briefed = "brief:" in "{} {}".format(answer.get("direction") or "", body.get("direction") or "").lower()
+            if not briefed:
+                hinted.add("brief")
+                shots, total = len(agent.generated(built)), sum(s.get("credits") or 0 for s in built)
+                noted("question", "A big job ({} shots, {} credits) with no brief yet, so the model was asked to ask for one first".format(shots, total))
+                return agent.BRIEF_FIRST.format(why="{} generate steps, {} credits".format(shots, total), most=agent.MAX_QUESTIONS)
+        if "notes" in hinted:
+            return None
+        hinted.add("notes")
+        notes = []
+        if big and not agent.clean_concept(answer.get("concept")):
+            notes.append(agent.CONCEPT_MISSING)
+        if big and agent.stills_wanted(built, book, instruction, body.get("history")):
+            notes.append(agent.STILLS_FIRST)
+        if big:
+            critique = await auto_opinion(answer)
+            if critique:
+                notes.append(agent.OPINION_HINT.format(critique=critique))
+        if not notes:
+            return None
+        noted("retry", "The studio gave the model its notes on the plan, once: {}".format(
+            ", ".join(n.split(":")[0].split(".")[0][:40] for n in notes)))
+        return agent.CREATIVE_NOTES.format(notes="\n".join("- " + n for n in notes))
+
+    async def auto_opinion(answer):
+        """The second opinion the studio asks for itself on a big job, at most once a message: the same call as the
+        tool's, written down as agent.AUTO_OPINION and in the session's story. None when it could not be had."""
+        if opinions:
+            return None
+        opinions.append(True)
+        about = agent.plan_outline(answer.get("steps"), agent.clean_concept(answer.get("concept")), await kept("/brief"))
+        try:
+            found = await ask_opinion(about, None, agent.AUTO_OPINION)
+        except agent.AgentError as error:
+            noted("skip", "No automatic second opinion this time: {}".format(str(error)[:120]))
+            return None
+        noted("bulb", "A senior creative director ({}) reviewed the plan".format(str(found["model"] or "a stronger model").split("/")[-1]))
+        if threaded and threaded[0].get("record"):
+            await offload(threaded[0]["record"], "note", "Second opinion (auto): " + found["critique"], {"model": found["model"], "auto": True})
+        return found["critique"]
 
     def no_run():
         return "This conversation keeps no state: open a project, or start the skill again from the Agent tab."
@@ -1636,13 +1706,13 @@ async def _planning(request, user, body, instruction, project):
         noted("skill", "Drafted the skill “{}” for an admin to publish".format(draft["title"]))
         return json.dumps({"draft": draft["id"], "title": draft["title"], "waits_for": "an admin to publish it in the console"}, ensure_ascii=False)
 
-    async def second_opinion(call):
-        about = str(call.get("text") or "").strip()[:8000]
-        if not about:
-            return "Say in text what the second opinion is about."
+    async def ask_opinion(about, item=None, purpose="second_opinion"):
+        """A second opinion on `about` (and the frames of library item `item`), charged to the user as a message to
+        that model is: the second_opinion tool's, and the studio's own on a big job (purpose agent.AUTO_OPINION).
+        Returns agent.second_opinion's answer; raises agent.AgentError."""
         pictures, labels = [], []
-        row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ?", (call.get("item"), user["id"])) \
-            if isinstance(call.get("item"), int) and call.get("item") else None
+        row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ?", (item, user["id"])) \
+            if isinstance(item, int) and item else None
         if row and row["kind"] in ("image", "video") and (await offload(state.outputs.folder, user["id"]) / row["filename"]).is_file():
             try:
                 for label, picture in (await review.result_frames(await offload(state.outputs.folder, user["id"]) / row["filename"], row["kind"]))[:SECOND_OPINION_FRAMES]:
@@ -1650,16 +1720,24 @@ async def _planning(request, user, body, instruction, project):
                     labels.append(label)
             except (review.ReviewError, media.MediaError):
                 pass
-        try:
-            found = await state.agent.second_opinion(about, pictures, labels, **_model(body))
-        except agent.AgentError as error:
-            return "No second opinion this time: {}".format(error)
+        found = await state.agent.second_opinion(about, pictures, labels, **({"purpose": purpose} if purpose != "second_opinion" else {}),
+                                                 **_model(body))
         # Asked on the user's behalf in their turn: charged as a message to that model is, by its tokens.
         cost = await offload(state.credits.message_cost, found["model"], found["tokens"])
         if cost:
-            charged["credits"] += await offload(state.credits.charge_up_to, user["id"], cost, "agent", note="{} · second opinion".format(found["model"]),
-                                                             project_id=project or None)
+            charged["credits"] += await offload(state.credits.charge_up_to, user["id"], cost, "agent", note="{} · second opinion{}".format(
+                found["model"], " (auto)" if purpose == agent.AUTO_OPINION else ""), project_id=project or None)
         agent.add_tokens(tokens, found["tokens"])
+        return found
+
+    async def second_opinion(call):
+        about = str(call.get("text") or "").strip()[:8000]
+        if not about:
+            return "Say in text what the second opinion is about."
+        try:
+            found = await ask_opinion(about, call.get("item"))
+        except agent.AgentError as error:
+            return "No second opinion this time: {}".format(error)
         noted("bulb", "Asked {} for a second opinion".format(str(found["model"] or "a stronger model").split("/")[-1]))
         return found["critique"]
 
@@ -1964,7 +2042,13 @@ async def _planning(request, user, body, instruction, project):
         _soon(_grade(state, instruction, picked, reply, steps, answer.get("question"), _model(body).get("model")))
     for thread in threaded:   # the next message goes on with this session when its history ends with this reply
         await offload(_keep_thread, state, user, project, body, chosen_model, thread, None if thread.get("stood_in") else reply)
-    yield {"type": "plan", "reply": reply,
+    concept = agent.clean_concept(answer.get("concept"))   # a big job's idea in one sentence: kept for the messages after
+    if concept and shared.keeps_state and not long_skill:
+        try:
+            await offload(shared.write, "/concept", concept, "agent")
+        except (runs.RunError, ValueError):
+            pass   # a module this user may only read: the plan stands without it
+    yield {"type": "plan", "reply": reply, "concept": concept,
            "thought": str(answer.get("thought") or ""), "activity": log, "seconds": round(time.monotonic() - started, 1),
            "chips": chips, "memory_used": remembered, "direction": answer.get("direction") or "", "steps": steps, "total": sum(s["credits"] for s in steps), "llm": charged,
            "balance": await offload(state.credits.balance, user["id"]), "question": None if asked_all else agent.clean_question(answer.get("question")),

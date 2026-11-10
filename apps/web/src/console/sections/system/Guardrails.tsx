@@ -30,6 +30,7 @@ const LIMITS: Record<string, { label: string; unit?: string }> = {
   guard_sessions_per_user: { label: 'Live agent sessions one user may hold' },
   guard_tool_calls: { label: 'Tool calls while the agent answers one message' },
   guard_turn_seconds: { label: 'Longest one message to the agent may take', unit: 'seconds' },
+  creative_big_job_credits: { label: 'A plan priced above this is a big job (brief, concept, stills first)', unit: 'credits' },
 };
 
 /** A limit as typed, or the reason it can't be saved: a whole number in its range (0 is "no limit" where it may be). */

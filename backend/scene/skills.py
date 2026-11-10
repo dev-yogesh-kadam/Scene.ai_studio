@@ -15,11 +15,14 @@ skill (DEFAULT, script-to-video), which hands on to the craft skills. "words" is
 a skill in words ("use the director skill") is found by it, and the console keeps it. The files are read on every
 message, so a change to one counts at once.
 
-Two more keys a skill may have:
+Three more keys a skill may have:
 
     next: director, sound-pass     the skills it hands on to when its own steps are done (read_skill loads them)
     craft: true                    a craft skill (directing, coverage, continuity, the sound pass): never picked by its
                                    words alone, only loaded by a skill that names it, or by the user with /<id>
+    auto: story                    loaded on its own for multi-shot film and story work (wants_directing): the
+                                   director, beside whatever else the message has. Never for a single shot, an edit or
+                                   motion graphics, and never beside a long skill the user named (that skill calls it)
 
 A skill drafted in a chat ("make this a skill", skill_draft) waits in skills/drafts/ until an admin publishes it: the
 agent never reads a draft.
@@ -166,7 +169,7 @@ def load(folder=FOLDER):
         found.append({"id": slug, "title": title, "version": meta.get("version") or "1",
                       "desc": meta.get("desc") or _short(meta.get("user_description") or meta.get("description")), "words": words, "text": text,
                       "next": [n for n in ids_in(meta.get("next")) if n != slug], "craft": is_on(meta.get("craft")),
-                      "guide": is_on(meta.get("guide"))})
+                      "guide": is_on(meta.get("guide")), "loads_for": str(meta.get("auto") or "").strip().lower()})
     return found
 
 
@@ -222,6 +225,8 @@ def save(meta, folder=FOLDER):
         head += "next: {}\n".format(", ".join(after))
     if is_on(meta["craft"]) if "craft" in meta else before.get("craft"):
         head += "craft: true\n"
+    if before.get("loads_for"):   # the console's form has no "auto": a skill saved again keeps it
+        head += "auto: {}\n".format(before["loads_for"])
     path = Path(folder) / (sid + ".md")
     path.write_text(head + "---\n" + str(meta.get("text") or "").strip() + "\n", encoding="utf-8")
     return find(sid, folder)
@@ -245,7 +250,41 @@ def pick(instruction, history=(), folder=FOLDER, force=()):
     `instruction` and `history` are kept for the callers; the default skill is wants_video()'s to decide."""
     found = {s["id"]: s for s in load(folder)}
     named = [i if i in found else canonical(i) for i in force or []]
-    return [found[i] for i in dict.fromkeys(named) if i in found]
+    chosen = [found[i] for i in dict.fromkeys(named) if i in found]
+    # the one exception to "only the user picks": a skill marked "auto: story" (the director) comes on its own for
+    # multi-shot film and story work, marked "auto" so the route treats it as a craft beside the work, never a run's skill
+    if wants_directing(instruction, history):
+        chosen += [dict(s, auto=True) for s in found.values() if s.get("loads_for") == "story" and s["id"] not in named]
+    return chosen
+
+
+# Multi-shot film and story work, which the director plans (wants_directing): a story, a script, a scene of several
+# shots, a short film, a music video, a shot list...
+STORY = re.compile(
+    r"\b(story|stories|script|screenplay|short film|film|movie|episode|drama|music video|trailer|scenes|shot list|"
+    r"storyboard|direct(ing)? (this|the|my|it|a)|plan the shots|break (it|this|the script) down|breakdown|narrative)\b",
+    re.IGNORECASE)
+# ...not work on what is there already: an edit, a retake, a new shape, captions
+EDITING = re.compile(r"\b(trim|split|cut (it|this|the)|join|merge|shorten|halve|retake|upscale|reframe|crop|subtitles?|"
+                     r"captions?|lip ?sync)\b", re.IGNORECASE)
+ONE_SHOT = re.compile(r"\b(a|one|single) (single |quick |short )?(shot|still|picture|image|photo|frame)\b", re.IGNORECASE)
+
+
+def wants_directing(instruction, history=()):
+    """Whether a message is multi-shot film or story work, which the director skill plans: a story, a script, a short
+    film, a scene of several shots (STORY), and not a single shot (a clip of 15 s at most, "one shot", "a picture"), an
+    edit of what exists (EDITING) or motion graphics. A short follow-up is about the work of the message before."""
+    said = str(instruction or "")
+    last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
+    if len(said) < 60 and last.get("instruction"):
+        said += "\n" + str(last["instruction"])
+    if not STORY.search(said) or HABIT.search(said) or MOTION_GRAPHICS.search(said) or BRAND_MOTION.search(said):
+        return False
+    if EDITING.search(str(instruction or "")):
+        return False
+    lengths = [float(n) for n, _ in SECONDS.findall(said)]
+    single = (lengths and max(lengths) <= ONE_CLIP_SECONDS) or ONE_CLIP.search(said) or ONE_SHOT.search(said)
+    return not (single and not LONGER.search(said))
 
 
 def wants_motion(instruction, history=()):

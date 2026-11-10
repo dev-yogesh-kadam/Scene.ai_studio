@@ -488,7 +488,9 @@ Ad research (a brand's public ads and site; there is no ads account here):
 
 SKILL_RULES = """Skills, and handing on:
 - Only the user picks a skill (/<id>, or by its name), and a message asking for a video gets script-to-video when
-  they picked none. Never load a skill because a message fits it: with no skill given, do the work without one. Load
+  they picked none. The one exception is the studio's own: multi-shot film and story work comes with the director
+  skill, given with the message; follow it for the shot plan. Never load a skill because a message fits it: with no
+  skill given, do the work without one. Load
   another only when the user names it, or the skill in use hands on to it or calls for it.
 - A skill in use runs to its end. Do not load another skill while one is mid-way (a run's status in its state says
   where it stands) unless the user asks for it, or the skill itself hands on to it (its last line names the skills
@@ -1225,15 +1227,15 @@ class Agent:
         names = await self.models()
         return next((n for n in names if "opus" in n.lower()), None) or await self.pick_model(model)
 
-    async def second_opinion(self, about, pictures=(), labels=(), model=None):
+    async def second_opinion(self, about, pictures=(), labels=(), model=None, purpose="second_opinion"):
         """A short critique of a plan or a result by the strongest model there is (stronger()). about: what is to be
         judged, in words. pictures: JPEGs (base64) of the result, named by labels. Returns {"critique", "model", "tokens"};
-        the call is written down as a "second_opinion"."""
+        the call is written down as `purpose`: "second_opinion", or AUTO_OPINION when the studio asked it itself."""
         named = "\n".join("Picture {}: {}".format(n, label) for n, label in enumerate(labels, start=1))
         message = "{}{}".format(about, "\n\nThe pictures, in order:\n" + named if named else "")
         answer = await self.chat([{"role": "system", "content": SECOND_OPINION}, {"role": "user", "content": message}],
                                  {"type": "object", "required": ["critique"], "properties": {"critique": {"type": "string"}}},
-                                 model=await self.stronger(model), images=list(pictures), purpose="second_opinion")
+                                 model=await self.stronger(model), images=list(pictures), purpose=purpose)
         critique = str(answer.get("critique") or "").strip()[:2000]
         if not critique:
             raise AgentError("The second opinion came back empty.")
@@ -1918,6 +1920,98 @@ SAVE_FIRST = ("Nothing of this run is saved yet, and the next message only knows
               "what is attached, what you worked out) with state_write, then finish again.")
 NO_SOUND_EDIT = ("the sound tool only puts an audio file on a video, and there was no video and sound to put together; to "
                  "separate a voice, transcribe or otherwise work on a sound file, make a \"generate\" step with that workflow")
+
+
+# ---------------------------------------------------------------- the creative process (docs/creative-director.md)
+
+BIG_JOB_STEPS = 4   # a plan of more than this many generate steps is a big job (big_job)
+# "a 20-shot ad", "6 scenes", "10 clips": a message that asks for a big job before any plan says so
+SHOTS_ASKED = re.compile(r"\b(\d{1,3})[- ]?(shots?|scenes?|clips?|cuts?)\b", re.IGNORECASE)
+AUTO_OPINION = "second_opinion (auto)"   # the purpose a second opinion the studio asks for itself is written down as
+
+
+def generated(steps):
+    """The steps of a plan that make something with a workflow: the model's ("tool" "generate", or no tool) or the
+    studio's priced ones (settings, and not a sound, an edit, the cut or motion graphics). A shot's variations count once."""
+    found = []
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, dict):
+            continue
+        if "tool" in step or "credits" not in step:
+            if (step.get("tool") or "generate") == "generate":
+                found.append(step)
+        elif step.get("settings") and not any(step.get(k) for k in ("sound", "assemble", "edit", "motion")) \
+                and (step.get("variation") or {}).get("n", 1) == 1:
+            found.append(step)
+    return found
+
+
+def big_job(steps, instruction="", history=(), credits=0):
+    """Whether a plan is a big job, the one place this is decided: more than BIG_JOB_STEPS generate steps, a price above
+    `credits` (the setting creative_big_job_credits; 0: by its steps alone), or a message asking for more shots than
+    that ("a 20-shot ad"; a short follow-up is read with the message before it). A big job gets the brief, the concept,
+    the stills first and the automatic second opinion; a small one never gets a question."""
+    if len(generated(steps)) > BIG_JOB_STEPS:
+        return True
+    total = sum(s["credits"] for s in steps or [] if isinstance(s, dict) and isinstance(s.get("credits"), (int, float))
+                and not isinstance(s.get("credits"), bool))
+    if credits and total > credits:
+        return True
+    said = str(instruction or "")
+    last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
+    if len(said) < 60 and last.get("instruction"):
+        said += "\n" + str(last["instruction"])
+    return any(int(n) > BIG_JOB_STEPS for n, _ in SHOTS_ASKED.findall(said))
+
+
+BRIEF_FIRST = ("This is a big job ({why}), and this conversation has no brief yet (/brief is empty). Before shots, ask ONE "
+               "brief card: \"questions\", at most {most}, each with a \"default\": the audience, the platform and shape, the "
+               "tone, and a reference or must-have (an open brief: 2 to 3 directions as one of them). Plan no steps in that "
+               "answer. If the user's messages already answer these, write them to /brief with state_write instead (in a "
+               "conversation that keeps no memory, a \"Brief:\" line in \"direction\") and finish again with the plan.")
+CONCEPT_MISSING = ("A big job needs its concept: one sentence in \"concept\" (the first sentence of \"thought\" too), stated to "
+                   "the user in one line of \"reply\".")
+STILLS_FIRST = ("A big video job makes its key stills first (one picture per character or scene the shots start on or use), "
+                "for the user to approve before the video shots; the clips follow in the next plan. No approved stills for "
+                "these are in NeuralCore. Plan the stills now, unless the user said to skip them.")
+OPINION_HINT = "A senior creative director reviewed your plan: {critique}\nRevise if it helps; you decide."
+CREATIVE_NOTES = "Before the user sees this plan, the studio's notes on it (each is given once):\n{notes}"
+# words that say the stills are not wanted (English; any other language is the model's to read, and this is a hint only)
+SKIP_STILLS = re.compile(r"\b(skip|no|without|don'?t need)( the| any)? (key )?(stills|pictures|images|frames)\b|\bstraight to (the )?video\b",
+                         re.IGNORECASE)
+
+
+def plan_outline(steps, concept="", brief=None):
+    """A plan in words for a second opinion: the concept, the brief and one line a shot."""
+    lines = ["The concept: {}".format(concept or "(none given)")]
+    if brief:
+        lines.append("The brief: {}".format(json.dumps(brief, ensure_ascii=False)[:600]))
+    for n, step in enumerate(steps if isinstance(steps, list) else [], start=1):
+        if not isinstance(step, dict):
+            continue
+        camera = ", ".join(str(step.get(k)) for k in ("shot_size", "angle", "move") if step.get(k))
+        lines.append("{}. {} ({}{}{}{}): {}".format(
+            n, step.get("name") or "step", step.get("tool") or "generate", ", " + str(step.get("workflow")) if step.get("workflow") else "",
+            "; " + camera if camera else "", "; at " + str(step.get("place")) if step.get("place") else "",
+            " ".join(str(step.get("prompt") or "").split())[:300]))
+    return "Judge this plan before the user approves it.\n" + "\n".join(lines)
+
+
+def stills_wanted(built, book=(), instruction="", history=()):
+    """Whether a big video job should make its key stills first: it has video shots that start on nothing, no picture
+    step comes before them, NeuralCore keeps no picture of a character, a place or a style for them, and the user did not
+    say to skip them. A hint, never a block."""
+    said = " ".join([str(instruction or "")] + [str(t.get("instruction") or "") for t in (history or [])[-3:] if isinstance(t, dict)])
+    if SKIP_STILLS.search(said):
+        return False
+    shots = [s for s in generated(built) if s.get("kind") == "video"]
+    if not shots or any(s.get("start") for s in shots):
+        return False
+    first_video = next(i for i, s in enumerate(built) if s in shots)
+    if any(s.get("kind") == "image" for s in generated(built[:first_video])):
+        return False
+    kept = [e for e in book or [] if e.get("asset") and e.get("kind") == "image" and e.get("type") in ("character", "location", "style")]
+    return not kept
 
 
 def takes_sound(offers):

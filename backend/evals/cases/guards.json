@@ -158,7 +158,8 @@
    "budget"
   ],
   "ask": {
-   "instruction": "ten pictures of a dragon flying over mountains"
+   "instruction": "ten pictures of a dragon flying over mountains",
+   "direction": "Brief: fantasy fans on Instagram; square stills; epic and painterly; the same green dragon in every picture."
   },
   "setup": {
    "credits": 50
@@ -166,7 +167,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
-    "concept": "",
+    "concept": "One green dragon crossing a mountain range from dawn to dusk, ten frames of one journey.",
     "reply": "Ten pictures of the dragon.",
     "steps": [
      {
@@ -260,7 +261,7 @@
       "after": 0
      }
     ],
-    "direction": "",
+    "direction": "Brief: fantasy fans on Instagram; square stills; epic and painterly; the same green dragon in every picture.",
     "question": {
      "text": "",
      "options": []
