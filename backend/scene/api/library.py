@@ -294,6 +294,20 @@ async def media_link(ref: str, request: Request, download: bool = False, user: d
     raise HTTPException(404, "No such item.")
 
 
+NOT_READY = {"Retry-After": "1", "Cache-Control": "no-store"}
+
+
+async def _made_poster(path):
+    """The poster, made once (media.poster: a second request waits for the first). One that can't be read is a 404; one
+    that can't be put in place yet (Windows: its older copy still being sent) is a 503 the browser asks again for."""
+    try:
+        return await media.poster(path)
+    except media.MediaError as error:
+        raise HTTPException(404, str(error))
+    except OSError:
+        raise HTTPException(503, "The thumbnail is being made. Ask again in a moment.", headers=NOT_READY)
+
+
 async def poster_response(request, path):
     """A video's poster. The browser keeps it and only asks whether it has changed, which costs no download."""
     state = request.app.state
@@ -303,18 +317,12 @@ async def poster_response(request, path):
             path = await offload(storage.here, path)
             if not path.is_file():
                 raise HTTPException(404, "The file is missing from storage.")
-            try:
-                poster = await media.poster(path)
-            except media.MediaError as error:
-                raise HTTPException(404, str(error))
+            poster = await _made_poster(path)
             await offload(storage.keep_path, state, poster)
         return storage.signed(state, None, poster)
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
-    try:
-        poster = await media.poster(path)
-    except media.MediaError as error:
-        raise HTTPException(404, str(error))
+    poster = await _made_poster(path)
     webp = media.webp_of(poster)   # the smaller copy, to a browser that takes WebP, once it was made (new results)
     if "image/webp" in request.headers.get("accept", "") and webp.is_file() and webp.stat().st_mtime >= poster.stat().st_mtime:
         poster = webp
@@ -344,11 +352,17 @@ async def get_frame(item_id: int, request: Request, at: float = 0.0, user: dict 
         raise HTTPException(404, "The file is missing from storage.")
     tenth = max(0, min(int(round(at * 10)), 36000))
     target = media.poster_path(path).with_name("{}.{}.jpg".format(path.name, tenth))
-    if not (target.is_file() and target.stat().st_mtime >= path.stat().st_mtime):
-        target.parent.mkdir(exist_ok=True)
-        if not await media.frame_at(path, tenth / 10, target):
-            raise HTTPException(404, "The video has no frame there.")
-        await offload(request.app.state.outputs.keep, target)
+    if not media.fresh(target, path):
+        async with media.making(target):   # made once: the keyframes under a result are asked for together
+            if not media.fresh(target, path):
+                target.parent.mkdir(exist_ok=True)
+                try:
+                    made = await media.frame_at(path, tenth / 10, target)
+                except OSError:
+                    raise HTTPException(503, "The frame is being made. Ask again in a moment.", headers=NOT_READY)
+                if not made:
+                    raise HTTPException(404, "The video has no frame there.")
+                await offload(request.app.state.outputs.keep, target)
     elsewhere = storage.signed(request.app.state, "posters", target)
     if elsewhere:
         return elsewhere
