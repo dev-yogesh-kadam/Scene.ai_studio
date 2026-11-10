@@ -16,6 +16,8 @@ Claude Code's other places (VS Code, `claude --resume`), titled "Studio Â· tab Â
 off in it, and it is compacted, still the same session, when its context is COMPACT full (sessions.py)."""
 
 import asyncio
+import collections
+import contextlib
 import contextvars
 import glob
 import hashlib
@@ -26,6 +28,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 try:   # the Claude Agent SDK: every message of the agent runs in a live session of Claude Code (converse); service() refuses to start without it
@@ -48,8 +51,11 @@ COMPACT = 0.9        # a session is compacted when its context is this full (ses
 EFFORT = contextvars.ContextVar("claude_effort", default="")
 LEVELS = ("low", "medium", "high", "xhigh", "max")
 NO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}   # the owner's own notes of the folder never reach a studio session
-LIMITED = re.compile(r"usage limit|rate.?limit|limit reached|out of (extra )?usage|overloaded|try again later|429|529", re.IGNORECASE)
-SIGNED_OUT = re.compile(r"log ?in|logged out|not signed|authenticat|oauth|invalid api key|401", re.IGNORECASE)
+# What Claude Code says when it did not answer, read by failure(): only where it gives no structured reason (an HTTP
+# status, a rate limit event, the error of an assistant message).
+LIMITED = re.compile(r"usage limit|rate.?limit|limit reached|out of (extra )?usage|overloaded|try again later|\b(429|529)\b", re.IGNORECASE)
+SIGNED_OUT = re.compile(r"\blog ?in\b|logged out|not signed|authenticat|oauth|invalid api key|\b401\b", re.IGNORECASE)
+SIGNED_OUT_SAID = "Claude Code on this machine is not signed in. Run claude in a terminal and type /login."
 
 
 class Busy(Exception):
@@ -62,6 +68,30 @@ class Failed(Exception):
 
 class Lost(Failed):
     """The session a thread goes on with is gone (Claude Code cleaned it up): the conversation starts a new one."""
+
+
+def failure(said="", limits=None, status=None, kind=None, default="Claude could not answer: {}"):
+    """What Claude Code not answering means, as the exception to raise: Busy (a usage limit, or Anthropic overloaded),
+    Lost (the session is gone), or Failed (signed out, or anything else). The one place its words are read.
+    said: what it said (a result's text, an error's message, what it printed); limits: its last rate limit event;
+    status: the HTTP status of the call that failed (a result's api_error_status); kind: the error of an assistant
+    message (the SDK's AssistantMessageError: "rate_limit", "authentication_failed", "billing_error" ...). The
+    structured reasons come first; words are read only without them. default: the message of a Failed nothing here
+    knows, with {} for what was said (quoted, at most 300 characters)."""
+    said = " ".join(str(said or "").split())
+    if kind == "rate_limit" or (limits or {}).get("status") == "rejected" or status in (429, 529):
+        return Busy("Claude is at its usage limit{}".format(resets(limits)))
+    if "no conversation found" in said.lower():
+        return Lost("The conversation's Claude session is gone.")
+    if kind == "authentication_failed" or status == 401:
+        return Failed(SIGNED_OUT_SAID)
+    if kind == "billing_error":
+        return Failed("Claude Code's account could not pay for this message: check its plan and extra usage on claude.ai.")
+    if LIMITED.search(said):
+        return Busy("Claude is at its usage limit{}".format(resets(limits)))
+    if SIGNED_OUT.search(said):
+        return Failed(SIGNED_OUT_SAID)
+    return Failed(default.format(said[:300] or "Claude Code stopped without an answer."))
 
 
 def find(path=""):
@@ -230,18 +260,12 @@ def read(stdout, stderr=""):
     return judged(result, limits, " ".join([str(stderr or "")] + [line for line in str(stdout or "").splitlines() if not line.startswith("{")]))
 
 
-def judged(result, limits, printed=""):
+def judged(result, limits, printed="", kind=None):
     """read() of Claude Code's result event (a dict) and its last rate limit event: raises Busy, Lost or Failed when it
-    did not answer. printed: what else it said, for the error."""
+    did not answer (failure()). printed: what else it said, for the error; kind: the error an assistant message gave."""
     if result is None or result.get("is_error") or result.get("subtype") != "success":
         said = " ".join(str((result or {}).get("result") or "").split()) or " ".join(str(printed or "").split())[-300:]
-        if (limits or {}).get("status") == "rejected" or (result or {}).get("api_error_status") in (429, 529) or LIMITED.search(said):
-            raise Busy("Claude is at its usage limit{}".format(resets(limits)))
-        if "no conversation found" in said.lower():
-            raise Lost("The conversation's Claude session is gone.")
-        if SIGNED_OUT.search(said):
-            raise Failed("Claude Code on this machine is not signed in. Run claude in a terminal and type /login.")
-        raise Failed("Claude could not answer: {}".format(said[:300] or "Claude Code stopped without an answer."))
+        raise failure(said, limits, (result or {}).get("api_error_status"), kind)
     answer = result.get("structured_output")
     usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
     number = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
@@ -261,9 +285,14 @@ def judged(result, limits, printed=""):
 # Agent SDK: a message is answered at once, without starting the program and reading its session anew, and the
 # studio's tools are Claude's own tools (an MCP server inside the studio), which it calls as it goes in one turn.
 # A session no one wrote to for IDLE is closed, and so is the oldest past LIVE; its next message opens it again.
+# A message from outside a tab gets a session of its own (oneoff()): at most ONEOFF_LIVE of those at once, more wait
+# their turn, and they never count against LIVE, so a burst of them never pushes a tab's session out.
 
 IDLE = 15 * 60   # seconds
-LIVE = 6         # live sessions at once: each is a program of its own, holding a few hundred MB of memory
+LIVE = 6         # live sessions of tabs at once: each is a program of its own, holding a few hundred MB of memory
+ONEOFF = "oneoff:"   # the key of a session opened for one message outside a tab (oneoff())
+ONEOFF_LIVE = 2      # such sessions at once; more wait for one to end. Each also takes a place of PARALLEL as it answers.
+WATCH = 1.0      # seconds between looks at a turn that may have gone quiet (_next)
 TOOLS_SERVER = "studio"
 
 
@@ -276,9 +305,43 @@ class _Live:
         self.used = time.monotonic()
         self.tools, self.called, self.context, self.result_chars = {}, [], None, 8000
         self.record, self.compacted = None, []   # record(kind, text, data): what happens in it, for its story (sessions.py)
+        self.users = 0           # messages of converse() using this entry now (holding or waiting for its lock)
+        self.heard = time.monotonic()   # when Claude Code last said something, or a tool of the studio's last ended
+        self.running = 0         # the studio's tools running now for it (Claude Code is quiet while they work)
+        self.seen = []           # the session ids Claude Code named in it (its start, its result), oldest first
+        self.error_kind = None   # the error an assistant message of the turn gave (the SDK's AssistantMessageError)
 
 
 live = {}   # a conversation's key (thread["key"]) -> its _Live
+held = collections.Counter()   # a conversation's key -> messages using it now (holding()): its session is never closed to make room
+_slots_of = {}   # a name -> (the event loop, its Semaphore): see _slots
+
+
+def key_of(thread):
+    """The key of a conversation's live session: its thread's "key", else its session id."""
+    return (thread or {}).get("key") or (thread or {}).get("id") or "default"
+
+
+@contextlib.contextmanager
+def holding(key):
+    """While this runs, the live session of `key` is in use: _tidy() never closes it to make room for another, even
+    between the rounds of one message (a plan sent back to be fixed)."""
+    held[key] += 1
+    try:
+        yield
+    finally:
+        held[key] -= 1
+        if held[key] <= 0:
+            del held[key]
+
+
+def _slots(name, size):
+    """A semaphore of `size` places for the running event loop (each test runs its own loop)."""
+    loop = asyncio.get_running_loop()
+    found = _slots_of.get(name)
+    if found is None or found[0] is not loop:
+        found = _slots_of[name] = (loop, asyncio.Semaphore(size))
+    return found[1]
 
 
 def _handlers(entry, names):
@@ -288,13 +351,18 @@ def _handlers(entry, names):
         async def run(args):
             entry.called.append(name)
             tool = entry.tools.get(name)
-            if tool is None:
-                text = "{} is not on offer for this message.".format(name)
-            else:
-                try:
-                    text = str(await asyncio.get_running_loop().create_task(tool(dict(args or {})), context=entry.context))
-                except (KeyError, ValueError, TypeError):
-                    text = "That call could not be run. Check its fields."
+            entry.running += 1
+            try:
+                if tool is None:
+                    text = "{} is not on offer for this message: use the tools you have now.".format(name)
+                else:
+                    try:
+                        text = str(await asyncio.get_running_loop().create_task(tool(dict(args or {})), context=entry.context))
+                    except (KeyError, ValueError, TypeError):
+                        text = "That call could not be run. Check its fields."
+            finally:
+                entry.running -= 1
+                entry.heard = time.monotonic()
             chars = entry.result_chars(name) if callable(entry.result_chars) else entry.result_chars
             from .agent import fit_result   # agent.py builds on this module: found once both are loaded
             return {"content": [{"type": "text", "text": fit_result(text, chars, name)}]}
@@ -315,32 +383,48 @@ def prompt_file(system):
     return str(path)
 
 
-async def _open(s, settings):
-    """A connected client for one conversation. settings: {"model", "system", "schema", "tools": {name: (about, input
-    schema)}, "handlers", "resume", "max_turns", "web", "effort"}. With "web", Claude Code's web search (WEB_TOOLS) is on
-    too; "effort", how hard it thinks (EFFORT), or empty for the model's default."""
+def _options(s, settings):
+    """The ClaudeAgentOptions of one conversation's client. settings: {"model", "system", "schema", "tools": {name:
+    (about, input schema)}, "handlers", "resume", "max_turns", "web", "effort"}. With "web", Claude Code's web search
+    (WEB_TOOLS) is on too; "effort", how hard it thinks (EFFORT), or empty for the model's default."""
     tools = [sdk.tool(name, about, shape)(settings["handlers"][name]) for name, (about, shape) in settings["tools"].items()]
-    Path(s["home"]).mkdir(parents=True, exist_ok=True)
     web = list(WEB_TOOLS) if settings.get("web") else []
-    options = sdk.ClaudeAgentOptions(
+    return sdk.ClaudeAgentOptions(
         cli_path=s["cli"], model=settings["model"], system_prompt={"type": "file", "path": prompt_file(settings["system"])}, tools=web,
         allowed_tools=["mcp__{}__{}".format(TOOLS_SERVER, name) for name in settings["tools"]] + web,
         mcp_servers={TOOLS_SERVER: sdk.create_sdk_mcp_server(TOOLS_SERVER, tools=tools)} if tools else {},
         strict_mcp_config=True, setting_sources=[], cwd=s["home"], resume=settings["resume"] or None,
         max_turns=settings["max_turns"], output_format={"type": "json_schema", "schema": settings["schema"]},
         settings=session_settings(s), env=dict(NO_MEMORY), effort=settings.get("effort") or None)
-    client = sdk.ClaudeSDKClient(options)
+
+
+async def _open(s, settings):
+    """A connected client for one conversation (settings: see _options)."""
+    Path(s["home"]).mkdir(parents=True, exist_ok=True)
+    client = sdk.ClaudeSDKClient(_options(s, settings))
     await asyncio.wait_for(client.connect(), 60)
     return client
 
 
-async def _close(key):
-    entry = live.pop(key, None)
-    if entry is not None and entry.client is not None:
+async def _shut(entry):
+    """Let go of an entry's running program (its session stays, for the next message to resume)."""
+    client, entry.client = entry.client, None
+    if client is not None:
         try:
-            await asyncio.wait_for(entry.client.disconnect(), 15)
+            await asyncio.wait_for(client.disconnect(), 15)
         except Exception as error:   # it is let go either way
             print("A Claude session did not close cleanly: {}".format(error))
+
+
+async def _close(key, entry=None):
+    """Close a conversation's live session and forget it here (only `entry`, when given, not one opened since)."""
+    found = live.get(key)
+    if found is None or (entry is not None and found is not entry):
+        found = entry
+    else:
+        live.pop(key, None)
+    if found is not None:
+        await _shut(found)
 
 
 async def close_all(starting=""):
@@ -349,15 +433,21 @@ async def close_all(starting=""):
         await _close(key)
 
 
+def _busy(key, entry):
+    return bool(held.get(key)) or entry.users > 0 or entry.lock.locked()
+
+
 async def _tidy():
-    """Close the sessions idle for IDLE, then the ones used longest ago past LIVE (never one that is answering)."""
+    """Close the sessions idle for IDLE, then the tabs' ones used longest ago past LIVE: never one in use (answering,
+    waiting to, or between the rounds of a message), and never a one-off session (oneoff() closes its own)."""
     now = time.monotonic()
     for key, entry in list(live.items()):
-        if now - entry.used > IDLE and not entry.lock.locked():
-            await _close(key)
-    while len(live) > LIVE:
-        idle = [(entry.used, key) for key, entry in live.items() if not entry.lock.locked()]
-        if not idle:
+        if not key.startswith(ONEOFF) and now - entry.used > IDLE and not _busy(key, entry):
+            await _close(key, entry)
+    while True:
+        tabs = [(entry.used, key) for key, entry in live.items() if not key.startswith(ONEOFF)]
+        idle = [(used, key) for used, key in tabs if not _busy(key, live[key])]
+        if len(tabs) <= LIVE or not idle:
             break
         await _close(min(idle)[1])
 
@@ -386,7 +476,21 @@ def _events_of(message):
     return found
 
 
+def _session_named(message):
+    """The session id a message of the stream names: the start of a session (system "init") and the result do."""
+    if isinstance(message, sdk.SystemMessage) and message.subtype == "init":
+        return (message.data or {}).get("session_id")
+    if isinstance(message, sdk.ResultMessage):
+        return message.session_id
+    return None
+
+
 def _told(entry, message):
+    named = _session_named(message)
+    if named and named not in entry.seen:
+        entry.seen.append(named)
+    if isinstance(message, sdk.AssistantMessage) and getattr(message, "error", None):
+        entry.error_kind = message.error
     for kind, text, data in _events_of(message):
         if kind == "compact":
             entry.compacted.append(data)
@@ -399,12 +503,40 @@ def _told(entry, message):
                 print("A Claude session's event was not kept: {}".format(error))
 
 
-async def _turn(entry, text):
-    """One message to the live session; returns (its result as a result event, the last rate limit event)."""
+async def _next(entry, stream, quiet):
+    """The stream's next message. Raises StopAsyncIteration at its end, and Failed when Claude Code has said nothing
+    for `quiet` seconds while none of the studio's tools ran for it (a tool's own time is the tool's: a film operation
+    may take many minutes). quiet 0: waits as long as it takes."""
+    if not quiet:
+        return await stream.__anext__()
+    task = asyncio.ensure_future(stream.__anext__())
+    try:
+        while True:
+            done, _ = await asyncio.wait([task], timeout=WATCH)
+            if done:
+                return task.result()
+            if not entry.running and time.monotonic() - entry.heard > quiet:
+                raise Failed("Claude Code said nothing for {} s, so this message was stopped. Try again; if it happens "
+                             "often, raise claude_timeout in config.json.".format(quiet))
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+async def _turn(entry, text, quiet=0):
+    """One message to the live session; returns (its result as a result event, the last rate limit event). quiet: see
+    _next."""
     result, limits = None, None
     async with gate:
+        entry.heard, entry.error_kind = time.monotonic(), None
         await entry.client.query(text)
-        async for message in entry.client.receive_response():
+        stream = entry.client.receive_response().__aiter__()
+        while True:
+            try:
+                message = await _next(entry, stream, quiet)
+            except StopAsyncIteration:
+                break
+            entry.heard = time.monotonic()
             _told(entry, message)
             if isinstance(message, sdk.RateLimitEvent):
                 info = message.rate_limit_info
@@ -419,58 +551,101 @@ async def _turn(entry, text):
 async def converse(s, model, system, text, schema, thread, tools, about, finish_now, max_turns, result_chars=8000, web=False):
     """One message of a conversation in its live session. Returns (the answer as JSON text, {"prompt", "cached",
     "answer"} tokens, the usage limits or None, the names of the tools it called in order). Raises Busy, Lost or Failed.
-    thread: the conversation's {"key", "id", ...}; its id (the session) and size are kept up to date here.
+    thread: the conversation's {"key", "id", ...}; its id (the session) and size are kept up to date here. A one-off
+    thread (oneoff()) also gets "opened": every session id Claude Code named, so they can be removed however it ends.
     tools: {name: async function(call) -> str}, the studio's tools for this message; about: {name: (what it does,
     its input schema)}, every tool the session offers. A turn that runs out of max_turns is asked finish_now.
     result_chars: how much of a tool's result Claude is given, in characters: a number, or a function of the tool's name
-    (agent.result_chars). web: Claude Code's web search is on in the session (WEB_TOOLS)."""
+    (agent.result_chars). web: Claude Code's web search is on in the session (WEB_TOOLS). A turn in which Claude Code
+    says nothing for the service's timeout (claude_timeout) while no tool runs is stopped (Failed)."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
-    key = thread.get("key") or thread.get("id") or "default"
+    key = key_of(thread)
     effort = EFFORT.get()
     # A session opened with another effort is opened again (going on with the same conversation): it is set as it starts.
     signature = json.dumps([model, system, schema, sorted(about), max_turns, bool(web), effort], sort_keys=True)
     if text.lstrip().startswith("/"):   # a message is never taken for a command of Claude Code's (/compact): command() runs those
         text = "Message:\n" + text
-    await _tidy()
-    entry = live.get(key)
-    if entry is not None and (entry.signature != signature or entry.session != thread.get("id")):
-        await _close(key)   # opened for another prompt, shape or session: opened again, going on with the session
-        entry = None
-    if entry is None:
-        entry = live[key] = _Live(signature)
-    async with entry.lock:
-        entry.tools, entry.called, entry.context, entry.result_chars = tools, [], contextvars.copy_context(), result_chars
-        entry.record, entry.compacted = thread.get("record"), []
+    quiet = int(s.get("timeout") or 0)
+    with holding(key):
+        entry = live.get(key)
+        if entry is None:
+            entry = live[key] = _Live(signature)
+        entry.users += 1
         try:
-            if entry.client is None:
-                entry.client = await _open(s, {"model": model, "system": system, "schema": schema, "tools": about,
-                                               "handlers": _handlers(entry, about), "resume": thread.get("id"), "max_turns": max_turns,
-                                               "web": web, "effort": effort})
-            result, limits = await _turn(entry, text)
-            tokens = None
-            if (result or {}).get("subtype") == "error_max_turns":   # still working when its turns ran out: it answers now
-                tokens = judged(dict(result, subtype="success", is_error=False), limits)["tokens"]
-                result, limits = await _turn(entry, finish_now)
-            got = judged(result, limits)
-        except asyncio.CancelledError:   # the user stopped it: the program goes, the session stays for the next message
-            await asyncio.shield(_close(key))
-            raise
-        except (Busy, Failed):
-            await _close(key)
-            raise
-        except Exception as error:   # the SDK's own errors: the program could not be started, or stopped
-            await _close(key)
-            said = str(error)
-            if "no conversation found" in said.lower():
-                raise Lost("The conversation's Claude session is gone.")
-            raise Failed("Claude Code stopped: {}".format(" ".join(said.split())[:300]))
+            await _tidy()
+            async with entry.lock:
+                if key not in live:   # let go while this message waited (a deleted conversation): it is this one's again
+                    live[key] = entry
+                if entry.client is not None and (entry.signature != signature or entry.session != thread.get("id")):
+                    await _shut(entry)   # opened for another prompt, shape or session: opened again, going on with the session
+                entry.signature = signature
+                entry.tools, entry.called, entry.context, entry.result_chars = tools, [], contextvars.copy_context(), result_chars
+                entry.record, entry.compacted, entry.seen = thread.get("record"), [], []
+                try:
+                    if entry.client is None:
+                        entry.session = thread.get("id")
+                        entry.client = await _open(s, {"model": model, "system": system, "schema": schema, "tools": about,
+                                                       "handlers": _handlers(entry, about), "resume": thread.get("id"),
+                                                       "max_turns": max_turns, "web": web, "effort": effort})
+                    result, limits = await _turn(entry, text, quiet)
+                    tokens = None
+                    if (result or {}).get("subtype") == "error_max_turns":   # still working when its turns ran out: it answers now
+                        tokens = judged(dict(result, subtype="success", is_error=False), limits)["tokens"]
+                        result, limits = await _turn(entry, finish_now, quiet)
+                    got = judged(result, limits, kind=entry.error_kind)
+                except asyncio.CancelledError:   # the user stopped it: the program goes, the session stays for the next message
+                    await asyncio.shield(_let_go(key, entry))
+                    raise
+                except (Busy, Failed):
+                    await _let_go(key, entry)
+                    raise
+                except Exception as error:   # the SDK's own errors: the program could not be started, or stopped
+                    await _let_go(key, entry)
+                    if sdk is not None and isinstance(error, getattr(sdk, "CLINotFoundError", ())):
+                        raise Failed("Claude Code can't be started ({}). Set claude_path in config.json.".format(error)) from error
+                    raise failure(str(error), kind=entry.error_kind, default="Claude Code stopped: {}") from error
+                finally:
+                    entry.used = time.monotonic()
+                    if key.startswith(ONEOFF):
+                        thread["opened"] = list(dict.fromkeys([*(thread.get("opened") or []), *entry.seen]))
+                entry.session = got["session"] or thread.get("id")
         finally:
-            entry.used = time.monotonic()
-        entry.session = got["session"] or thread.get("id")
+            entry.users -= 1
     thread.update(id=entry.session, size=got["size"], compacted=len(entry.compacted) + (thread.get("compacted") or 0))
     total = {k: got["tokens"][k] + (tokens or {}).get(k, 0) for k in got["tokens"]}
     return got["answer"], total, got["limits"], list(entry.called)
+
+
+async def _let_go(key, entry):
+    """A message failed or was stopped: its program goes. The entry goes too, unless another message waits for it."""
+    if entry.users <= 1 and live.get(key) is entry:
+        live.pop(key, None)
+    await _shut(entry)
+
+
+@contextlib.asynccontextmanager
+async def oneoff(s):
+    """A thread for one message outside a tab: a session of its own, opened by its first converse(), then closed and
+    its files removed (forget) when the message ends, however it ends: answered, failed, stopped or timed out. At most
+    ONEOFF_LIVE are open at once; more wait their turn here. They never count against LIVE: a burst of them never
+    closes a tab's session."""
+    thread = {"key": ONEOFF + uuid.uuid4().hex, "id": None, "opened": []}
+    async with _slots("oneoff", ONEOFF_LIVE):
+        try:
+            yield thread
+        finally:
+            await asyncio.shield(_discard(s, thread))
+
+
+async def _discard(s, thread):
+    await _close(thread["key"])
+    for session in dict.fromkeys([thread.get("id"), *(thread.get("opened") or [])]):
+        if session:
+            try:
+                forget(s, session)
+            except OSError as error:   # a file in use stays: nothing reads it again
+                print("A one-off Claude session's file was not removed: {}".format(error))
 
 
 async def command(s, thread, text):
@@ -479,20 +654,33 @@ async def command(s, thread, text):
     compaction (pre_tokens, post_tokens) or None, "session": its id}."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
-    key = thread.get("key") or thread.get("id") or "default"
+    key, name = key_of(thread), text.split()[0]
     entry = live.get(key)
     if entry is not None and entry.client is not None and entry.session == thread.get("id"):
-        async with entry.lock:
-            entry.record, entry.compacted = thread.get("record"), []
+        with holding(key):
+            entry.users += 1
             try:
-                await _turn(entry, text)
-            except Exception as error:
-                await _close(key)
-                raise Failed("Claude Code could not do {}: {}".format(text.split()[0], " ".join(str(error).split())[:300]))
+                async with entry.lock:
+                    if entry.client is not None and entry.session == thread.get("id"):   # still so once its turn came
+                        entry.record, entry.compacted, entry.seen = thread.get("record"), [], []
+                        try:
+                            result, limits = await _turn(entry, text, int(s.get("timeout") or 0))
+                            if result is not None and (result.get("is_error") or result.get("subtype") != "success"):
+                                said = " ".join(str(result.get("result") or "").split())
+                                raise failure(said, limits, result.get("api_error_status"), entry.error_kind,
+                                              default="Claude Code could not do " + name + ": {}")
+                        except (Busy, Failed):
+                            await _let_go(key, entry)
+                            raise
+                        except Exception as error:
+                            await _let_go(key, entry)
+                            raise failure(str(error), kind=entry.error_kind, default="Claude Code could not do " + name + ": {}") from error
+                        finally:
+                            entry.used = time.monotonic()
+                        done = entry.compacted[-1] if entry.compacted else None
+                        return {"compacted": done, "session": entry.session}
             finally:
-                entry.used = time.monotonic()
-            done = entry.compacted[-1] if entry.compacted else None
-        return {"compacted": done, "session": entry.session}
+                entry.users -= 1
     if not thread.get("id"):
         raise Failed("This conversation has no Claude session yet.")
     args = [s["cli"], "-p", text, "--resume", thread["id"], "--output-format", "stream-json", "--verbose", "--tools", "",
@@ -515,10 +703,8 @@ async def command(s, thread, text):
         elif event.get("type") == "result":
             session = event.get("session_id") or session
             if event.get("is_error"):
-                said = " ".join(str(event.get("result") or "").split())
-                if "no conversation found" in said.lower():
-                    raise Lost("The conversation's Claude session is gone.")
-                raise Failed("Claude Code could not do {}: {}".format(text.split()[0], said[:300]))
+                raise failure(event.get("result"), None, event.get("api_error_status"),
+                              default="Claude Code could not do " + name + ": {}")
     return {"compacted": done, "session": session}
 
 

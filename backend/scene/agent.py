@@ -9,7 +9,6 @@ import json
 import math
 import re
 import time
-import uuid
 
 from . import agent_tools, camera, claude, kit, prompters, sequence
 from .db import offload
@@ -1169,17 +1168,15 @@ class Agent:
         s, name = self._service_of(model)
         if s is None:
             raise AgentError("The agent has no Claude to work with: Claude Code is not installed and signed in on the studio's PC.")
-        # A message with no conversation (no agent tab) gets a session of its own, closed and forgotten once answered.
-        oneoff = thread is None
-        if oneoff:
-            thread = {"key": "oneoff:" + uuid.uuid4().hex, "id": None}
-        try:
+        # A message with no conversation (no agent tab) gets a session of its own, closed and forgotten once it ends,
+        # answered or not (claude.oneoff). A tab's session is held for the whole message: never closed to make room.
+        if thread is None:
+            async with claude.oneoff(s) as thread:
+                return await self._ask_claude_live(s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread,
+                                                   web, reply_chars)
+        with claude.holding(claude.key_of(thread)):
             return await self._ask_claude_live(s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web,
                                                reply_chars)
-        finally:
-            if oneoff:
-                await claude._close(thread["key"])
-                claude.forget(s, thread.get("id"))
 
     async def _ask_claude_live(self, s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web=False,
                                reply_chars=REPLY_CHARS):
