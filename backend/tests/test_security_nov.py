@@ -81,3 +81,50 @@ def test_an_agent_tool_can_ask_whether_its_user_is_over_the_limit(client):
     answers = asyncio.run(ask(1, most + 1))
     assert all(answers[:-1]) and answers[-1] is False
     assert asyncio.run(ask(2, 1)) == [True]
+
+
+# ---------------------------------------------------------------- the admin console
+
+def call(app, path, port, host):
+    """One request to `app` as it arrives on a socket listening on `port`, whatever its Host header says."""
+    answer = {}
+
+    async def run():
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET", "scheme": "http",
+                 "path": path, "raw_path": path.encode(), "query_string": b"", "root_path": "",
+                 "headers": [(b"host", host.encode())], "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", port)}
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                answer["status"] = message["status"]
+            elif message["type"] == "http.response.body":
+                answer["body"] = answer.get("body", b"") + message.get("body", b"")
+        await app(scope, receive, send)
+    import asyncio
+    asyncio.run(run())
+    return answer
+
+
+def test_the_admin_console_is_never_on_the_studios_port(client):
+    """The tunnel reaches the studio's port only. Whatever Host a visitor sends through it, no console route, page or
+    script answers there; the console listens on this machine alone unless console_host says otherwise."""
+    from scene.main import Doors, create_console
+    assert Settings().console_host == "127.0.0.1" and Settings().console_port != Settings().port
+    settings = client.app.state.settings
+    doors = Doors(client.app)
+    for host in ("developmenttestinghere.in", "127.0.0.1:{}".format(settings.console_port), "localhost:{}".format(settings.console_port)):
+        for path in ("/api/admin/users", "/api/console/me", "/console.html", "/_app/console-XyZ789.js"):
+            assert call(doors, path, settings.port, host)["status"] == 404, (host, path)
+    # On the console's own port it answers (signed out: 401).
+    assert call(doors, "/api/admin/users", settings.console_port, "127.0.0.1")["status"] == 401
+    # The console can't share the studio's port.
+    import pytest
+    same = SimpleNamespace(state=SimpleNamespace(settings=Settings(port=8080, console_port=8080)))
+    with pytest.raises(ValueError):
+        create_console(same)
