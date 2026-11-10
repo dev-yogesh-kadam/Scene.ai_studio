@@ -21,6 +21,32 @@ def quick_hashes(monkeypatch):
     monkeypatch.setattr(security, "SCRYPT", {"n": 2 ** 10, "r": 8, "p": 1, "dklen": 32})
 
 
+from scene import claude as _claude  # noqa: E402
+
+# What claude.py keeps between calls, as it is when no test has run: each test starts from it, and it is put back after
+# each test, so one file's tests never meet another's (a test that swaps the live loop or the program's runner, a live
+# session, a semaphore made in another test's event loop). Run in either order, test_claude_sdk.py and test_claude.py
+# must both pass (test_harness.py checks it).
+_CLAUDE_FUNCTIONS = {name: getattr(_claude, name) for name in ("converse", "ask", "_run", "_open", "forget", "find", "sdk")}
+
+
+def _claude_fresh():
+    for name, value in _CLAUDE_FUNCTIONS.items():
+        if getattr(_claude, name) is not value:
+            setattr(_claude, name, value)
+    _claude.live.clear()
+    _claude.held.clear()
+    _claude._slots_of.clear()
+    _claude.gate = None   # made again inside the next test's own event loop
+
+
+@pytest.fixture(autouse=True)
+def fresh_claude():
+    _claude_fresh()
+    yield
+    _claude_fresh()
+
+
 @pytest.fixture(autouse=True)
 def secret_key(monkeypatch):
     """A secret key of the test's own (vault.py), so no test writes secret.key into the project."""
@@ -35,6 +61,36 @@ POSTGRES = os.environ.get("SCENE_TEST_DATABASE_URL", "")
 if not POSTGRES:
     raise pytest.UsageError("The tests run on PostgreSQL: set SCENE_TEST_DATABASE_URL to a database they may empty, "
                             "postgresql://scene_test:<password>@localhost:5432/scene_test (docs/database.md).")
+
+
+def _database_name(url):
+    from urllib.parse import urlsplit
+    return urlsplit(url).path.lstrip("/").split("?")[0]
+
+
+# Never the studio's own database: the tests empty every table they find (the URL itself is never printed).
+if _database_name(POSTGRES) in ("", "scene"):
+    raise pytest.UsageError("SCENE_TEST_DATABASE_URL names the studio's live database (or none): the tests empty every "
+                            "table. Point it at a test database, scene_test_<name> (docs/database.md).")
+# One run at a time on a database: two runs on one database drop and empty each other's tables in the middle of a
+# test (the schema made again under a running test_schema, a job's rows gone). A lock of PostgreSQL's own, held by a
+# connection kept open for the whole run, so it goes with the process however that ends.
+RUN_LOCK = 0x5CE7E57   # pg_advisory_lock key: "the test run on this database"
+_run_lock = []
+
+
+def hold_the_database():
+    import psycopg
+    if _run_lock:
+        return
+    conn = psycopg.connect(POSTGRES, autocommit=True)
+    if not conn.execute("SELECT pg_try_advisory_lock(%s)", (RUN_LOCK,)).fetchone()[0]:
+        conn.close()
+        pytest.exit("Another test run is using the database {} right now: wait for it to end, or give this run a "
+                    "database of its own (SCENE_TEST_DATABASE_URL).".format(_database_name(POSTGRES)), returncode=4)
+    _run_lock.append(conn)
+
+
 _migrated = []
 # A database call that would block the app's event loop (db.Database.loop_guard): "raise" fails the test. "report"
 # lets it pass and writes each place it happened (db.blocking_place) once to SCENE_TEST_LOOP_REPORT.
@@ -56,6 +112,7 @@ def empty_postgres():
     """The test database at the newest migration, with no rows: made once per run, then emptied for each test."""
     import psycopg
     from scene import schema
+    hold_the_database()
     if not _migrated:
         with psycopg.connect(POSTGRES, autocommit=True) as conn:
             conn.execute("DROP SCHEMA public CASCADE")
