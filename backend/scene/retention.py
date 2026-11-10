@@ -3,6 +3,9 @@ events (claude_events) and the calls to the agent's models (agent_calls) grow wi
 ones older than that are written to compressed files in the backup folder, archive/<table>_<YYYY-MM>.jsonl.gz (one JSON
 object per row, the month of its time), and only then deleted. The audit log is never touched: it is sealed (audit.py).
 
+A crash between writing a month file and deleting its rows archives those rows again the next time: `read` gives
+each row once (by its id), so an archive is never read with a row twice.
+
 Sync: run on a database thread (backup.run_forever does, once a day; it archives at most once a month)."""
 
 import gzip
@@ -52,6 +55,17 @@ def archive(db, folder, days, now=None):
 
 
 def read(path):
-    """The rows of one archive file (for looking at them again)."""
+    """The rows of one archive file (for looking at them again), each once: a row archived twice (a crash between the
+    file and the delete) is given the first time it was written."""
+    rows, seen = [], set()
     with gzip.open(path, "rt", encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("id") is not None:
+                if row["id"] in seen:
+                    continue
+                seen.add(row["id"])
+            rows.append(row)
+    return rows

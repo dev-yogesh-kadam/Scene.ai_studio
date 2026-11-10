@@ -209,7 +209,7 @@ class Watcher:
         """Note what the render PC changed in the workflow files, and fetch its node list again when it answers and the
         one in hand is old: the console's Workflows section compares the workflows with it."""
         await offload(versions.look, self.state)
-        await offload(self.state.traces.prune)
+        await offload(self.state.traces.prune, None, getattr(self.state.settings, "retention_days", 0))
         checked = await offload(backup.last_check, self.state.db)
         if self.state.settings.backup_keep > 0 and (not checked or checked["when"] < time.time() - DAY):   # once a day
             await asyncio.to_thread(backup.check, self.state.db, self.state.backup_dir)

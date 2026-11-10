@@ -75,10 +75,12 @@ class Recorder:
         except (OSError, ValueError, EOFError):
             return None
 
-    def prune(self, now=None):
-        """Forget rows older than a month and words older than a week."""
+    def prune(self, now=None, retention_days=0):
+        """Forget rows older than a month and words older than a week. With retention_days (config.json, retention.py)
+        set, the rows are left to it: it archives them before it deletes them, monthly, so none is deleted unarchived."""
         now = now or time.time()
-        self.db.run("DELETE FROM agent_calls WHERE started < ?", (now - KEEP_CALLS,))
+        if not retention_days or retention_days <= 0:
+            self.db.run("DELETE FROM agent_calls WHERE started < ?", (now - KEEP_CALLS,))
         if self.folder.is_dir():
             for path in self.folder.glob("*.json.gz"):
                 try:
