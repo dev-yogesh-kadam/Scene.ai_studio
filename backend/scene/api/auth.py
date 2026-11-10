@@ -1,6 +1,7 @@
 """Sign up, sign in (with an optional second step), sign out, password and two-step sign-in settings."""
 
 import asyncio
+import hmac
 import json
 import re
 import threading
@@ -46,7 +47,17 @@ def password_problem(password):
 
 
 def signup_open(state):
+    """Whether strangers may make accounts: the admin console's Settings when an admin has set it there, else
+    allow_signup (closed by default, config.py)."""
     return state.db.setting("allow_signup", "1" if state.settings.allow_signup else "0") == "1"
+
+
+def invite_fits(state, body):
+    """Whether the sign-up carries the invite code, when the studio asks for one (signup_invite). Compared in constant
+    time, so the answer's timing says nothing about how much of a guess was right."""
+    wanted = state.settings.signup_invite.strip()
+    given = str(body.get("invite") or "").strip()
+    return not wanted or hmac.compare_digest(given.encode("utf-8"), wanted.encode("utf-8"))
 
 
 # Headers a proxy in front of the studio adds. A request carrying any of them came from elsewhere, through the proxy,
@@ -102,7 +113,10 @@ async def auth_state(request: Request):
     """What the sign-in page needs to know before anyone is signed in."""
     state = request.app.state
     first_run = await state.db.aone("SELECT 1 FROM users LIMIT 1") is None
-    return {"first_run": first_run, "signup_open": first_run or await offload(signup_open, state)}
+    found = {"first_run": first_run, "signup_open": first_run or await offload(signup_open, state)}
+    if not first_run and found["signup_open"] and state.settings.signup_invite.strip():
+        found["invite_required"] = True   # the sign-up form asks for the invite code (sent as "invite")
+    return found
 
 
 @router.post("/register", dependencies=[limited("register", 10, 3600, by="address")])
@@ -114,6 +128,9 @@ async def register(body: dict, request: Request, response: Response):
     first_run = await state.db.aone("SELECT 1 FROM users LIMIT 1") is None
     if not first_run and not await offload(signup_open, state):
         raise HTTPException(403, "New accounts are closed. Ask an admin for access.")
+    if not first_run and not invite_fits(state, body):
+        await offload(audit.record, request, None, "Refused a new account", email[:254], "no or wrong invite code")
+        raise HTTPException(403, "New accounts need an invite code. Ask an admin for one.")
     # The first account is the admin. On an installation that is already on the internet, a stranger must not be the
     # one to make it.
     if first_run and state.settings.first_account_local and not on_this_machine(request):
@@ -271,7 +288,7 @@ async def change_password(body: dict, request: Request, user: dict = Depends(cur
         raise HTTPException(400, password_problem(new))
     await request.app.state.db.arun("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(new), user["id"]))
     await offload(_sign_out_others, request, user)
-    audit.record(request, user, "Changed password", user["email"])
+    await offload(audit.record, request, user, "Changed password", user["email"])
     return {"ok": True}
 
 
@@ -329,5 +346,5 @@ async def mfa_disable(body: dict, request: Request, user: dict = Depends(current
     if not await offload(_second_step, db, dict(row, id=user["id"]), str(body.get("code") or "").strip()):
         raise HTTPException(400, "That code is not right. Use the newest code from the app, or a recovery code.")
     await db.arun("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user["id"],))
-    audit.record(request, user, "Turned off two-step sign-in", user["email"])
+    await offload(audit.record, request, user, "Turned off two-step sign-in", user["email"])
     return {"ok": True}

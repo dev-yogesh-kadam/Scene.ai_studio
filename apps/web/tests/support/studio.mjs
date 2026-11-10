@@ -47,6 +47,9 @@ export async function startStudio({
         database_owner_url: '',
         backup_keep: 0,
         signups_per_day: 0,
+        // Sign-up is closed and gives no credits on a fresh installation; the tests make several accounts with credits.
+        allow_signup: true,
+        signup_credits: 1000,
       },
       null,
       2,

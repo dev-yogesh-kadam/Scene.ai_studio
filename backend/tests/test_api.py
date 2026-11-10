@@ -465,7 +465,7 @@ def test_a_plain_prompt_becomes_a_caption_just_before_it_renders_with_the_others
         "9": {"class_type": "SaveImage", "inputs": {"images": ["1", 0], "filename_prefix": "t"}}}))
     (folder / "captioned.studio.json").write_text(json.dumps({"caption": {"template": "5:value", "ratio": "3:shape"}, "hide": ["5:value"]}))
     empty_postgres()
-    app = create_app(Settings(database_url=POSTGRES, comfy_url="http://127.0.0.1:9", first_account_local=False, claude_models="off", storage_dir=str(tmp_path / "storage"),
+    app = create_app(Settings(database_url=POSTGRES, comfy_url="http://127.0.0.1:9", first_account_local=False, signup_credits=1000, claude_models="off", storage_dir=str(tmp_path / "storage"),
                               workflows_dir=str(tmp_path / "workflows")))
     asked = []
 

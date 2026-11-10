@@ -19,9 +19,24 @@ storage
 docs
 content
 motion/.fonts
-*.mp4
-*.mov
-*.zip
 backend/tests
 workflows/archive
 scene.env
+# A pattern without **/ matches only at the top of the context: these are excluded at any depth, so a settings file,
+# a key, a database copy or a clip left in a subfolder never reaches an image layer either.
+**/config.json
+**/secret.key
+**/scene.env
+**/.env
+**/*.env
+**/*.pem
+**/*.key
+**/*.dump
+**/backups
+**/storage
+**/*.mp4
+**/*.mov
+**/*.zip
+.github
+.claude
+**/.claude

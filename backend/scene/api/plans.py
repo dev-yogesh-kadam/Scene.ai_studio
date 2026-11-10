@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from .. import preferences
-from .deps import current_user
+from .deps import costly, current_user
 from ..db import offload
 
 router = APIRouter(prefix="/api")
@@ -16,7 +16,7 @@ def _runner(request: Request):
     return request.app.state.plans
 
 
-@router.post("/agent/plans")
+@router.post("/agent/plans", dependencies=[costly("plan")])
 async def create_plan(body: dict, request: Request, user: dict = Depends(current_user)):
     """{steps, name?, tab?, project_id?}: the steps as the agent's plan gives them. Priced; nothing is charged."""
     return await _runner(request).create(user, body)
@@ -33,7 +33,7 @@ async def get_plan(plan_id: int, request: Request, user: dict = Depends(current_
     return runner.shown(await offload(runner.get, user, plan_id))
 
 
-@router.post("/agent/plans/{plan_id}/approve")
+@router.post("/agent/plans/{plan_id}/approve", dependencies=[costly("plan")])
 async def approve_plan(plan_id: int, request: Request, body: dict | None = Body(None), user: dict = Depends(current_user)):
     """Reserve the plan's price and run it. Approving twice charges once. {"auto": true}: the page approves it by itself,
     without the user's Approve, which their permission (GET /api/agent/preferences) must allow for every step's kind."""
@@ -50,7 +50,7 @@ async def stop_plan(plan_id: int, request: Request, user: dict = Depends(current
     return await offload(_runner(request).stop, user, plan_id)
 
 
-@router.post("/agent/plans/{plan_id}/resume")
+@router.post("/agent/plans/{plan_id}/resume", dependencies=[costly("plan")])
 async def resume_plan(plan_id: int, request: Request, user: dict = Depends(current_user)):
     """A stopped or failed plan goes on: what is left is priced, reserved and run."""
     return await _runner(request).approve(user, plan_id, again=True)

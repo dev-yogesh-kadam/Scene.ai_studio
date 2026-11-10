@@ -176,7 +176,7 @@ def client(tmp_path):
     # Claude Code is never run by a test: the real one is switched off, and the agent is given a Claude of its own
     # whose program does not exist (a test that reaches it fails), as faked by each test (fake_claude, hosted, model).
     settings = Settings(database_url=POSTGRES, database_loop_guard=LOOP_GUARD, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
-                        storage_dir=str(tmp_path), signup_credits=500, first_account_local=False,
+                        storage_dir=str(tmp_path), allow_signup=True, signup_credits=500, first_account_local=False,
                         workflows_dir=str(ROOT / "workflows"), web_dist_dir=str(built(tmp_path / "web")))
     from scene import claude
     with TestClient(create_app(settings)) as test_client:

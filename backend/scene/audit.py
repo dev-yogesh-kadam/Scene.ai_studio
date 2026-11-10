@@ -8,10 +8,14 @@ who rewrites the whole database, but nothing can be quietly edited or removed.
 
 import hashlib
 import json
+import threading
 import time
 
 from .security import client_address
 
+# One entry written at a time: two written together would both be sealed onto the same entry before them, and the chain
+# would then read as broken although nothing was changed. (One app process; several would need a lock in the database.)
+WRITING = threading.Lock()
 FIELDS = ("actor_id", "actor_name", "actor_email", "action", "target", "detail", "ip", "created")
 
 
@@ -26,12 +30,13 @@ def record(request, actor, action, target="", detail=""):
     row = {"actor_id": actor and actor["id"], "actor_name": actor["name"] if actor else "", "actor_email": actor["email"] if actor else "",
            "action": action, "target": str(target)[:200], "detail": str(detail)[:500], "ip": client_address(request),
            "created": time.time()}
-    last = db.one("SELECT seal FROM audit_log ORDER BY id DESC LIMIT 1")
-    seal = _seal(last["seal"] if last else "", row)
-    db.run("INSERT INTO audit_log ({}, seal) VALUES ({}, ?)".format(", ".join(FIELDS), ", ".join("?" * len(FIELDS))),
-           (*row.values(), seal))
-    head = json.loads(db.setting("audit_head", "") or "{}")
-    db.set_setting("audit_head", json.dumps({"seal": seal, "count": int(head.get("count") or 0) + 1}))
+    with WRITING:
+        last = db.one("SELECT seal FROM audit_log ORDER BY id DESC LIMIT 1")
+        seal = _seal(last["seal"] if last else "", row)
+        db.run("INSERT INTO audit_log ({}, seal) VALUES ({}, ?)".format(", ".join(FIELDS), ", ".join("?" * len(FIELDS))),
+               (*row.values(), seal))
+        head = json.loads(db.setting("audit_head", "") or "{}")
+        db.set_setting("audit_head", json.dumps({"seal": seal, "count": int(head.get("count") or 0) + 1}))
 
 
 def verify(db):

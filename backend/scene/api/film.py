@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import core, detect, edits, ffjob, film, montage, motion, pages, reframe, runs, sharing, storage
 from ..media import FPS, MediaError
-from .deps import current_user
+from .deps import costly, current_user
 from .workspace import _project_id
 from ..db import offload
 
@@ -52,7 +52,7 @@ def _text(value, most):
     return " ".join(str(value or "").split())[:most]
 
 
-@router.post("/edit/film")
+@router.post("/edit/film", dependencies=[costly("render")])
 async def film_edit(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue one film operation. Costs no credits: it needs no GPU. Returns {"job", "name"}."""
     return await offload(queue, request, user, body)
