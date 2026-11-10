@@ -384,8 +384,11 @@ def main(argv=None):
             print("Langfuse: LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not all set; nothing sent.")
         else:
             name = args.run_name or "{}-{}".format("live" if args.live else "replay", time.strftime("%Y%m%d-%H%M%S"))
-            sent = asyncio.run(langfuse_run.send(target, name, cases, results))
-            print("Langfuse: dataset run {!r}, {} results sent.".format(name, sent))
+            try:
+                sent = asyncio.run(langfuse_run.send(target, name, cases, results))
+                print("Langfuse: dataset run {!r}, {} results sent.".format(name, sent))
+            except (LookupError, PermissionError) as refused:   # no Langfuse, or its words are off: the run's results stand
+                print("Langfuse: nothing sent ({}).".format(refused))
     return 0 if ok else 1
 
 

@@ -104,7 +104,7 @@ def test_a_run_reaches_langfuse_only_with_its_three_settings_and_as_a_dataset_ru
 
     async def go():
         async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
-            return await langfuse_run.send(target, "replay-test", cases, results, http=http)
+            return await langfuse_run._send_here(target, "replay-test", cases, results, http=http)
     assert asyncio.run(go()) == 2
     paths = [p for _, p, _ in seen]
     assert paths[:3] == ["/api/public/v2/datasets/" + langfuse_run.DATASET, "/api/public/v2/datasets", "/api/public/dataset-items"]
@@ -114,3 +114,21 @@ def test_a_run_reaches_langfuse_only_with_its_three_settings_and_as_a_dataset_ru
     assert sorted(s["body"]["value"] for s in scores) == [0, 1] and "2 steps" in next(s["body"]["comment"] for s in scores if s["body"]["value"] == 0)
     assert all(request.startswith("/api/public/") for request in paths)   # traces went the studio's way (OTEL), too
     assert "/api/public/otel/v1/traces" in paths and paths.index("/api/public/otel/v1/traces") < paths.index("/api/public/dataset-run-items")
+
+
+def test_with_the_studios_dataset_run_the_run_goes_through_it(monkeypatch):
+    """Once langfuse_trace has dataset_run (the Langfuse area's), an eval run is sent by it: one item and one result per case."""
+    import asyncio
+    from scene import langfuse_trace
+    called = {}
+
+    async def dataset_run(name, items, results, run_name=None, *, description="", metadata=None, target=None, db=None, http=None):
+        called.update(name=name, items=items, results=results, run=run_name, target=target)
+        return {"traces": {i["key"]: "t" for i in items}}
+    monkeypatch.setattr(langfuse_trace, "dataset_run", dataset_run, raising=False)
+    cases = [c for c in run.load() if c["id"] == "en-one-picture"]
+    results = [{"id": "en-one-picture", "lang": "en", "ok": False, "checks": [("steps", False, "2 steps")], "seconds": 1.5, "plan": {"total": 40}}]
+    assert asyncio.run(langfuse_run.send(("http://lf.test", "Basic x"), "replay-1", cases, results)) == 1
+    assert called["name"] == langfuse_run.DATASET and called["run"] == "replay-1" and called["target"] == ("http://lf.test", "Basic x")
+    assert called["items"][0]["key"] == called["results"][0]["key"] == "scene-eval-en-one-picture"
+    assert called["results"][0]["scores"] == {"eval_passed": 0} and "2 steps" in called["results"][0]["comments"]["eval_passed"]

@@ -38,8 +38,36 @@ class _Sender(langfuse_trace.Sender):
         return self._target
 
 
+def as_items(cases, results):
+    """The run as langfuse_trace.dataset_run takes it: an item per case run, a result per item, in order."""
+    by_id = {c["id"]: c for c in cases}
+    items, done = [], []
+    for result in results:
+        case = by_id.get(result["id"]) or {}
+        items.append({"key": "scene-eval-" + result["id"], "input": case.get("ask"), "expected": case.get("expect"),
+                      "metadata": {"lang": case.get("lang"), "tags": case.get("tags") or [], "about": case.get("about") or "",
+                                   "file": case.get("_file") or ""}})
+        failed = ["{}: {}".format(n, f) for n, ok, f in result["checks"] if not ok]
+        done.append({"key": "scene-eval-" + result["id"], "output": result.get("plan"), "seconds": result.get("seconds") or 0,
+                     "scores": {"eval_passed": 1 if result["ok"] else 0}, "comments": {"eval_passed": "; ".join(failed)[:2000]},
+                     "model": result.get("model") or ""})
+    return items, done
+
+
 async def send(target, run_name, cases, results, http=None):
-    """Send a run's results. Returns how many results were linked to the run. http: a client to use (a test's)."""
+    """Send a run's results. Returns how many results were linked to the run. http: a client to use (a test's).
+    With the studio's own dataset functions (langfuse_trace.dataset_run, from the Langfuse area) they send it; on a
+    tree without them, the same run is sent here."""
+    studio_run = getattr(langfuse_trace, "dataset_run", None)
+    if studio_run is not None:
+        items, done = as_items(cases, results)
+        sent = await studio_run(DATASET, items, done, run_name, description="The studio agent's eval cases (backend/evals/cases).",
+                                metadata={"cases": len(results)}, target=target, http=http)
+        return len((sent or {}).get("traces") or done)
+    return await _send_here(target, run_name, cases, results, http)
+
+
+async def _send_here(target, run_name, cases, results, http=None):
     url, auth = target
     headers = {"Authorization": auth}
     by_id = {c["id"]: c for c in cases}
