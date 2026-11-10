@@ -2,8 +2,8 @@
 nothing runs until Approve and nothing costs more than was approved; the spend limits and the studio's stop; the
 agent's limits; outside text framed as data; an answer that can't be read.
 
-Each test tries to break one rule. A test marked xfail(strict) needs a one-line hook in a file another area owns
-(the reason names it): it fails until the hook is wired, and then the lead takes the mark off."""
+Each test tries to break one rule. @hook(...) names the one-line hook, in a file another area owns, that the rule
+depends on: wired on 10 November 2026, so the tests run as plain tests and the names stay as a note of where it lives."""
 
 import asyncio
 import json
@@ -23,8 +23,8 @@ UPSCALE = "upscaler/utility_seedvr2_3b_int8_upscale_video"   # priced by the len
 DURATION = "102:value"   # the duration control of JOB's workflow (video/h3_all_in_one), "3 to 15" seconds
 
 
-def hook(why):
-    return pytest.mark.xfail(strict=True, reason="needs hook-in: " + why)
+def hook(where):
+    return lambda test: test
 
 
 def told(seen):
@@ -109,13 +109,12 @@ def test_a_plan_step_never_costs_more_than_was_approved(studio, monkeypatch):
     sign_in(studio, BOB)
     console(studio, USER).put("/api/admin/settings", json={"daily_cap": 100})   # Bob may spend 100 credits a day
     plan = underpriced_plan(studio, monkeypatch, BOB)
-    assert plan["total"] == 20
+    # priced by the length of the video it is made from (300 s, as measured), not the 1 s the plan says: before
+    # 10 November it was approved at 20 credits and its step took 6,000 (5,980 from the balance, past the daily limit)
+    assert plan["total"] == 6000
     before = balance(studio)
-    assert studio.post("/api/agent/plans/{}/approve".format(plan["id"])).json()["state"] in ("running", "failed")
-    ended = wait_for(studio, plan["id"])
-    # today: the step is made, 6,000 credits are taken (20 from the reservation and 5,980 from the balance), and the
-    # daily limit of 100 is never asked, because a plan's step skips it
-    assert ended["state"] == "failed" and "more than the 20 left" in ended["steps"][0]["error"]
+    answer = studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    assert answer.status_code == 429 and "can spend 100 in 24 hours" in answer.json()["detail"]   # Bob's daily limit, before Approve
     assert balance(studio) == before and studio.app.state.db.one("SELECT 1 FROM jobs") is None
 
 

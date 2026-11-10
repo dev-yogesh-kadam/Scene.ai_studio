@@ -31,6 +31,8 @@ import time
 import uuid
 from pathlib import Path
 
+from . import guardrails
+
 try:   # the Claude Agent SDK: every message of the agent runs in a live session of Claude Code (converse); service() refuses to start without it
     import claude_agent_sdk as sdk
 except ImportError:
@@ -356,8 +358,9 @@ def _handlers(entry, names):
                 if tool is None:
                     text = "{} is not on offer for this message: use the tools you have now.".format(name)
                 else:
-                    try:
-                        text = str(await asyncio.get_running_loop().create_task(tool(dict(args or {})), context=entry.context))
+                    try:   # at most guard_tool_calls in a message, each within its time (guardrails.py)
+                        text = await guardrails.run_tool(name, entry.called, guardrails.known("guard_tool_calls"),
+                                                         lambda: asyncio.get_running_loop().create_task(tool(dict(args or {})), context=entry.context))
                     except (KeyError, ValueError, TypeError):
                         text = "That call could not be run. Check its fields."
             finally:
@@ -570,6 +573,12 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
     with holding(key):
         entry = live.get(key)
         if entry is None:
+            closing, refused = guardrails.sessions_to_close(live, key, guardrails.known("guard_sessions_per_user"),
+                                                            busy=lambda e: e.users > 0 or e.lock.locked())
+            for old in closing:   # one person holds at most their share of the live sessions
+                await _close(old)
+            if refused:
+                raise Failed(refused)
             entry = live[key] = _Live(signature)
         entry.users += 1
         try:

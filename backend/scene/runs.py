@@ -116,10 +116,10 @@ def read(db, user_id, run, path, offset=0, limit=PAGE):
     if not total:
         return {"path": path, "missing": True}
     offset, limit = max(0, int(offset or 0)), max(1, min(int(limit or PAGE), PAGE))
-    rows = db.all("SELECT path, value FROM run_state WHERE user_id = ? AND run = ? AND " + where + " ORDER BY path LIMIT ? OFFSET ?",
+    rows = db.all("SELECT path, value, writer FROM run_state WHERE user_id = ? AND run = ? AND " + where + " ORDER BY path LIMIT ? OFFSET ?",
                   (user_id, run, *params, limit, offset))
     return {"path": path, "folder": True, "total": total, "offset": offset,
-            "leaves": [{"path": r["path"], "value": json.loads(r["value"])} for r in rows]}
+            "leaves": [{"path": r["path"], "value": json.loads(r["value"]), "writer": r["writer"]} for r in rows]}
 
 
 def children(db, user_id, run, path):

@@ -94,9 +94,14 @@ def test_what_was_already_used_and_admins_are_not_capped(database):
     assert credits.charge_up_to(user, 30, "agent") == 30                    # tokens already used: taken anyway
     admin = a_user(db, daily_cap=10, role="admin")
     assert credits.charge(admin, 500, "generation")
-    token = credits_module.PREPAID.set(1)                                   # a plan's step: checked at approval
+    # a plan's step: checked at approval, so past the daily cap, but never more than is left of what was reserved
+    plan = db.run("INSERT INTO agent_plans (user_id, steps, progress, state, created, reserved_left) "
+                  "VALUES (?, '[]', '[]', 'running', 0, 10)", (user,))
+    token = credits_module.PREPAID.set(plan)
     try:
         assert credits.charge(user, 5, "agent")
+        with pytest.raises(OverCap):
+            credits.charge(user, 50, "agent")
     finally:
         credits_module.PREPAID.reset(token)
 

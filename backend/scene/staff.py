@@ -23,7 +23,7 @@ AREAS = {
     # Not a section of the console: reading it shows the agent's workings in the chat as they are (internals.py)
     "internals": "Agent internals",
 }
-ADMIN_ONLY = {"roles", "settings", "maintenance", "endpoints", "sessions"}   # never given to another role
+ADMIN_ONLY = {"roles", "settings", "maintenance", "endpoints", "sessions", "guardrails"}   # never given to another role
 
 BASE = {"overview", "search", "projects", "assets"}
 BUILT_IN = {

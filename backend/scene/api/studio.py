@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 
 import httpx
 
-from .. import sharing, health, kit, media, memory, placement, runs, storage
+from .. import guardrails, sharing, health, kit, media, memory, placement, runs, storage
 from ..db import as_everyone, offload
 from ..catalog import KINDS
 from ..comfy import workflows
@@ -87,7 +87,7 @@ async def price(state, wf, settings, user_id=None):
               "resolution": list(schema["resolutions"]) if "resolution" in chosen else []}
     estimate["choices"] = {group: {str(v): await offload(state.credits.cost, wf["id"], estimate["seconds"], dict(chosen, **{group: v})) for v in values}
                            for group, values in others.items() if values}
-    return estimate
+    return await offload(guardrails.check_quote, state.db, estimate)   # a length or price that makes no sense is refused
 
 
 def switched_on(state, workflow_id, user):
@@ -334,6 +334,9 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
         raise HTTPException(429, over)
     run_of = settings.get("run_of") if isinstance(settings.get("run_of"), str) and runs.RUN.match(settings["run_of"]) else ""
     settings["run_of"] = run_of
+    over = await offload(guardrails.run_problem, state.db, user["id"], run_of, quote["credits"])   # the most one run may use
+    if over:
+        raise HTTPException(429, over)
     if not await offload(state.credits.charge, user["id"], quote["credits"], "generation"):
         raise HTTPException(402, "This needs {} credits and you have {}. Ask an admin for more.".format(
             quote["credits"], await offload(state.credits.balance, user["id"])))

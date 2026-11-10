@@ -14,7 +14,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import aftercare, agent, camera, claude, conversations, core, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
+from .. import aftercare, agent, camera, guardrails, claude, conversations, core, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
     pages, runs, sequence, placement, sessions, sharing, skills, storage, traces, web
 from ..db import as_everyone, offload
 from ..comfy import workflows
@@ -1038,6 +1038,7 @@ async def agent_plan(body: dict, request: Request, user: dict = Depends(current_
     instruction = str(body.get("instruction") or "").strip()[:2000]
     if not instruction:
         raise HTTPException(400, "Write a message for the agent.")
+    await offload(guardrails.turn_check, request.app.state.db)   # the studio's stop; the agent's limits read again
     project = await offload(_project_id, request, user, body.get("project_id"))
     # What the agent's work says of how the studio is built (skills, NeuralCore, its session, tokens) is put in plain
     # words for someone who may not see it (internals.py).
@@ -1586,8 +1587,8 @@ async def _planning(request, user, body, instruction, project):
         if found.get("folder"):
             shown = found["offset"] + len(found["leaves"])
             more = "" if shown >= found["total"] else "\n({} of {} shown: call again with offset {}.)".format(shown, found["total"], shown)
-            return "\n".join(json.dumps(leaf, ensure_ascii=False) for leaf in found["leaves"]) + more
-        return json.dumps(found, ensure_ascii=False)
+            return guardrails.framed_state(found, agent.external, more)
+        return guardrails.framed_state(found, agent.external)   # a transcript or a file kept here: framed as outside text
 
     async def state_write(call):
         path = str(call.get("path") or "")

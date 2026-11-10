@@ -21,7 +21,7 @@ import httpx
 import websockets
 from fastapi import HTTPException
 
-from . import core, edits, errors, health, langfuse_trace, media, memory, moderation, motion, placement, sequence, sharing, traces
+from . import core, edits, errors, guardrails, health, langfuse_trace, media, memory, moderation, motion, placement, sequence, sharing, traces
 from .comfy import workflows
 from .agent import AgentError
 from .comfy.client import ComfyError
@@ -133,6 +133,11 @@ class JobManager:
             if cost:
                 self.credits.add(user_id, cost, "refund", note="Maintenance")
             raise Closed(closed["text"])
+        stop = guardrails.stop_problem(self.db)   # the studio's stop (guardrails.py): no new work
+        if stop:
+            if cost:
+                self.credits.add(user_id, cost, "refund", note="Studio stopped")
+            raise HTTPException(503, stop)
         if moderation.refusal(self.db, user_id, settings):   # a prompt with words the studio does not make
             if cost:
                 self.credits.add(user_id, cost, "refund", note="Prompt refused")
@@ -318,7 +323,7 @@ class JobManager:
             self.wake.set()
 
     def paused(self):
-        return self.db.setting("queue_paused", "0") == "1"
+        return self.db.setting("queue_paused", "0") == "1" or guardrails.stopped(self.db) is not None
 
     def pause(self, paused):
         self.db.set_setting("queue_paused", "1" if paused else "0")

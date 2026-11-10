@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
+from .. import __version__, audit, backup, claude, edits, endpoints, errors, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..config import ROOT
@@ -1348,6 +1348,24 @@ async def agent_roles(body: dict, request: Request, user: dict = Depends(admin_u
     if changed:
         await offload(audit.record, request, user, "Changed the agent's models", "", "; ".join(changed))
     return {"roles": found, "configured": getattr(state.agent, "configured", {})}
+
+
+# ---------------------------------------------------------------- guardrails: the studio's stop and the limits
+
+@router.get("/guardrails")
+async def get_guardrails(request: Request, user: dict = Depends(admin_user)):
+    return await offload(guardrails.shown, request.app.state.db)
+
+
+@router.put("/guardrails")
+async def set_guardrails(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """{"stop": true/false, "text"?, "limits"?: {name: number}} (guardrails.py). The stop takes effect at once."""
+    try:
+        found = await offload(guardrails.save, request.app.state.db, body, user.get("name") or user.get("email") or "")
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    await offload(audit.record, request, user, "Changed the guardrails", "", json.dumps(body, ensure_ascii=False)[:200])
+    return found
 
 
 # ---------------------------------------------------------------- maintenance and alerts

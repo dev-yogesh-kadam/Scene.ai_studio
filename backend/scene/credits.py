@@ -280,7 +280,8 @@ class Credits:
         """cap_problem; with `lock` (inside a transaction), the user's row stays locked until it ends, so a charge made
         at the same moment waits for this one and counts it in what was spent."""
         if PREPAID.get() is not None:   # a plan's step: its plan's whole price was checked at approval, and reserved
-            return None
+            from . import guardrails   # ...and it may not cost more than is left of what was approved
+            return guardrails.plan_step_problem(self.db, PREPAID.get(), user_id, amount)
         user = self.db.one("SELECT role, daily_cap FROM users WHERE id = ?" + (" FOR UPDATE" if lock else ""), (user_id,))
         if not user or user["role"] == "admin" or amount <= 0:
             return None
@@ -312,6 +313,10 @@ class Credits:
         return self._charge(user_id, amount, reason, job_id, note, project_id, cap)
 
     def _charge_plan(self, user_id, plan, amount, reason, job_id, note, project_id):
+        from . import guardrails   # a step never takes more than is left of its plan's approved reservation
+        problem = guardrails.plan_step_problem(self.db, plan, user_id, amount)
+        if problem:
+            raise OverCap(problem)
         row = self.db.one("SELECT reserved_left FROM agent_plans WHERE id = ? AND user_id = ?", (plan, user_id))
         take = min(amount, row["reserved_left"]) if row else 0
         if take and not self.db.change("UPDATE agent_plans SET reserved_left = reserved_left - ? WHERE id = ? AND reserved_left >= ?",

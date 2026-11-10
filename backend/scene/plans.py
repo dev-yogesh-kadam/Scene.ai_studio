@@ -22,6 +22,7 @@ from starlette.datastructures import FormData
 from .credits import PREPAID
 from .jobs import QUEUEING
 from .db import offload
+from . import guardrails, moderation
 
 RUNNING = ("running", "stopping")
 ENDED_JOB = ("done", "failed", "cancelled")
@@ -133,6 +134,9 @@ class PlanRunner:
         steps = body.get("steps")
         if not isinstance(steps, list) or not steps or len(steps) > 200 or not all(isinstance(s, dict) for s in steps):
             raise HTTPException(400, "A plan needs its steps.")
+        problem = await offload(moderation.plan_problem, self.db, steps)   # words the studio refuses: said before Approve
+        if problem:
+            raise HTTPException(400, problem)
         project_id = body.get("project_id") or None
         if project_id:
             from . import sharing
@@ -160,6 +164,11 @@ class PlanRunner:
                     total += (await workspace._motion_price(self.state, user, dict(step["motion"])))[1]
                 elif step.get("settings") and not (step.get("assemble") or step.get("sound") or step.get("edit")):
                     settings = json.loads(json.dumps(step["settings"]))
+                    uses = step.get("uses") or []   # the video it is made from, as _queue gives it: priced by its real length
+                    parent = step["start"]["id"] if step.get("start") else uses[0].get("id") if uses else None
+                    if isinstance(parent, int):
+                        settings["parent"] = parent
+                        settings.pop("source_seconds", None)   # not the length the plan says, which may be anything
                     wf = await self.state.catalog.load(str(settings.get("workflow", "")))
                     await offload(studio.switched_on, self.state, wf["id"], user)
                     studio.fit_resolution(self.state, workflows.describe(wf), settings)
@@ -189,6 +198,9 @@ class PlanRunner:
                     if p.get("error") and not p.get("made") and (not job or job["status"] in ("failed", "cancelled")):
                         p.update(error="", job=None)
             total = await self.price(user, steps, progress)
+            problem = await offload(guardrails.plan_problem, self.db, user, total)   # the studio's stop, the plan limit
+            if problem:
+                raise HTTPException(429, problem)
             # What is still reserved for this plan pays first: only what it lacks is charged now. A plan that ended gave
             # its reservation back (_finish), so a resume reserves what is left to make; one reservation, never two.
             held = row["reserved_left"]
