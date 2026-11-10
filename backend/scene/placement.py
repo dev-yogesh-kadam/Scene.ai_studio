@@ -84,7 +84,7 @@ def canvas_of(db, user_id, project_id):
 
 def read(db, owner, project_id):
     with as_everyone():
-        row = db.one("SELECT data FROM boards WHERE user_id = ? AND project_id = ? AND kind = ?", (owner, project_id or 0, KIND))
+        row = db.one("SELECT data FROM boards WHERE user_id = ? AND project_id IS NOT DISTINCT FROM NULLIF(?, 0) AND kind = ?", (owner, project_id or 0, KIND))
     try:
         data = json.loads(row["data"]) if row else {}
     except ValueError:
@@ -95,7 +95,7 @@ def read(db, owner, project_id):
 
 def _write(db, owner, project_id, data):
     with as_everyone():
-        db.run("INSERT INTO boards (user_id, project_id, kind, data, updated) VALUES (?, ?, ?, ?, ?) "
+        db.run("INSERT INTO boards (user_id, project_id, kind, data, updated) VALUES (?, NULLIF(?, 0), ?, ?, ?) "
                "ON CONFLICT(user_id, project_id, kind) DO UPDATE SET data = excluded.data, updated = excluded.updated",
                (owner, project_id or 0, KIND, json.dumps(data), time.time()))
 

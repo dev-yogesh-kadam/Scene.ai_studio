@@ -1,0 +1,22 @@
+/* An error's message in the table: one line, cut with an ellipsis. */
+.message {
+  display: block;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The stack of an error, as it was written. */
+.stack {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 12px/1.5 var(--mono);
+}
+/* The stack of an error, as it was written. */
+.stack {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 12px/1.5 var(--mono);
+}

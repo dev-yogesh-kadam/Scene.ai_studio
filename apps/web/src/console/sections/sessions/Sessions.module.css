@@ -1,0 +1,13 @@
+.ses-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.ses-grid.many {
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+@media (max-width: 720px) {
+  .ses-grid.many {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

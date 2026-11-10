@@ -76,6 +76,22 @@ def test_a_bulk_run_is_a_grid_of_prompts_by_workflows_on_one_seed(client):
     client.app.state.jobs.pause(False)
 
 
+def test_a_starred_cell_is_its_items_rating(client):
+    """The star on the compare board is the item's own rating (1), so it is the same in every browser."""
+    me = register(client)
+    client.app.state.jobs.pause(True)
+    done = client.post("/api/bulk", data={"kind": "image", "prompts": json.dumps(["a red fox"]),
+                                          "workflows": json.dumps(["image/image_t2i_flux2_klein_9b"])}).json()
+    job = client.get("/api/bulk/runs/" + done["run"]).json()["cells"][0]["job"]
+    item = client.app.state.db.run(
+        "INSERT INTO generations (user_id, job_id, workflow, kind, name, filename, settings, context, created) "
+        "VALUES (?, ?, 'image/x', 'image', 'Fox', 'fox.png', '{}', '{}', 1)", (me["id"], job))
+    assert client.get("/api/bulk/runs/" + done["run"]).json()["cells"][0]["items"][0]["rating"] == 0
+    client.put("/api/library/{}".format(item), json={"rating": 1})
+    assert client.get("/api/bulk/runs/" + done["run"]).json()["cells"][0]["items"][0]["rating"] == 1
+    client.app.state.jobs.pause(False)
+
+
 def test_bulk_generation_is_for_admins_only(client):
     register(client)
     register(client, **BOB)   # signed in as Bob now, who is not an admin

@@ -1,0 +1,7 @@
+.la-btn.solid {
+  background: var(--la-paper);
+  color: var(--la-ink);
+}
+.la-btn.solid:hover {
+  background: #fff;
+}

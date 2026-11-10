@@ -31,6 +31,7 @@ import httpx
 
 from . import endpoints, vault
 from .credits import Credits
+from .db import offload
 
 EVERY = 3        # seconds between two sendings
 BATCH = 100      # calls in one request at most
@@ -187,7 +188,7 @@ class Sender:
 
     async def send(self, http):
         """Send what waits, BATCH at a time. Returns how many went; what Langfuse did not take waits for the next time."""
-        target = self.target() if self.waiting or self.scores else None
+        target = await offload(self.target) if self.waiting or self.scores else None
         if target is None:
             self.waiting.clear()   # no Langfuse in use: nothing is kept for one
             self.scores.clear()
@@ -236,7 +237,7 @@ class Sender:
     async def link(self, http=None):
         """{"url", "project"}: where the console opens a trace in Langfuse ({url}/project/{project}/traces/{trace id}),
         or None when no Langfuse is in use or it does not answer. Asked at most every LINK_KEPT seconds."""
-        target = self.target()
+        target = await offload(self.target)
         if target is None:
             return None
         asked, found = self._link
@@ -259,7 +260,7 @@ class Sender:
         """Keep one call in a Langfuse dataset, made if it is not there yet: what was sent as its input, its answer as
         what is expected, its trace as where it came from. Raises LookupError with no Langfuse in use; httpx errors
         when it does not answer or refuses."""
-        target = self.target()
+        target = await offload(self.target)
         if target is None:
             raise LookupError("No Langfuse is set in Servers & APIs.")
         url, auth = target

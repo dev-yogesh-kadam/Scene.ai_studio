@@ -1,0 +1,15 @@
+.secret {
+  font: 500 14px/1.6 var(--mono);
+  letter-spacing: 0.04em;
+  background: var(--field);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  user-select: all;
+  word-break: break-all;
+}
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}

@@ -1,0 +1,11 @@
+:is(.la-frame, .la-stage) .la-a-rain.near {
+  animation: la-rain-near 0.22s linear infinite;
+}
+@keyframes la-rain-near {
+  from {
+    transform: translate(0, -90px);
+  }
+  to {
+    transform: translate(-20px, 0);
+  }
+}

@@ -1,0 +1,9 @@
+.credit-token {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: block;
+}
+.credit-badge .credit-token {
+  color: var(--text);
+}

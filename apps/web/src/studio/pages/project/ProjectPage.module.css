@@ -1,0 +1,7 @@
+.owner-tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--series-1) 88%, var(--text)); /* readable at 12px: 4.5:1 */
+  border: 1px solid color-mix(in srgb, var(--series-1) 45%, transparent);
+}

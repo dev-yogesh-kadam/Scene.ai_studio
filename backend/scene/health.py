@@ -14,6 +14,7 @@ import time
 import httpx
 
 from . import backup, phone, versions
+from .db import offload
 
 CHECK_EVERY = 60     # seconds between checks
 FIRST_CHECK = 30     # after the app starts: it settles first (the render server may take a moment to be reached)
@@ -140,19 +141,19 @@ async def problems(state, render=None, model=None):
     if state.settings.backup_keep > 0 and (saved is None or saved < now - 2 * DAY):
         found.append(problem("backup", "serious", "The database has not been backed up for two days. Check the folder {}.".format(
             state.backup_dir), "system"))
-    checked = backup.last_check(db)
+    checked = await offload(backup.last_check, db)
     if state.settings.backup_keep > 0 and checked and checked.get("copy") and not checked.get("ok"):
         found.append(problem("backup_check", "serious", "The newest backup, {}, can't be read back: {}".format(
             checked["copy"], checked.get("detail", "")), "system"))
-    burst = db.one("SELECT COUNT(*) n FROM jobs WHERE status = 'failed' AND finished > ?", (now - 900,))["n"]
+    burst = (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status = 'failed' AND finished > ?", (now - 900,)))["n"]
     if burst >= 3:
         found.append(problem("failures", "serious", "{} jobs failed in the last 15 minutes.".format(burst), "jobs"))
-    if not state.jobs.paused():   # paused, they wait on purpose
-        stuck = db.one("SELECT COUNT(*) n FROM jobs WHERE status = 'queued' AND created < ?", (now - 3600,))["n"]
+    if not await offload(state.jobs.paused):   # paused, they wait on purpose
+        stuck = (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status = 'queued' AND created < ?", (now - 3600,)))["n"]
         if stuck:
             found.append(problem("waiting", "warning", "{} job{} been waiting for over an hour.".format(
                 stuck, " has" if stuck == 1 else "s have"), "jobs"))
-    for job in db.all("SELECT name, started, est_seconds FROM jobs WHERE status = 'running' AND started IS NOT NULL"):
+    for job in await db.aall("SELECT name, started, est_seconds FROM jobs WHERE status = 'running' AND started IS NOT NULL"):
         if now - job["started"] > max(1800, 3 * (job["est_seconds"] or 0)):
             found.append(problem("slow", "warning", "\"{}\" has been running for {}, far longer than it should.".format(
                 job["name"], minutes(now - job["started"])), "jobs"))
@@ -184,32 +185,32 @@ class Watcher:
         db, now = self.state.db, now or time.time()
         current = {p["key"]: p for p in found}
         self.streak = {key: self.streak.get(key, 0) + 1 for key in current}
-        opened = {a["key"]: a for a in db.all("SELECT * FROM alerts WHERE ended IS NULL")}
+        opened = {a["key"]: a for a in await db.aall("SELECT * FROM alerts WHERE ended IS NULL")}
         messages = []
         for key, p in current.items():
             if key in opened:
-                db.run("UPDATE alerts SET text = ? WHERE id = ?", (p["text"], opened[key]["id"]))   # its numbers move on
+                await db.arun("UPDATE alerts SET text = ? WHERE id = ?", (p["text"], opened[key]["id"]))   # its numbers move on
             elif self.streak[key] >= CONFIRM:
-                db.run("INSERT INTO alerts (key, level, text, tab, started) VALUES (?, ?, ?, ?, ?)",
+                await db.arun("INSERT INTO alerts (key, level, text, tab, started) VALUES (?, ?, ?, ?, ?)",
                        (key, p["level"], p["text"], p["tab"], now))
                 messages.append((p["level"], p["text"]))
         for key, a in opened.items():
             if key not in current:
-                db.run("UPDATE alerts SET ended = ? WHERE id = ?", (now, a["id"]))
+                await db.arun("UPDATE alerts SET ended = ? WHERE id = ?", (now, a["id"]))
                 messages.append(("resolved", "{} (after {}).".format(RESOLVED.get(key, "Resolved: " + a["text"]), minutes(now - a["started"]))))
         for level, text in messages:
             await phone.send(self.http, db, level, text)
         if messages:
-            self.state.hub.tell({"alerts": len(db.all("SELECT id FROM alerts WHERE ended IS NULL")),
+            self.state.hub.tell({"alerts": len(await db.aall("SELECT id FROM alerts WHERE ended IS NULL")),
                                  "news": [{"level": level, "text": text} for level, text in messages]})
         return messages
 
     async def workflows(self, found):
         """Note what the render PC changed in the workflow files, and fetch its node list again when it answers and the
         one in hand is old: the console's Workflows section compares the workflows with it."""
-        versions.look(self.state)
-        self.state.traces.prune()
-        checked = backup.last_check(self.state.db)
+        await offload(versions.look, self.state)
+        await offload(self.state.traces.prune)
+        checked = await offload(backup.last_check, self.state.db)
         if self.state.settings.backup_keep > 0 and (not checked or checked["when"] < time.time() - DAY):   # once a day
             await asyncio.to_thread(backup.check, self.state.db, self.state.backup_dir)
         catalog = self.state.catalog

@@ -59,6 +59,21 @@ def test_a_command_reaches_nothing_outside_its_folder():
         ffjob.check(["-i", "a.mp4", "o.mp4"], [CLIP], None, OUT, timeout=5000)
 
 
+def test_a_command_a_page_could_have_planted_reaches_nothing_either():
+    # what text from outside (a fetched page, a file) might talk the model into writing: still refused, every one
+    refused(["-i", "http://example.com/a.mp4", "o.mp4"], "URL or protocol")
+    refused(["-i", "C:\\Scene\\Data\\secrets\\scene_app.txt", "o.mp4"], "outside the folder")
+    refused(["-i", "C:/Scene/x.mp4", "o.mp4"], "outside the folder")
+    refused(["-i", "/etc/passwd", "o.mp4"], "outside the folder")
+    refused(["-f", "lavfi", "-i", "movie=C\\:/Scene/x.mp4", "o.mp4"], "movie")
+    refused(["-f", "lavfi", "-i", "movie=C\\:/Scene/x.mp4", "o.mp4"], "outside the folder")
+    refused(["-f", "lavfi", "-i", "amovie=/etc/passwd", "o.mp4"], "outside the folder")
+    refused(["-f", "concat", "-i", "l.txt", "o.mp4"], "outside the folder", sidecars=[{"name": "l.txt", "content": "file '/etc/passwd'"}])
+    for name in ("C:/x/l.txt", "/etc/l.txt", "..\\l.txt"):   # a sidecar named by a path, not a bare name
+        with pytest.raises(ffjob.JobError, match="bare file name"):
+            ffjob.check(["-i", "a.mp4", "o.mp4"], [CLIP], [{"name": name, "content": "x"}], OUT)
+
+
 def test_ordinary_commands_pass_the_check():
     ok = lambda argv, sidecars=None, outputs=OUT: ffjob.check(argv, [CLIP], sidecars, outputs)
     argv, _, timeout = ok(["ffmpeg", "-i", "a.mp4", "-vf", "drawtext=fontfile=Anton-Regular.ttf:text='Scene 4\\: Rooftop':"

@@ -1,0 +1,237 @@
+.media {
+  min-width: 0;
+}
+.media .thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--media-ground);
+  cursor: pointer;
+  border-radius: var(--radius-media);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line);
+  transition:
+    transform 0.3s var(--ease-out),
+    box-shadow 0.3s var(--ease-out);
+}
+.media .thumb:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    var(--lift);
+}
+.media .thumb video,
+.media .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.media .thumb :global(.note) {
+  font-size: 36px;
+  color: #fff;
+}
+.media .kind {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  font: 600 11px/20px var(--sans);
+  text-transform: capitalize;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  color: #fff;
+}
+.media .meta {
+  padding: 10px 2px 0;
+}
+.media .title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pop-title {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font: 600 11px/1.4 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: 13px/1.35 var(--sans);
+}
+.pop-item:hover,
+.pop-item:focus-visible {
+  background: var(--hover);
+}
+.pop-item > :global(.icon) {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--muted);
+}
+.pop-item > span {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+}
+.media .rated {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #6fe3a5;
+}
+.media .rated :global(.icon) {
+  width: 14px;
+  height: 14px;
+}
+.pop-item:active {
+  scale: 0.97;
+}
+.media .thumb:active {
+  scale: 0.98;
+  filter: brightness(0.88);
+}
+.media {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 250px;
+}
+.media .meta {
+  padding: 10px 4px 0;
+}
+.card-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  translate: 0 -4px;
+  transition:
+    opacity 0.18s var(--ease-out),
+    translate 0.18s var(--ease-out);
+}
+.card-tool {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(12, 12, 14, 0.55);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  color: #fff;
+  cursor: pointer;
+}
+.card-tool:hover {
+  background: rgba(12, 12, 14, 0.78);
+}
+.card-tool:active {
+  scale: 0.92;
+}
+.card-tool :global(.icon) {
+  width: 17px;
+  height: 17px;
+}
+.card-go {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0b0b0b;
+  font: 600 12px/1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  translate: -50% 6px;
+  transition:
+    opacity 0.18s var(--ease-out),
+    translate 0.18s var(--ease-out);
+}
+.card-go :global(.icon) {
+  width: 15px;
+  height: 15px;
+}
+.card-go:active {
+  scale: 0.95;
+}
+.card-go:disabled {
+  opacity: 0.6;
+}
+.media .thumb:hover .card-tools,
+.media .thumb:focus-within .card-tools {
+  opacity: 1;
+  translate: 0 0;
+}
+.media .thumb:hover .card-go,
+.media .thumb:focus-within .card-go {
+  opacity: 1;
+  translate: -50% 0;
+}
+.media .thumb:hover .kind {
+  opacity: 0;
+}
+.media .kind {
+  transition: opacity 0.18s var(--ease-out);
+}
+@media (hover: none) {
+  .card-tools,
+  .card-go {
+    opacity: 1;
+    translate: 0 0;
+  }
+  .card-go {
+    translate: -50% 0;
+  }
+}
+.media .thumb::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 45%;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.45));
+  transition: opacity 0.2s var(--ease-out);
+}
+.media .thumb:hover::after {
+  opacity: 1;
+}
+
+.media .thumb.plain {
+  cursor: default;
+  display: grid;
+  place-items: center;
+}

@@ -1,0 +1,19 @@
+.la-flash.go {
+  animation: la-cut 0.3s ease-out;
+}
+.la-slate footer .la-btn.pressed {
+  background: rgba(57, 217, 138, 0.14);
+  color: #39d98a;
+  transform: scale(0.96);
+}
+.la-reel.live {
+  height: 240vh;
+}
+@keyframes la-cut {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 0;
+  }
+}

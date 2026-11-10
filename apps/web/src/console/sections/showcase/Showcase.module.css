@@ -1,0 +1,40 @@
+.showcase-sections {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.showcase-sections-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.showcase-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 2px;
+  border-radius: 999px;
+  background: var(--hover);
+  font-size: 13px;
+}
+.showcase-chip > span {
+  padding: 0 4px;
+}
+.showcase-chip i {
+  font-style: normal;
+}
+.showcase-new {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.showcase-new :global(.search) {
+  width: 240px;
+}
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}

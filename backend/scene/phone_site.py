@@ -1,4 +1,4 @@
-"""The studio for phones: a site of its own, built from mobile/ (Expo, for the web) and served at /m/.
+"""The studio for phones: a site of its own, built from apps/mobile/ (Expo, for the web) and served at /m/.
 
 A phone that opens one of the studio's pages is sent to the same place on the phone site (a project, a module, the
 library...). Tablets and computers get the full studio. Someone who wants the full studio on their phone opens any
@@ -9,7 +9,7 @@ import re
 from fastapi import Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from .db import as_everyone
+from .db import as_everyone, offload
 
 BASE = "/m"
 DESKTOP = "scene_desktop"   # set: this browser chose the full studio
@@ -55,14 +55,14 @@ def install(app, settings):
             return response
         if not is_phone(request) or request.cookies.get(DESKTOP) or not (site / "index.html").is_file():
             return await call_next(request)
-        target = SAME.get(path) or _place(request.app.state.db, path) or "/"
+        target = SAME.get(path) or await offload(_place, request.app.state.db, path) or "/"
         return RedirectResponse(BASE + target, status_code=302)
 
     def index():
         if not (site / "index.html").is_file():
             return HTMLResponse("<!doctype html><meta name=viewport content='width=device-width'><body style='font:16px system-ui;"
                                 "padding:24px'>The phone site isn't built yet. On the studio PC, run <code>npm run build</code> in "
-                                "<code>mobile/</code>, then reload. <a href='/?desktop=1'>Open the full studio</a></body>", status_code=503)
+                                "<code>apps/mobile/</code>, then reload. <a href='/?desktop=1'>Open the full studio</a></body>", status_code=503)
         response = FileResponse(site / "index.html")
         response.delete_cookie(DESKTOP)   # opening the phone site again ends the choice of the full studio
         return response

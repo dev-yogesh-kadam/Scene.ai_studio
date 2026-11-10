@@ -1,0 +1,119 @@
+# The checks every push and pull request must pass (T4): the code (types, lint, design tokens, unit tests of the web
+# app, the shared package and the phone site), the backend (pytest on PostgreSQL), the web app built (with its bundle
+# budget) and driven end to end by Playwright against the fake ComfyUI, the smoke test, and scripts/check_models.py.
+# Nothing here reaches the real render server or anyone's data: every studio is started on a database of its own.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  PYTHON_VERSION: '3.14'
+  # The tests' own account (docs/database.md): CREATEDB, so each test studio makes a throwaway database beside it.
+  SCENE_TEST_DATABASE_URL: postgresql://scene_test:ci-only@localhost:5432/scene_test
+
+jobs:
+  code:
+    name: Types, lint, tokens, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - name: Design tokens made from tokens.json
+        run: npm run tokens:check
+      - name: Unit tests (web, shared, phone)
+        run: npm test
+
+  backend:
+    name: Backend tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: "The tests' account and database (not a superuser: the row-level policies must apply to it)"
+        run: |
+          PGPASSWORD=ci-superuser psql -h localhost -U postgres -c "CREATE ROLE scene_test LOGIN CREATEDB PASSWORD 'ci-only'"
+          PGPASSWORD=ci-superuser psql -h localhost -U postgres -c "CREATE DATABASE scene_test OWNER scene_test"
+      - name: Python packages
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r backend/requirements-dev.txt
+      - name: pytest
+        working-directory: backend
+        run: ../.venv/bin/python -m pytest -q
+      - name: scripts/check_models.py (here it can only show that it runs; there is no Claude Code on the runner)
+        run: .venv/bin/python scripts/check_models.py
+
+  web:
+    name: Build, bundle budget, Playwright, smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-superuser
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: The tests' account and database
+        run: |
+          PGPASSWORD=ci-superuser psql -h localhost -U postgres -c "CREATE ROLE scene_test LOGIN CREATEDB PASSWORD 'ci-only'"
+          PGPASSWORD=ci-superuser psql -h localhost -U postgres -c "CREATE DATABASE scene_test OWNER scene_test"
+      - name: Python packages (the test studios run this tree's backend from .venv)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r backend/requirements.txt
+      - run: npm ci
+      - name: Build the web app (fails when the studio's first-load JavaScript grows past its budget)
+        run: npm run build -w apps/web
+      - name: Playwright's browser
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Playwright, against the fake ComfyUI
+        working-directory: apps/web
+        run: npx playwright test
+      - name: Smoke test, against the fake ComfyUI
+        run: node apps/web/tests/smoke/smoke.mjs --fake-comfy
+      - name: What Playwright saw when a test failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: apps/web/test-results/
+          retention-days: 7

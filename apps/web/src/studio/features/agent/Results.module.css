@@ -1,0 +1,377 @@
+:global(.seg) button.on {
+  background: var(--thumb);
+  color: var(--text);
+  box-shadow: var(--sheen), var(--shadow-s);
+}
+:global(.btn).on {
+  background: var(--agent-soft);
+}
+:global(.btn).on {
+  color: var(--agent);
+}
+.step-why {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--agent);
+}
+.agent-review.checking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* A step waiting for approval: its prompt, which can be opened in full and edited, and its settings as pills. */
+.agent-prompt {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+.agent-prompt p {
+  margin: 0;
+  padding-right: 56px;
+  white-space: pre-wrap;
+}
+.agent-prompt p.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.agent-prompt-tools {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  display: flex;
+}
+/* Review: what the agent found when it looked at a finished shot */
+.agent-review {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.agent-review.failed {
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bad-soft);
+  color: var(--text);
+}
+/* What a plan made: a block per clip, sound or grid of pictures. */
+.results {
+  display: grid;
+  gap: 18px;
+}
+.result {
+  display: grid;
+  gap: 8px;
+}
+.result-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.result-head :global(.muted) {
+  flex: none;
+}
+.dot-state {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.dot-state.done {
+  background: var(--ok);
+}
+.dot-state.running {
+  background: var(--agent);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+.dot-state.queued {
+  background: var(--warn);
+}
+.dot-state.failed {
+  background: var(--bad);
+}
+.result-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 4px;
+  padding: 2px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-model::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--agent);
+}
+.result-name {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-wait.failed {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.result-wait-inner {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: 62%;
+  text-align: center;
+}
+/* A running result in the agent panel: one soft glow that drifts slowly across, as light on film being exposed. Every
+animation here starts at --since (set from the clock), so drawing the log again does not restart it. */
+.result-wait.running {
+  background: var(--hover);
+}
+.result-wait.running::before {
+  content: '';
+  position: absolute;
+  top: -30%;
+  bottom: -30%;
+  left: -60%;
+  width: 70%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--agent) 22%, transparent), transparent 70%);
+  animation: glow-drift 12s ease-in-out var(--since, 0s) infinite alternate;
+  will-change: transform;
+}
+.result-wait-inner {
+  position: relative;
+  z-index: 1;
+}
+.result-wait.running .result-wait-inner > span {
+  color: var(--text);
+  letter-spacing: 0.02em;
+  animation: phase-breathe 3s ease-in-out var(--since, 0s) infinite;
+}
+.result-audio audio {
+  width: 100%;
+}
+.keyframes {
+  display: flex;
+  gap: 6px;
+}
+.keyframe {
+  position: relative;
+  width: 76px;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--media-ground);
+  cursor: pointer;
+}
+.keyframe img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.keyframe span {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font: 600 10px/14px var(--sans);
+}
+.keyframe:hover {
+  outline: 2px solid var(--agent);
+  outline-offset: 1px;
+}
+.result-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.crumb:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.crumb :global(.icon) {
+  width: 14px;
+  height: 14px;
+}
+.rate {
+  display: inline-flex;
+  gap: 2px;
+}
+.rate :global(.icon-btn).on {
+  color: var(--ok);
+}
+.rate :global(.icon-btn).on.bad {
+  color: var(--bad);
+}
+.retake {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.info-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.info-ref {
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--media-ground);
+}
+.info-ref img,
+.info-ref video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.info-ref .sound span {
+  display: none;
+}
+:root[data-motion='calm'] .result-wait.running,
+:root[data-motion='calm'] .dot-state.running {
+  animation: none;
+}
+:root[data-motion='calm'] .result-wait.running::before,
+:root[data-motion='calm'] .result-wait.running .result-wait-inner > span {
+  animation: none;
+}
+.result {
+  justify-items: start;
+}
+.result > .result-head,
+.result > .agent-review,
+.result > .result-foot,
+.result > .retake {
+  justify-self: stretch;
+}
+.result-media {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--media-ground);
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    outline-color 0.15s,
+    transform 0.15s var(--ease);
+}
+.result-media:hover,
+.result-media:focus-visible {
+  outline-color: var(--agent);
+}
+.result-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.clip-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font: 600 11px/1 var(--sans);
+}
+.clip-badge :global(.icon) {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+.result-wait {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 90px;
+  max-width: 100%;
+  border-radius: 14px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+}
+.result-wait.failed {
+  justify-self: stretch;
+}
+.take-pick {
+  align-items: center;
+}
+@keyframes glow-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(230%);
+  }
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--ok-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--ok-soft);
+  }
+}
+@keyframes phase-breathe {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.keyframes {
+  flex-wrap: wrap;
+}

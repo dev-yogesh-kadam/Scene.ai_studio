@@ -41,7 +41,7 @@ Stop the app with `Ctrl+C`.
 
 Open the studio on a phone and it shows its phone site (`/m/`): projects, modules as storyboards, the agent, creating,
 the library and skills, sized for a small screen. Tablets and computers get the full studio. The phone site is built
-from `mobile/` (`npm run build`; `scripts/start.bat` does it the first time). See [mobile/README.md](mobile/README.md).
+from `apps/mobile/` (`npm run build`; `scripts/start.bat` does it the first time). See [apps/mobile/README.md](apps/mobile/README.md).
 
 ## Project layout
 
@@ -49,7 +49,9 @@ from `mobile/` (`npm run build`; `scripts/start.bat` does it the first time). Se
 |---|---|
 | `backend/scene/` | The server (FastAPI). `api/` holds the routes, `comfy/` talks to ComfyUI, `jobs.py` is the queue. |
 | `backend/tests/` | Tests. Run them with `pytest` from `backend/`. |
-| `frontend/` | The web app: plain HTML, CSS and JavaScript modules, no build step. |
+| `apps/web/` | The web app in React + TypeScript (Vite): the studio and the admin console, two separate builds into `apps/web/dist/` (the start scripts build it when it is missing or older than its source). Tests in `apps/web/tests/` (Playwright, the smoke test, the fake ComfyUI). |
+| `apps/mobile/` | The phone site (Expo), served at `/m/`. |
+| `packages/shared/` | TypeScript both apps use: the API client and its types, the NDJSON reader, the live connection, formatting. |
 | `workflows/video/`, `workflows/image/`, `workflows/audio/` | The ComfyUI workflows users can run. `workflows/reports/` holds the render PC's model lists and is not read by the app. |
 | `workflows/upscaler/` | Workflows that make a video the user has larger. They appear as "Upscale video" on the Canvas. |
 | `motion/` | Motion graphics: the HyperFrames packages (`package.json`) and the templates. |
@@ -96,8 +98,8 @@ from `mobile/` (`npm run build`; `scripts/start.bat` does it the first time). Se
 | `console_hours` | `12` | How long a sign-in to the admin console lasts. |
 | `default_workflow` | none | Workflow selected for new users, for example `video/h3_all_in_one`. |
 | `allow_signup` | `true` | Whether visitors can create accounts. The first account can always be created. |
-| `database_url` | `""` | The PostgreSQL database, as `postgresql://scene_app:<password>@localhost:5432/scene`. Empty means SQLite in `storage_dir`. See [docs/database.md](docs/database.md). |
-| `database_owner_url` | `""` | The account that owns the tables; it makes and changes them when the app starts. |
+| `database_url` | `""` | The PostgreSQL database (the only kind), as `postgresql://scene_app:<password>@localhost:5432/scene`. Required. Its tables are made by migrations: `scripts/migrate.py upgrade` with `database_owner_url`. See [docs/database.md](docs/database.md). |
+| `database_owner_url` | `""` | The account that owns the tables. Only `scripts/migrate.py` uses it; the app never changes tables. |
 | `first_account_local` | `true` | The first account (the admin) can only be made from a browser on the machine the app runs on. Set `false` for a server with no browser of its own. |
 | `secure_cookies` | `false` | Marks the session cookie `Secure` for every visit. Visits over https, including through a Cloudflare tunnel, get it anyway. |
 | `signup_credits` | `1000` | Credits a new account starts with. An admin can change it in the admin console. |
@@ -107,6 +109,7 @@ from `mobile/` (`npm run build`; `scripts/start.bat` does it the first time). Se
 | `secret_key_file` | `secret.key` | The key the API keys, two-step sign-in secrets and backup copies of `config.json` are encrypted with. Made on first start; `SCENE_SECRET_KEY` is used instead when set. Keep a copy apart from the backups: without it those secrets can't be read. |
 | `node_path` | the installed one | The Node.js program that renders motion graphics. See [docs/motion.md](docs/motion.md). |
 | `output_dir` | `outputs` inside `storage_dir` | Where finished images and videos are kept. Can be any folder, for example `C:/Scene/Outputs`. |
+| `web_dist_dir` | `apps/web/dist` | Where the web app's build is (`npm run build -w apps/web` writes it). An older `web_app` or `frontend_dir` in `config.json` is ignored. |
 
 ## Development
 
@@ -117,6 +120,19 @@ cd backend && ../.venv/bin/python -m scene       # run the app
 ```
 
 On Windows the Python is `.venv\Scripts\python.exe`. The tests need no ComfyUI, Claude or Node.js.
+
+The client apps are npm workspaces (`apps/*`, `packages/*`), installed once at the root:
+
+```bash
+npm install                 # once
+npm run typecheck           # TypeScript, every workspace
+npm run lint                # ESLint
+npm test                    # unit tests: the phone site (Jest), the web app and the shared package (Vitest)
+npm run build -w apps/web   # the React studio and console, into apps/web/dist/
+npm run e2e                 # build, then Playwright (Chromium) against a studio of its own and a fake ComfyUI
+npm run smoke               # the smoke test over HTTP (--react, --fake-comfy), against a studio of its own
+npm run dev -w apps/web     # the React studio on http://localhost:5173, /api sent to SCENE_STUDIO_URL (default :8080)
+```
 
 ## Before putting it on the public internet
 

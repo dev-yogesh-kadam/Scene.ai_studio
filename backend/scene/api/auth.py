@@ -13,7 +13,8 @@ from .. import audit, staff, vault
 from ..security import (ACCOUNT_FAILURES, ACCOUNT_SECONDS, DUMMY_HASH, MAX_PASSWORD, check_totp, client_address, hash_password,
                         is_https, needs_rehash, new_recovery_codes, new_token, new_totp_secret, recovery_hash, token_hash,
                         totp_uri, verify_password)
-from .deps import CONSOLE_COOKIE, COOKIE, current_user, limited
+from .deps import CONSOLE_COOKIE, COOKIE, counted, current_user, limited
+from ..db import offload
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -100,8 +101,8 @@ def start_session(request, response, user_id, console=False, view_as=None):
 async def auth_state(request: Request):
     """What the sign-in page needs to know before anyone is signed in."""
     state = request.app.state
-    first_run = state.db.one("SELECT 1 FROM users LIMIT 1") is None
-    return {"first_run": first_run, "signup_open": first_run or signup_open(state)}
+    first_run = await state.db.aone("SELECT 1 FROM users LIMIT 1") is None
+    return {"first_run": first_run, "signup_open": first_run or await offload(signup_open, state)}
 
 
 @router.post("/register", dependencies=[limited("register", 10, 3600, by="address")])
@@ -110,8 +111,8 @@ async def register(body: dict, request: Request, response: Response):
     email = str(body.get("email", "")).strip().lower()[:254]
     name = str(body.get("name", "")).strip()[:80] or email.split("@")[0]
     password = str(body.get("password", ""))
-    first_run = state.db.one("SELECT 1 FROM users LIMIT 1") is None
-    if not first_run and not signup_open(state):
+    first_run = await state.db.aone("SELECT 1 FROM users LIMIT 1") is None
+    if not first_run and not await offload(signup_open, state):
         raise HTTPException(403, "New accounts are closed. Ask an admin for access.")
     # The first account is the admin. On an installation that is already on the internet, a stranger must not be the
     # one to make it.
@@ -122,22 +123,22 @@ async def register(body: dict, request: Request, response: Response):
         raise HTTPException(400, "Enter a valid email address.")
     if password_problem(password):
         raise HTTPException(400, password_problem(password))
-    if state.db.one("SELECT 1 FROM users WHERE email = ?", (email,)):
+    if await state.db.aone("SELECT 1 FROM users WHERE email = ?", (email,)):
         raise HTTPException(409, "There is already an account with this email.")
     # Every new account is given credits, so one visitor may not make account after account.
     limit = state.settings.signups_per_day
-    made = state.db.one("SELECT COUNT(*) n FROM audit_log WHERE action = 'Created account' AND ip = ? AND created > ?",
-                        (client_address(request), time.time() - 86400))["n"]
+    made = (await state.db.aone("SELECT COUNT(*) n FROM audit_log WHERE action = 'Created account' AND ip = ? AND created > ?",
+                        (client_address(request), time.time() - 86400)))["n"]
     if not first_run and limit and made >= limit:
-        audit.record(request, None, "Refused a new account", email, "too many from this address today")
+        await offload(audit.record, request, None, "Refused a new account", email, "too many from this address today")
         raise HTTPException(429, "Too many new accounts were made from here today. Try again tomorrow, or ask an admin.")
     # The first account owns the installation.
-    user_id = state.db.run("INSERT INTO users (email, name, password_hash, role, created) VALUES (?, ?, ?, ?, ?)",
+    user_id = await state.db.arun("INSERT INTO users (email, name, password_hash, role, created) VALUES (?, ?, ?, ?, ?)",
                            (email, name, await new_hash(password), "admin" if first_run else "user", time.time()))
-    state.credits.add(user_id, state.credits.signup, "welcome")
-    start_session(request, response, user_id)
-    user = state.db.one("SELECT id, email, name, role, credits FROM users WHERE id = ?", (user_id,))
-    audit.record(request, user, "Created account", email)
+    await offload(lambda: state.credits.add(user_id, state.credits.signup, "welcome"))
+    await offload(start_session, request, response, user_id)
+    user = await state.db.aone("SELECT id, email, name, role, credits FROM users WHERE id = ?", (user_id,))
+    await offload(audit.record, request, user, "Created account", email)
     return shown(state, user)
 
 
@@ -165,20 +166,20 @@ async def check_sign_in(request, body, failed="Failed sign-in"):
     email = str(body.get("email", "")).strip().lower()[:254]
     key = "{}|{}".format(email, client_address(request))
     account = "account|" + email
-    if state.throttle.blocked(key):
+    if await counted(state.throttle.blocked, key):
         raise HTTPException(429, "Too many wrong passwords. Wait a minute and try again.")
-    if state.throttle.blocked(account, ACCOUNT_FAILURES, ACCOUNT_SECONDS):
+    if await counted(state.throttle.blocked, account, ACCOUNT_FAILURES, ACCOUNT_SECONDS):
         raise HTTPException(429, "Too many wrong passwords for this account. Wait a few minutes and try again.")
-    user = state.db.one("SELECT * FROM users WHERE email = ?", (email,))
+    user = await state.db.aone("SELECT * FROM users WHERE email = ?", (email,))
     password = str(body.get("password", ""))
     # An email with no account is checked against a made-up hash, so it takes as long as a wrong password.
     right = await check_password(password, user["password_hash"] if user else DUMMY_HASH)
     if user is None or not right:
-        state.throttle.fail(key)
-        state.throttle.fail(account)
-        audit.record(request, None, failed, email)
+        await counted(state.throttle.fail, key)
+        await counted(state.throttle.fail, account)
+        await offload(audit.record, request, None, failed, email)
         raise HTTPException(401, "Wrong email or password.")
-    state.throttle.clear(key)
+    await counted(state.throttle.clear, key)
     if user["disabled"]:
         raise HTTPException(403, "This account is disabled. Ask an admin for access.")
     if user["mfa_enabled"]:
@@ -187,15 +188,15 @@ async def check_sign_in(request, body, failed="Failed sign-in"):
             return None, JSONResponse({"detail": "Enter the 6-digit code from your authenticator app.", "mfa_required": True}, status_code=401)
         # Five wrong codes lock the account's second step for a minute, from wherever they come.
         second = "mfa|{}".format(user["id"])
-        if state.throttle.blocked(second):
+        if await counted(state.throttle.blocked, second):
             raise HTTPException(429, "Too many wrong codes. Wait a minute and try again.")
-        if not _second_step(state.db, user, code):
-            state.throttle.fail(second)
-            audit.record(request, None, failed, email, "wrong code")
+        if not await offload(_second_step, state.db, user, code):
+            await counted(state.throttle.fail, second)
+            await offload(audit.record, request, None, failed, email, "wrong code")
             return None, JSONResponse({"detail": "That code is not right. Try the newest one.", "mfa_required": True}, status_code=401)
-        state.throttle.clear(second)
+        await counted(state.throttle.clear, second)
     if needs_rehash(user["password_hash"]):   # hashed with the older, weaker settings
-        state.db.run("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(password), user["id"]))
+        await state.db.arun("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(password), user["id"]))
     return user, None
 
 
@@ -204,8 +205,8 @@ async def login(body: dict, request: Request, response: Response):
     user, answer = await check_sign_in(request, body)
     if answer:
         return answer
-    start_session(request, response, user["id"])
-    audit.record(request, user, "Signed in", user["email"])
+    await offload(start_session, request, response, user["id"])
+    await offload(audit.record, request, user, "Signed in", user["email"])
     return shown(request.app.state, {k: user[k] for k in ("id", "email", "name", "role", "credits")})
 
 
@@ -220,13 +221,13 @@ async def view_as(code: str, request: Request):
     found = state.view_codes.pop(token_hash(code), None)
     if not found or found["expires"] < time.time():
         return RedirectResponse("/signin", status_code=303)
-    target = state.db.one("SELECT * FROM users WHERE id = ? AND disabled = 0", (found["user_id"],))
-    admin = state.db.one("SELECT * FROM users WHERE id = ?", (found["admin_id"],))
+    target = await state.db.aone("SELECT * FROM users WHERE id = ? AND disabled = 0", (found["user_id"],))
+    admin = await state.db.aone("SELECT * FROM users WHERE id = ?", (found["admin_id"],))
     if not target or not admin:
         return RedirectResponse("/signin", status_code=303)
     response = RedirectResponse("/projects", status_code=303)
-    start_session(request, response, target["id"], view_as=admin["id"])
-    audit.record(request, admin, "Viewed the studio as a user", target["email"], "read only, for an hour")
+    await offload(start_session, request, response, target["id"], view_as=admin["id"])
+    await offload(audit.record, request, admin, "Viewed the studio as a user", target["email"], "read only, for an hour")
     return response
 
 
@@ -234,7 +235,7 @@ async def view_as(code: str, request: Request):
 async def logout(request: Request, response: Response):
     token = request.cookies.get(COOKIE)
     if token:
-        request.app.state.db.run("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
+        await request.app.state.db.arun("DELETE FROM sessions WHERE token_hash = ?", (token_hash(token),))
     response.delete_cookie(COOKIE)
     return {"ok": True}
 
@@ -248,13 +249,13 @@ async def _confirm_password(request, user, password):
     """Check the signed-in user's password before a change to how they sign in. Wrong ones count like sign-ins."""
     state = request.app.state
     key = "confirm|{}".format(user["id"])
-    if state.throttle.blocked(key):
+    if await counted(state.throttle.blocked, key):
         raise HTTPException(429, "Too many wrong passwords. Wait a minute and try again.")
-    stored = state.db.one("SELECT password_hash FROM users WHERE id = ?", (user["id"],))["password_hash"]
+    stored = (await state.db.aone("SELECT password_hash FROM users WHERE id = ?", (user["id"],)))["password_hash"]
     if not await check_password(str(password or ""), stored):
-        state.throttle.fail(key)
+        await counted(state.throttle.fail, key)
         raise HTTPException(400, "The current password is wrong.")
-    state.throttle.clear(key)
+    await counted(state.throttle.clear, key)
 
 
 def _sign_out_others(request, user):
@@ -268,8 +269,8 @@ async def change_password(body: dict, request: Request, user: dict = Depends(cur
     new = str(body.get("new", ""))
     if password_problem(new):
         raise HTTPException(400, password_problem(new))
-    request.app.state.db.run("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(new), user["id"]))
-    _sign_out_others(request, user)
+    await request.app.state.db.arun("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(new), user["id"]))
+    await offload(_sign_out_others, request, user)
     audit.record(request, user, "Changed password", user["email"])
     return {"ok": True}
 
@@ -282,7 +283,7 @@ def _mfa(db, user):
 
 @router.get("/mfa")
 async def mfa_status(request: Request, user: dict = Depends(current_user)):
-    row = _mfa(request.app.state.db, user)
+    row = await offload(_mfa, request.app.state.db, user)
     return {"enabled": bool(row["mfa_enabled"]), "recovery_left": len(json.loads(row["mfa_recovery"] or "[]"))}
 
 
@@ -291,42 +292,42 @@ async def mfa_setup(body: dict, request: Request, user: dict = Depends(current_u
     """Start turning two-step sign-in on: a new secret for the authenticator app. It is not used until a code from
     the app confirms it was added (POST /api/auth/mfa/enable)."""
     db = request.app.state.db
-    if _mfa(db, user)["mfa_enabled"]:
+    if (await offload(_mfa, db, user))["mfa_enabled"]:
         raise HTTPException(400, "Two-step sign-in is already on.")
     await _confirm_password(request, user, body.get("password"))
     secret = new_totp_secret()
-    db.run("UPDATE users SET mfa_secret = ?, mfa_step = 0 WHERE id = ?", (vault.seal(secret), user["id"]))
+    await db.arun("UPDATE users SET mfa_secret = ?, mfa_step = 0 WHERE id = ?", (vault.seal(secret), user["id"]))
     return {"secret": secret, "uri": totp_uri(secret, user["email"])}
 
 
 @router.post("/mfa/enable", dependencies=[limited("mfa", 10, 300)])
 async def mfa_enable(body: dict, request: Request, user: dict = Depends(current_user)):
     db = request.app.state.db
-    row = _mfa(db, user)
+    row = await offload(_mfa, db, user)
     if row["mfa_enabled"]:
         raise HTTPException(400, "Two-step sign-in is already on.")
     if not row["mfa_secret"]:
         raise HTTPException(400, "Start again: set up the authenticator app first.")
-    step = check_totp(vault.reveal(row["mfa_secret"]), body.get("code"))
+    step = await offload(check_totp, vault.reveal(row["mfa_secret"]), body.get("code"))
     if step is None:
         raise HTTPException(400, "That code is not right. Check the app shows Scene.ai and try the newest code.")
     codes = new_recovery_codes()
-    db.run("UPDATE users SET mfa_enabled = 1, mfa_step = ?, mfa_recovery = ? WHERE id = ?",
+    await db.arun("UPDATE users SET mfa_enabled = 1, mfa_step = ?, mfa_recovery = ? WHERE id = ?",
            (step, json.dumps([recovery_hash(c) for c in codes]), user["id"]))
-    _sign_out_others(request, user)
-    audit.record(request, user, "Turned on two-step sign-in", user["email"])
+    await offload(_sign_out_others, request, user)
+    await offload(audit.record, request, user, "Turned on two-step sign-in", user["email"])
     return {"recovery_codes": codes}
 
 
 @router.post("/mfa/disable", dependencies=[limited("mfa", 10, 300)])
 async def mfa_disable(body: dict, request: Request, user: dict = Depends(current_user)):
     db = request.app.state.db
-    row = _mfa(db, user)
+    row = await offload(_mfa, db, user)
     if not row["mfa_enabled"]:
         return {"ok": True}
     await _confirm_password(request, user, body.get("password"))
-    if not _second_step(db, dict(row, id=user["id"]), str(body.get("code") or "").strip()):
+    if not await offload(_second_step, db, dict(row, id=user["id"]), str(body.get("code") or "").strip()):
         raise HTTPException(400, "That code is not right. Use the newest code from the app, or a recovery code.")
-    db.run("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user["id"],))
+    await db.arun("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user["id"],))
     audit.record(request, user, "Turned off two-step sign-in", user["email"])
     return {"ok": True}

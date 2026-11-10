@@ -1,0 +1,20 @@
+.empty.first {
+  align-items: center;
+  text-align: center;
+  padding: 12vh 16px;
+}
+.empty.first::before {
+  width: 164px;
+  height: 102px;
+  margin-bottom: 8px;
+}
+.empty.first h2 {
+  font: 650 24px/1.2 var(--display);
+  font-stretch: var(--wide);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.empty.first p {
+  max-width: 40ch;
+  margin-top: -8px;
+}

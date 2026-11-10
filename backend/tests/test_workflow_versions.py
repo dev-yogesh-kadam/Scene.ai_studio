@@ -27,13 +27,12 @@ def graph(steps=20, sampler="KSampler"):
                        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "base.safetensors"}}})
 
 
-def test_versions_record_what_arrived_and_say_what_changed(tmp_path):
-    from scene.db import Database
+def test_versions_record_what_arrived_and_say_what_changed(tmp_path, database):
     folder = tmp_path / "wf"
     folder.mkdir()
     (folder / "one.json").write_text(graph(), encoding="utf-8")
     (folder / "one.studio.json").write_text(json.dumps({"title": "One"}), encoding="utf-8")
-    db = Database(tmp_path / "scene.db")
+    db = database
     shelf = versions.Shelf(db, Folder(folder), tmp_path / "kept")
     held = []
     assert shelf.scan(now=100) == [("image/one", "first")]          # what was there when the record began

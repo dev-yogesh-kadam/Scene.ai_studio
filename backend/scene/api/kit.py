@@ -20,8 +20,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from .. import kit, memory, sharing
-from ..db import as_everyone
+from .. import kit, memory, sharing, storage
+from ..db import as_everyone, offload
 from ..references import media_kind, read_text_upload, read_upload, text_kind
 from .deps import current_user, limited, uploading
 
@@ -62,22 +62,22 @@ def describe_soon(request, user, project):
     """Have the agent's model look at the kit's pictures it has not described yet, in the background: the panel and
     the agent read the cards when they are done."""
     state = request.app.state
-    entries = [memory._asset_entry(row) for row in kit.entries(state.db, user["id"], project) if not row["about"]]
-    if not any(e["kind"] in ("image", "video") for e in entries):
-        return
 
-    async def look():
-        await memory.describe_missing(state, user["id"], entries, limit=8, seconds=600)
+    async def look():   # it inherits this request's context: whose rows it reads
+        rows = await offload(kit.entries, state.db, user["id"], project)
+        entries = [memory._asset_entry(row) for row in rows if not row["about"]]
+        if any(e["kind"] in ("image", "video") for e in entries):
+            await memory.describe_missing(state, user["id"], entries, limit=8, seconds=600)
     asyncio.ensure_future(look()).add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
 
 @router.get("")
 async def get_kit(request: Request, project: int = 0, user: dict = Depends(current_user)):
     state = request.app.state
-    project, keeper, reading = _keeper(request, user, project, "viewer")
+    project, keeper, reading = await offload(_keeper, request, user, project, "viewer")
     with reading():
         describe_soon(request, keeper, project)
-        entries = [memory.kit_row(e) for e in kit.entries(state.db, keeper["id"], project)]
+        entries = [memory.kit_row(e) for e in await offload(kit.entries, state.db, keeper["id"], project)]
     return {"entries": entries, "project": bool(project),
             "types": [{"id": tag, "label": said} for tag, said in kit.TYPES.items()]}
 
@@ -87,28 +87,28 @@ async def add_entry(request: Request, user: dict = Depends(current_user)):
     state = request.app.state
     if request.headers.get("content-type", "").startswith("application/json"):
         body = await request.json()
-        project, keeper, reading = _keeper(request, user, body.get("project_id"), "creator")
+        project, keeper, reading = await offload(_keeper, request, user, body.get("project_id"), "creator")
         if not project:
             raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
         folder = _folder(request, keeper)
         name, tag, always = kit.clean_name(body.get("name")), kit.tag_of(body.get("type")), bool(body.get("always"))
         if body.get("item"):
             from .library import _own   # an item of the user's, or one made by someone else in this shared project
-            item = _own(request, user, body["item"], "creator") if isinstance(body["item"], int) else None
-            source = state.outputs.folder(item["user_id"]) / item["filename"] if item else None
+            item = await offload(_own, request, user, body["item"], "creator") if isinstance(body["item"], int) else None
+            source = await offload(state.outputs.folder, item["user_id"]) / item["filename"] if item else None
             if not source or not source.is_file():
                 raise HTTPException(404, "No such library item.")
             with reading():
-                asset = kit.add(state.db, folder, keeper["id"], project, source.read_bytes(), Path(item["filename"]).name, item["kind"],
+                asset = await offload(kit.add, state.db, folder, keeper["id"], project, source.read_bytes(), Path(item["filename"]).name, item["kind"],
                                 name or item["name"], tag, always, True, item.get("about") or "", made_from=item["id"])
                 if body.get("type"):
-                    kit.update(state.db, keeper["id"], asset, {"type": body["type"]})
+                    await offload(kit.update, state.db, keeper["id"], asset, {"type": body["type"]})
         elif isinstance(body.get("text"), str) and body["text"].strip():
             if not name:
                 raise HTTPException(400, "Give the script a name.")
             words = body["text"].strip()[:SCRIPT_CHARS].encode("utf-8")
             with reading():
-                asset = kit.add(state.db, folder, keeper["id"], project, words, name + ".txt", "text", name, body.get("type") or "script", always)
+                asset = await offload(kit.add, state.db, folder, keeper["id"], project, words, name + ".txt", "text", name, body.get("type") or "script", always)
         else:
             raise HTTPException(400, "Send a file, a library item or the text of a script.")
     else:
@@ -116,7 +116,7 @@ async def add_entry(request: Request, user: dict = Depends(current_user)):
         upload = form.get("file")
         if not hasattr(upload, "filename"):
             raise HTTPException(400, "Choose a file.")
-        project, keeper, reading = _keeper(request, user, form.get("project_id"), "creator")
+        project, keeper, reading = await offload(_keeper, request, user, form.get("project_id"), "creator")
         if not project:
             raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
         if text_kind(upload.filename):
@@ -130,12 +130,12 @@ async def add_entry(request: Request, user: dict = Depends(current_user)):
             filename = upload.filename   # a HEIC or AVIF photo is a JPEG or PNG now
         tag = form.get("type") or ("script" if kind == "text" else "voice" if kind == "audio" else "other")
         with reading():
-            asset = kit.add(state.db, _folder(request, keeper), keeper["id"], project, data, filename, kind,
+            asset = await offload(kit.add, state.db, _folder(request, keeper), keeper["id"], project, data, filename, kind,
                             str(form.get("name") or filename.rsplit(".", 1)[0]), tag, str(form.get("always") or "") in ("1", "true", "on"),
                             use_note=str(form.get("use_note") or ""))
     with reading():
         describe_soon(request, keeper, project)
-        return memory.kit_row(kit.entry(state.db, keeper["id"], asset))
+        return memory.kit_row(await offload(kit.entry, state.db, keeper["id"], asset))
 
 
 @router.post("/sheet", dependencies=[limited("kit-sheet", 10, 600), uploading])
@@ -155,7 +155,7 @@ async def import_sheet(request: Request, user: dict = Depends(current_user)):
             raise HTTPException(400, "Choose the sheet: a .csv or .tsv file.")
         data, _ = await read_text_upload(upload)
         given, text = form.get("project_id"), data.decode("utf-8-sig")
-    project, keeper, reading = _keeper(request, user, given, "creator")
+    project, keeper, reading = await offload(_keeper, request, user, given, "creator")
     if not project:
         raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
     try:
@@ -170,21 +170,36 @@ async def import_sheet(request: Request, user: dict = Depends(current_user)):
 
 @router.get("/{asset_id}/file")
 async def entry_file(asset_id: int, request: Request, user: dict = Depends(current_user)):
-    keeper, reading = _keeper_of_entry(request, user, asset_id, "viewer")
+    keeper, reading = await offload(_keeper_of_entry, request, user, asset_id, "viewer")
     with reading():
-        found = kit.entry(request.app.state.db, keeper["id"], asset_id)
+        found = await offload(kit.entry, request.app.state.db, keeper["id"], asset_id)
     path = _folder(request, keeper) / found["filename"] if found else None
+    elsewhere = path and storage.signed(request.app.state, "kit", path)
+    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
+        return elsewhere
     if path is None or not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path)
 
 
+@router.get("/{asset_id}/poster")
+async def entry_poster(asset_id: int, request: Request, user: dict = Depends(current_user)):
+    """A small copy of an entry's picture, or a still from its clip, for its thumbnail (as a library item's poster)."""
+    from .library import poster_response
+    keeper, reading = await offload(_keeper_of_entry, request, user, asset_id, "viewer")
+    with reading():
+        found = await offload(kit.entry, request.app.state.db, keeper["id"], asset_id)
+    if found is None:
+        raise HTTPException(404, "No such NeuralCore entry.")
+    return await poster_response(request, _folder(request, keeper) / found["filename"])
+
+
 @router.put("/{asset_id}")
 async def change_entry(asset_id: int, body: dict, request: Request, user: dict = Depends(current_user)):
-    keeper, reading = _keeper_of_entry(request, user, asset_id)
+    keeper, reading = await offload(_keeper_of_entry, request, user, asset_id)
     with reading():
         try:
-            found = kit.update(request.app.state.db, keeper["id"], asset_id, body)
+            found = await offload(kit.update, request.app.state.db, keeper["id"], asset_id, body)
         except ValueError as error:   # a look, a palette or a relative that does not fit (kit._links)
             raise HTTPException(400, str(error))
     if found is None:
@@ -194,18 +209,18 @@ async def change_entry(asset_id: int, body: dict, request: Request, user: dict =
 
 @router.post("/order")
 async def order_entries(body: dict, request: Request, user: dict = Depends(current_user)):
-    project, keeper, reading = _keeper(request, user, body.get("project_id"), "creator")
+    project, keeper, reading = await offload(_keeper, request, user, body.get("project_id"), "creator")
     ids = [i for i in body.get("ids") or [] if isinstance(i, int)]
     with reading():
-        kit.reorder(request.app.state.db, keeper["id"], project, ids)
-        return {"entries": [memory.kit_row(e) for e in kit.entries(request.app.state.db, keeper["id"], project)]}
+        await offload(kit.reorder, request.app.state.db, keeper["id"], project, ids)
+        return {"entries": [memory.kit_row(e) for e in await offload(kit.entries, request.app.state.db, keeper["id"], project)]}
 
 
 @router.delete("/{asset_id}")
 async def delete_entry(asset_id: int, request: Request, user: dict = Depends(current_user)):
-    keeper, reading = _keeper_of_entry(request, user, asset_id)
+    keeper, reading = await offload(_keeper_of_entry, request, user, asset_id)
     with reading():
-        removed = kit.remove(request.app.state.db, _folder(request, keeper), keeper["id"], asset_id)
+        removed = await offload(kit.remove, request.app.state.db, _folder(request, keeper), keeper["id"], asset_id)
     if not removed:
         raise HTTPException(404, "No such NeuralCore entry.")
     return {"ok": True}

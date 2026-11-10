@@ -74,7 +74,8 @@ def test_claude_answers_in_the_agents_shape_with_its_own_tools_off(monkeypatch):
     args = runs[0]["args"]
     assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--tools") + 1] == ""   # it only answers
     assert args[args.index("--setting-sources") + 1] == "" and "--strict-mcp-config" in args and "--no-session-persistence" in args
-    assert json.loads(args[args.index("--json-schema") + 1])["required"] == ["thought", "reply", "steps", "direction", "question"]
+    assert json.loads(args[args.index("--json-schema") + 1])["required"] == ["thought", "reply", "steps", "direction", "question",
+                                                                             "claims_making", "wants_sound", "go_ahead"]
     assert runs[0]["system"].startswith("You plan.")
     assert runs[0]["message"]["content"][-1]["text"].endswith("hi")
     assert brain.claude_limits["status"] == "allowed"
@@ -116,19 +117,28 @@ def test_claude_says_what_went_wrong(monkeypatch, out, said):
         asyncio.run(brain.ask("You plan.", "hi", [], model="claude/sonnet"))
 
 
-def test_when_the_rounds_run_out_claude_still_answers(monkeypatch):
+def test_a_message_with_no_tab_runs_in_a_session_of_its_own_that_is_then_forgotten(monkeypatch):
     brain = brain_with_claude()
-    working = {"tool": "find_assets", "query": "Mira", "thought": "", "reply": "", "steps": [], "direction": "", "question": None}
-    runs = fake_claude(monkeypatch, printed(answered(working)), printed(answered(working)),
-                       printed(answered({"reply": "Mira is item 7.", "steps": []})))
+    opened = fake_live(monkeypatch, [("tool", "find_assets", {"query": "Mira"}), result(dict(PLAN, reply="Mira is item 7."), session="s-5")])
+    forgotten = []
+    monkeypatch.setattr(claude, "forget", lambda s, session: forgotten.append(session))
 
     async def find_assets(call):
         return "item 7: Mira"
 
     answer = asyncio.run(brain.ask_with_tools("You plan.", "Who is in my book?", [], {"find_assets": find_assets},
-                                              model="claude/sonnet", rounds=2))
-    assert answer["reply"] == "Mira is item 7." and answer["tools"] == ["find_assets", "find_assets"]
-    assert "Now give your answer to the user" in runs[-1]["message"]["content"][-1]["text"]
+                                              model="claude/sonnet"))
+    assert answer["reply"] == "Mira is item 7." and answer["tools"] == ["find_assets", "finish"]
+    assert opened[0].settings["resume"] is None and opened[0].results == ["item 7: Mira"]
+    assert opened[0].closed and not claude.live and forgotten == ["s-5"]   # closed at once, and its file removed
+
+
+def test_claude_is_not_offered_without_the_agent_sdk(monkeypatch):
+    monkeypatch.setattr(claude, "find", lambda path="": "C:/bin/claude.exe")
+    monkeypatch.setattr(claude, "sdk", None)
+    with pytest.raises(RuntimeError, match="pip install claude-agent-sdk"):
+        claude.service("sonnet")
+    assert claude.service("off") is None   # Claude switched off: nothing to refuse
 
 
 def test_with_claude_picked_claude_looks_at_the_pictures_too():
@@ -147,28 +157,21 @@ def session_answer(structured, session="s-1", size=20000):
 
 
 def test_a_thread_sends_only_what_is_new_and_goes_on_in_its_session(monkeypatch, tmp_path):
-    monkeypatch.setattr(claude, "sdk", None)   # without the Agent SDK: Claude Code is run for each call
     brain = brain_with_claude()
     brain.services["claude"]["home"] = str(tmp_path / "sessions")
-    working = {"tool": "find_assets", "query": "Mira", "thought": "", "reply": "", "steps": [], "direction": "", "question": None}
     runs = fake_claude(monkeypatch, printed(session_answer({"reply": "Hello.", "steps": []})),
-                       printed(session_answer(working)), printed(session_answer({"reply": "Mira is item 7.", "steps": []}, size=70000)))
+                       printed(session_answer({"reply": "Mira is item 7.", "steps": []}, size=70000)))
     thread = {"id": None}
     asyncio.run(brain.ask("You plan.", "FULL first message", [], model="claude/sonnet", thread=thread))
     first = runs[0]["args"]
     assert "--resume" not in first and "--no-session-persistence" not in first   # kept, to go on with
     assert runs[0]["room"] == str(tmp_path / "sessions") and thread["id"] == "s-1"
-
-    async def find_assets(call):
-        return "item 7: Mira"
-
-    answer = asyncio.run(brain.ask_with_tools("You plan.", "Only the new message", [], {"find_assets": find_assets},
-                                              model="claude/sonnet", thread=thread))
+    answer = asyncio.run(brain.ask("You plan.", "Only the new message", [], model="claude/sonnet", thread=thread,
+                                   history=[{"role": "user", "content": "FULL first message"}, {"role": "assistant", "content": "Hello."}]))
     assert answer["reply"] == "Mira is item 7."
-    second, third = runs[1], runs[2]
+    second = runs[1]
     assert second["args"][second["args"].index("--resume") + 1] == "s-1"
     assert [b["text"] for b in second["message"]["content"]] == ["Only the new message"]           # not the first message again
-    assert [b["text"] for b in third["message"]["content"]] == ["Result of find_assets:\nitem 7: Mira"]   # nor its own answer
     assert thread["size"] == 70000
     plain = fake_claude(monkeypatch, printed(answered({"reply": "On its own."})))
     asyncio.run(brain.ask("You plan.", "hi", [], model="claude/sonnet"))   # no thread: a call of its own, nothing kept
@@ -192,9 +195,13 @@ def test_a_follow_up_has_only_the_parts_that_changed_and_never_the_history():
 def state_with_a_user(tmp_path):
     import time
     from types import SimpleNamespace
+    from conftest import POSTGRES, empty_postgres
     from scene.db import Database
-    db = Database(tmp_path / "scene.db")
+    empty_postgres()
+    db = Database(POSTGRES)
     db.run("INSERT INTO users (id, email, name, password_hash, created) VALUES (1, 'a@b.c', 'A', '', ?)", (time.time(),))
+    for project in (3, 4):   # the projects its tabs are open in (claude_sessions.project_id is a key, migration 0007)
+        db.run("INSERT INTO projects (id, user_id, name, created) VALUES (?, 1, ?, ?)", (project, "P{}".format(project), time.time()))
     return SimpleNamespace(agent=brain_with_claude(), db=db)
 
 

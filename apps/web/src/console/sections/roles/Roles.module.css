@@ -1,0 +1,21 @@
+.role-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+.role-card summary::-webkit-details-marker {
+  display: none;
+}
+.role-card[open] summary {
+  margin-bottom: 8px;
+}
+.role-grid {
+  display: grid;
+  grid-template-columns: 1fr 64px 64px;
+  gap: 6px 12px;
+  align-items: center;
+  margin-top: 14px;
+  max-width: 460px;
+}
+.role-grid input {
+  justify-self: center;
+}

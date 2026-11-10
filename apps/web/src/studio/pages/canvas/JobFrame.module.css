@@ -1,0 +1,48 @@
+dialog.failed-dialog {
+  width: min(92vw, 560px);
+}
+.failed-dialog h2 {
+  color: var(--bad);
+}
+.failed-reason {
+  margin: 4px 0 14px;
+  line-height: 1.5;
+}
+.failed-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.failed-facts dt {
+  color: var(--muted);
+}
+.failed-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.failed-raw {
+  margin-top: 14px;
+  font-size: 12px;
+}
+.failed-raw summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.failed-raw pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    12px/1.5 ui-monospace,
+    Consolas,
+    monospace;
+}

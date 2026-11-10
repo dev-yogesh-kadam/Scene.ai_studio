@@ -1,0 +1,222 @@
+.la-meters i:nth-child(3) {
+  animation-duration: 0.61s;
+}
+.la-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 0;
+  color: var(--la-dim);
+}
+.la h2 {
+  margin: 0 0 18px;
+  font: 300 clamp(40px, 4.6vw, 72px)/1 var(--la-sans);
+  letter-spacing: -0.03em;
+}
+.la-manifesto {
+  padding-bottom: 110px;
+}
+.la-manifesto p {
+  margin: 70px 0 0;
+  max-width: 1100px;
+  font: 300 clamp(34px, 4.4vw, 64px)/1.08 var(--la-sans);
+  letter-spacing: -0.025em;
+}
+.la-manifesto em {
+  font-style: normal;
+  color: var(--la-dim);
+}
+.la-report {
+  padding-bottom: 110px;
+}
+.la-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: var(--la-line);
+  border: 1px solid var(--la-line);
+}
+.la-take {
+  background: var(--la-ink);
+}
+.la-take .la-pic {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+.la-take.dull .la-pic svg {
+  filter: saturate(0.55) brightness(0.85);
+}
+.la-take.soft .la-pic svg {
+  filter: blur(2px);
+}
+.la-take.kept .la-pic::after {
+  content: 'CIRCLED';
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  font: 500 10px/1 var(--la-mono-font);
+  letter-spacing: 0.1em;
+  padding: 6px 8px;
+  background: var(--la-hi);
+  color: var(--la-ink);
+}
+.la-take dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 14px 16px 18px;
+  font: 400 11px/1.4 var(--la-mono-font);
+}
+.la-take dt {
+  color: var(--la-dim);
+}
+.la-take dd {
+  margin: 0;
+}
+.la-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 32px;
+  margin-top: 70px;
+}
+.la-steps b {
+  display: block;
+  color: var(--la-hi);
+  margin-bottom: 18px;
+}
+.la-steps h3 {
+  margin: 0 0 12px;
+  font: 600 23px/1.1 var(--la-sans);
+  letter-spacing: -0.01em;
+}
+.la-steps p {
+  margin: 0;
+  color: rgba(242, 239, 234, 0.7);
+}
+.la-agent,
+.la-kit,
+.la-price {
+  padding-bottom: 120px;
+}
+.la-split {
+  display: grid;
+  grid-template-columns: 5fr 7fr;
+  gap: 64px;
+  align-items: center;
+  margin-top: 40px;
+}
+.la-split p {
+  color: rgba(242, 239, 234, 0.72);
+  font-size: 18px;
+  max-width: 520px;
+}
+.la-note {
+  color: var(--la-hi) !important;
+  font-size: 11px !important;
+}
+.la-screen {
+  border: 1px solid var(--la-line);
+  background: #0f0f0f;
+}
+.la-bar {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--la-line);
+  color: var(--la-dim);
+}
+.la-you {
+  margin: 22px 22px 0 auto;
+  max-width: 74%;
+  padding: 14px 18px;
+  background: #1d1d1d;
+  font-size: 15px;
+}
+.la-plan {
+  margin: 18px 22px 22px;
+  border: 1px solid var(--la-line);
+}
+.la-plan header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--la-line);
+}
+.la-plan header span {
+  color: var(--la-dim);
+  font-size: 13px;
+}
+.la-row {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--la-line);
+  font-size: 14px;
+}
+.la-thumb {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+.la-row em {
+  font: 400 11px/1 var(--la-mono-font);
+  font-style: normal;
+  color: var(--la-dim);
+}
+.la-plan footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  color: var(--la-dim);
+}
+.la-kit h2 {
+  margin-top: 40px;
+}
+.la-kit table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 40px;
+}
+.la-kit td,
+.la-kit th {
+  padding: 22px 16px 22px 0;
+  border-bottom: 1px solid var(--la-line);
+  vertical-align: top;
+  text-align: left;
+}
+.la-kit td.la-mono {
+  width: 90px;
+  color: var(--la-dim);
+  line-height: 1.9;
+}
+.la-kit th {
+  width: 280px;
+  font: 600 22px/1.2 var(--la-sans);
+}
+.la-kit .la-model {
+  width: 260px;
+  font: 400 12px/1.9 var(--la-mono-font);
+  color: var(--la-hi);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.la-kit td:last-child {
+  color: rgba(242, 239, 234, 0.72);
+}
+.la-price .la-split {
+  grid-template-columns: 7fr 5fr;
+}
+.la-price h2 {
+  margin: 0;
+}
+.la-cut {
+  padding: 140px 16px 70px;
+  text-align: center;
+  border-top: 1px solid var(--la-line);
+}

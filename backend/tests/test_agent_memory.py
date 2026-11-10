@@ -3,6 +3,7 @@ keeps, and the skills it is given."""
 
 import json
 
+from conftest import a_job
 from scene import memory, skills
 from test_api import register
 
@@ -244,6 +245,7 @@ def test_what_a_step_makes_for_reuse_is_kept_in_shared_memory_under_its_name(cli
         target.write_bytes(PNG)
         job = {"id": name, "user_id": me["id"], "workflow": "image/z", "name": name, "summary": "", "started": 0,
                "project_id": film(client), "settings": {"prompt": "a woman", "keep": keep}}
+        a_job(client.app.state.db, name, me["id"], "image/z")
         jobs._record(job, "image", target, {})
 
     made("maya1", {"tag": "character", "name": "Maya"})

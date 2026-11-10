@@ -5,7 +5,7 @@ desc: Use for titles, kinetic text, intros, outros and explainers made of words 
 words: \b(motion graphic\w*|kinetic|title|titles|title sequence|title card|intro|outro|explainer|lower.?third|caption\w*|subtitle\w*|animated text|text animation|typographic|typography)\b
 ---
 These are videos made of words and shapes, drawn here by HyperFrames with no AI model. Make them yourself, now, as
-pages you design with the film tool's html op: load the html-scenes skill first, and hold every page to the example
+pages you design with the render_html tool: load the html-scenes skill first, and hold every page to the example
 at its end (a ground that lives, type set with care, moves that overlap, a figure that counts, a wipe on the cut).
 Never use "generate" for text on screen: a generating model cannot write readable words.
 
@@ -37,5 +37,5 @@ For "motion" and "overlay" set prompt to "". Leave "scenes" empty for every othe
 These scene kinds are one plain style. For anything designed — a brand's fonts and colours, kinetic type, a title
 over a picture or a clip, captions styled for a reel, a lower third laid over a shot, a stat or chart card, an end card
 with a logo, a transition in a brand colour, a still with exact words — write the page yourself with the film tool's
-html op instead, and make it now: load the html-scenes skill (read_skill) before the first page. Look at what it made
+render_html instead, and make it now: load the html-scenes skill (read_skill) before the first page. Look at what it made
 before you show it.

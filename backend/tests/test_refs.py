@@ -2,6 +2,7 @@
 A link with one opens that place for anyone in the project, and for no one else."""
 
 from scene import refs
+from conftest import POSTGRES
 from scene.db import Database
 from test_api import ADMIN
 from test_sharing import BOB, as_, setup
@@ -47,13 +48,12 @@ def test_pages_answer_at_addresses_with_ids(client):
         assert answer.status_code == 200 and "<html" in answer.text.lower()
 
 
-def test_projects_from_before_ids_are_given_theirs(tmp_path):
-    db = Database(tmp_path / "scene.db")
+def test_projects_from_before_ids_are_given_theirs(database):
+    db = database
     user = db.run("INSERT INTO users (name, email, password_hash, created) VALUES ('A', 'a@example.com', 'x', 0)")
     top = db.run("INSERT INTO projects (user_id, name, created) VALUES (?, 'Old', 0)", (user,))
     module = db.run("INSERT INTO projects (user_id, name, created, parent_id) VALUES (?, 'Old module', 0, ?)", (user, top))
-    db.close()
-    db = Database(tmp_path / "scene.db")
+    db = Database(POSTGRES)   # the app starting again
     found = {r["id"]: r["ref"] for r in db.all("SELECT id, ref FROM projects")}
     assert refs.looks_like(found[top], refs.PROJECT) and refs.looks_like(found[module], refs.MODULE)
     db.close()

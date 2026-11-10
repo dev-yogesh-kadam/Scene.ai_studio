@@ -24,10 +24,13 @@ def test_servers_are_added_changed_and_removed_in_the_console(client):
 
 
 def test_the_model_servers_of_before_are_taken_out(client):
+    """Migration 0008 takes them out (as the app's start did before it) and its check keeps any other kind out."""
+    import pytest
     from scene import endpoints
     db = client.app.state.db
-    db.run("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES ('openai', 'Kimi', 'https://x', 'k', '', 1, ?)",
-           (time.time(),))
+    with pytest.raises(Exception, match="endpoints_kind_known"):
+        db.run("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES ('openai', 'Kimi', 'https://x', 'k', '', 1, ?)",
+               (time.time(),))
     endpoints.seed(db, client.app.state.settings)
     assert [r["kind"] for r in db.all("SELECT kind FROM endpoints")] == ["comfy"]
 

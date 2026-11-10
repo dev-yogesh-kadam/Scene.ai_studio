@@ -1,0 +1,221 @@
+:global(.seg) button.on {
+  background: var(--thumb);
+  color: var(--text);
+  box-shadow: var(--sheen), var(--shadow-s);
+}
+.menu-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line);
+}
+:global(.btn).on {
+  background: var(--agent-soft);
+}
+:global(.btn).on {
+  color: var(--agent);
+}
+/* The menus a pill or the permission button opens. */
+.pop {
+  position: fixed;
+  z-index: 60;
+  padding: 6px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  animation: pop-in 0.12s var(--ease);
+  max-width: calc(100vw - 16px);
+}
+.pop-title {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font: 600 11px/1.4 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: 13px/1.35 var(--sans);
+}
+.pop-item:hover,
+.pop-item:focus-visible,
+.pop-item.on {
+  background: var(--hover);
+}
+.pop-item > :global(.icon) {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--muted);
+}
+/* The + menu of a message box or a reference slot: where a file comes from, with what it takes on the right. */
+.add-menu {
+  min-width: 230px;
+}
+.add-menu-hint {
+  margin-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.pop-item > span {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+}
+.pop-perm {
+  width: 300px;
+}
+.pop-perm .pop-item > :global(.icon):last-child {
+  color: var(--agent);
+}
+.pop-models {
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.pop-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 420px;
+}
+.pop-choice {
+  min-width: 46px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--hover);
+  color: var(--text);
+  font: 500 12px/1 var(--sans);
+  cursor: pointer;
+}
+.pop-choice:hover {
+  background: var(--active);
+}
+.pop-choice.on {
+  background: var(--text);
+  color: var(--bg);
+}
+.pop-shapes {
+  display: flex;
+  gap: 6px;
+}
+.pop-shapes .pop-choice {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  height: auto;
+  padding: 12px 14px 8px;
+  border-radius: 12px;
+  background: none;
+  color: var(--muted);
+}
+.pop-shapes .pop-choice.on {
+  background: none;
+  color: var(--text);
+}
+.pop-shapes .pop-choice:hover {
+  background: var(--hover);
+}
+.shape-mark {
+  display: block;
+  border: 1.5px solid currentColor;
+  border-radius: 6px;
+}
+.shape-mark.landscape {
+  width: 44px;
+  height: 26px;
+  margin: 9px 0;
+}
+.shape-mark.square {
+  width: 36px;
+  height: 36px;
+  margin: 4px 4px;
+}
+.shape-mark.portrait {
+  width: 24px;
+  height: 42px;
+  margin: 1px 10px;
+}
+.pop-shapes .pop-choice.on .shape-mark {
+  border-width: 2px;
+}
+.pop-history {
+  width: 320px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+/* The effort of the chosen model, under the models in their menu: Auto and the levels the model takes, in a row. */
+.pop-effort {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.effort-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px 4px;
+}
+.effort-level {
+  position: relative;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: 500 12px/1 var(--sans);
+  cursor: pointer;
+}
+.effort-level:hover {
+  background: var(--hover);
+}
+.effort-level.on {
+  border-color: var(--agent);
+  background: var(--agent-soft);
+  color: var(--agent);
+}
+.effort-note {
+  margin: 0;
+  padding: 2px 10px 6px;
+}
+/* Global rules of the studio, split by area out of the one stylesheet they were in (app.css, then legacy.css). They
+are global because the markup that uses them names its classes as plain strings (shared controls, the shell, and the
+modules carried over from the classic studio and console). Loaded in their old order: common/styles/global.ts. */
+/* ---------------------------------------------------------------- touch and motion
+After Apple's "Designing Fluid Interfaces". Whatever can be pressed answers the moment the pointer goes down, not when
+it lets go. Things that can be dragged lift while they are held; the springs that move them are in js/spring.js. */
+.pop-item:active {
+  scale: 0.97;
+}
+@media (prefers-contrast: more) {
+  .pop {
+    border-color: var(--text);
+  }
+}
+.pop-item:global(.danger),
+.pop-item:global(.danger) :global(.icon) {
+  color: var(--bad);
+}
+.pop-item:global(.danger):hover {
+  background: var(--bad-soft);
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}

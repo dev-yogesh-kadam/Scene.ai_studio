@@ -58,6 +58,23 @@ def test_entries_come_in_from_a_canvas_item_a_file_and_a_script_and_can_be_chang
     assert client.put("/api/kit/999999", json={"name": "x"}).status_code == 404
 
 
+def test_an_entry_has_a_poster_for_its_thumbnail(client):
+    from scene import media
+    me = register(client)
+    project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
+    folder = client.app.state.outputs.folder(me["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=red:s=1280x720", "-frames:v", "1", folder / "face.png"))
+    item = client.app.state.db.run(
+        "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created, project_id) "
+        "VALUES (?, 'upload/file', 'image', 'face', 'face.png', '{}', '{}', 1, ?)", (me["id"], project))
+    entry = add(client, item, "Violet", "character", project=project)
+    poster = client.get("/api/kit/%d/poster" % entry["id"])
+    assert poster.status_code == 200 and poster.headers["content-type"] == "image/jpeg"
+    assert poster.content[:2] == bytes([0xFF, 0xD8])   # a JPEG, whatever the picture was
+    assert client.get("/api/kit/999999/poster").status_code == 404
+
+
 def test_the_always_on_entries_fill_the_slots_meant_for_them_in_order(client):
     me = register(client)
     db = client.app.state.db

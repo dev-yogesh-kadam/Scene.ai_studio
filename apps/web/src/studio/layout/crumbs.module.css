@@ -1,0 +1,41 @@
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px 0 12px;
+  margin-left: -8px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 14px 14px 0;
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  font-size: 14px;
+  white-space: nowrap;
+  max-width: 52vw;
+  overflow: hidden;
+}
+.crumbs a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.crumbs a:hover {
+  color: var(--text);
+}
+.crumbs b {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crumb-sep {
+  color: var(--faint, var(--muted));
+}
+.shell.on-canvas .crumbs {
+  display: none;
+}
+@media (max-width: 860px) {
+  .crumbs {
+    display: none;
+  }
+}

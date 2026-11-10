@@ -1,10 +1,11 @@
 id: html-scenes
 title: HTML scenes — motion graphics you design, drawn by HyperFrames
 version: 2
-desc: Load before writing a page for the film tool's html op: the page rules, fonts, media, and how to make titles, lower thirds, captions, stat cards and end cards look designed.
+desc: Load before writing a page for the render_html tool: the page rules, fonts, media, and how to make titles, lower thirds, captions, stat cards and end cards look designed.
 words: (?!)
+guide: true
 ---
-The film tool's html op draws a page you write to a video with HyperFrames: headless Chrome plays the page frame by
+The render_html tool draws a page you write to a video with HyperFrames: headless Chrome plays the page frame by
 frame, and every frame is exact. Use it for every word on screen and anything designed: titles, kinetic type, lower
 thirds, captions styled for a reel, stat and chart cards, quote cards, layouts over a picture or a clip, transitions
 in a brand colour, end cards, and stills with exact text (format png: a thumbnail's words over its picture). A video
@@ -62,7 +63,7 @@ Each rule is checked before the render, and a page that breaks one comes back wi
    background), gif (a short loop; slow to make, keep it under 6 s), png (one still of the last moment).
 10. Size and length: width and height 16 to 3840 px, even for a video; duration 0.1 to 90 s; fps 24, 25, 30, 50 or 60.
    One render holds about 2,600 million pixels (frames x width x height): 1080x1920 at 30 fps is about 41 s, and about
-   13 s with a video layer. Split anything longer into scenes, render each, and join them with the ffmpeg op.
+   13 s with a video layer. Split anything longer into scenes, render each, and join them with the ffmpeg tool.
 
 Before a scene that is joined with the studio's shots, read one shot's facts (width, height) and render at that size.
 The studio's shots run at 24 fps: make the scene 24 fps too, or the join judders.
@@ -124,7 +125,7 @@ tl.from("#bar", { scaleY: 0, duration: 0.5, ease: "expo.out" }, 0.2)
   .to([name.lines, role.lines], { yPercent: -110, duration: 0.35, ease: "power2.in", stagger: 0.05 }, D - 0.7)
   .to("#bar", { scaleY: 0, transformOrigin: "top", duration: 0.3, ease: "power2.in" }, D - 0.45);
 ```
-Lay it on with the composite op, or with the ffmpeg op (see ffmpeg-recipes: overlay a see-through clip).
+Lay it on with the composite op, or with the ffmpeg tool (see ffmpeg-recipes: overlay a see-through clip).
 
 **Captions that light word by word.** Take the words and their times from the transcript (a few words a group, a
 group on screen at a time). Build one span per word, show the group, and light each word when it is said:

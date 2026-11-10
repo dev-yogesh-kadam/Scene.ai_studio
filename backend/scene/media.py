@@ -8,6 +8,7 @@ import asyncio
 import glob
 import weakref
 import re
+import time
 import shutil
 from pathlib import Path
 
@@ -99,20 +100,66 @@ async def poster(video):
         return await _make_poster(video, target)
 
 
+on_removed = None   # told each file remove_result deletes (main.py sets it: the storage deletes its copy too)
+on_made = None      # told each poster or frame made here (main.py sets it: the storage keeps it)
+
+
 def remove_result(path):
-    """Delete a finished file and what was made from it for its thumbnail: its poster and a video's keyframes."""
+    """Delete a finished file and what was made from it for its thumbnail: its poster and a video's keyframes. On
+    Windows a file ffmpeg still reads (its poster being made, a moment after it was) is tried again for two seconds:
+    call it off the event loop (db.offload) from async code."""
     path = Path(path)
-    path.unlink(missing_ok=True)
+    _gone(path)
     posters = path.parent / ".posters"
     if posters.is_dir():
-        for made in posters.glob(glob.escape(path.name) + "*.jpg"):   # <name>.jpg and <name>.<tenth>.jpg
-            made.unlink(missing_ok=True)
+        for made in [*posters.glob(glob.escape(path.name) + "*.jpg"), *posters.glob(glob.escape(path.name) + "*.webp")]:   # <name>.jpg, <name>.<tenth>.jpg, <name>.webp
+            _gone(made)
+            if on_removed:
+                on_removed(made)
+    if on_removed:   # where the media are kept for good (main.py: Outputs.forget)
+        on_removed(path)
+
+
+def _gone(path, tries=20):
+    for attempt in range(tries):
+        try:
+            return path.unlink(missing_ok=True)
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
+def webp_of(poster_file):
+    """Where a poster's WebP copy is kept: beside it ("shot.mp4.jpg" -> "shot.mp4.webp")."""
+    return Path(poster_file).with_suffix(".webp")
+
+
+def make_webp(poster_file, quality=80):
+    """A poster's WebP copy (a third smaller than its JPEG, for the same picture), made once. None if it can't be."""
+    target = webp_of(poster_file)
+    if target.is_file() and target.stat().st_mtime >= Path(poster_file).stat().st_mtime:
+        return target
+    try:
+        from PIL import Image
+        with Image.open(poster_file) as picture:
+            partial = target.with_name(target.name + ".partial")
+            picture.save(partial, "WEBP", quality=quality, method=4)
+        partial.replace(target)
+        return target
+    except (OSError, ValueError):
+        return None
 
 
 async def make_poster_soon(path):
     """Make a new result's poster now, so its thumbnail is ready when the page asks. Best effort."""
     try:
-        await poster(path)
+        made = await poster(path)
+        webp = await asyncio.to_thread(make_webp, made)   # a smaller copy for the browsers that take it, made once
+        if on_made:
+            for one in (made, webp):
+                if one:
+                    await asyncio.to_thread(on_made, one)
     except (MediaError, OSError):
         pass
 

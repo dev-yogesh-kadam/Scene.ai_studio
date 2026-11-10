@@ -1,0 +1,188 @@
+.step-why {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--agent);
+}
+.result {
+  display: grid;
+  gap: 8px;
+}
+/* Pictures as a contact sheet: every tile the same height, as wide as its own shape makes it, as many to a row as the
+panel has room for. A single picture is larger, but never fills the panel. */
+.result-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.res-tile {
+  position: relative;
+  flex: none;
+  height: 150px;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--media-ground);
+}
+.result-grid.one .res-tile {
+  height: 240px;
+}
+.res-tile.wait {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 12px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.res-tile.wait.running {
+  background: linear-gradient(110deg, var(--hover) 30%, var(--active) 50%, var(--hover) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+.res-tile.wait.failed {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.tile-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.tile-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.25s var(--ease);
+}
+.res-tile:hover .tile-media img {
+  transform: scale(1.03);
+}
+.tile-btn {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+}
+.tile-btn:hover {
+  background: rgba(0, 0, 0, 0.82);
+}
+.tile-btn :global(.icon) {
+  width: 15px;
+  height: 15px;
+}
+.tile-btn.info {
+  left: 6px;
+  top: 6px;
+}
+.tile-btn.open {
+  right: 6px;
+  bottom: 6px;
+}
+.tile-rate {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.res-tile:hover .tile-rate,
+.res-tile:focus-within .tile-rate {
+  opacity: 1;
+}
+.tile-rate :global(.icon-btn) {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}
+.grid-review {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+/* Clips as a grid: four to a row in a wide panel, fewer in a narrow one; under each, its first and last frame. */
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.clip-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.clip-cell .res-tile {
+  width: 100%;
+  height: auto;
+}
+.clip-cell .clip-badge {
+  pointer-events: none;
+}
+.clip-ends {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.pop-info {
+  width: 300px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.pop-info p {
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+:root[data-motion='calm'] .res-tile.wait.running {
+  animation: none;
+}
+.result {
+  justify-items: start;
+}
+.clip-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font: 600 11px/1 var(--sans);
+}
+.clip-badge :global(.icon) {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+.result-grid {
+  width: 100%;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}

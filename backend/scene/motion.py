@@ -21,7 +21,7 @@ from .config import ROOT
 MOTION_DIR = ROOT / "motion"
 TEMPLATES_DIR = MOTION_DIR / "templates"
 CLI = MOTION_DIR / "node_modules" / "hyperframes" / "bin" / "hyperframes.mjs"
-FONT = ROOT / "frontend" / "assets" / "fonts" / "Archivo-latin.woff2"
+FONT = ROOT / "apps" / "web" / "public" / "fonts" / "Archivo-latin.woff2"
 SHAPES = {"landscape": (1920, 1080), "portrait": (1080, 1920), "square": (1080, 1080)}
 CARD_FPS = 30
 RENDER_TIMEOUT = 900            # seconds
@@ -214,7 +214,7 @@ async def _lint(project, node):
     return [said(f) for f in found.get("findings", []) if f.get("severity") == "warning" and f.get("code") not in QUIET_FINDINGS][:8]
 
 
-async def _run(command, folder, check=True):
+async def _run(command, folder, check=True, timeout=RENDER_TIMEOUT):
     """Run HyperFrames and return what it said. check: a failure raises MotionError with its last words."""
     env = dict(os.environ, HYPERFRAMES_FFMPEG_PATH=media.ffmpeg_path(), HYPERFRAMES_FFPROBE_PATH=str(_ffprobe()),
                # Nothing is sent anywhere and nothing is installed while rendering. The one thing looked up is a Google
@@ -225,13 +225,13 @@ async def _run(command, folder, check=True):
     process = await asyncio.create_subprocess_exec(*command, cwd=str(folder), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, **flags)
     try:
-        output, _ = await asyncio.wait_for(process.communicate(), RENDER_TIMEOUT)
+        output, _ = await asyncio.wait_for(process.communicate(), timeout)
     except asyncio.CancelledError:   # the job this was for was cancelled
         process.kill()
         raise
     except asyncio.TimeoutError:
         process.kill()
-        raise MotionError("The render took longer than {} minutes and was stopped.".format(RENDER_TIMEOUT // 60))
+        raise MotionError("The render took longer than {} minutes and was stopped.".format(timeout // 60))
     text = output.decode("utf-8", "replace")
     if check and process.returncode:
         lines = [line for line in text.splitlines() if line.strip()]
@@ -360,3 +360,238 @@ async def render_page(page, width, height, seconds, target, fps=30, fmt="mp4", m
 
     still = max(0.0, seconds - 1.0 / fps) if fmt == "png" else None
     return await _produce(fill, {}, target, fps, "Page", node, work_dir, fmt="mp4" if fmt == "png" else fmt, still=still, lint=True)
+
+
+# ---------------------------------------------------------------- projects written file by file (pages.py)
+
+PROJECT_PIXELS_MOST = 14_000_000_000   # frames x width x height in one project render: about 60 s of 1080x1920 at 60 fps
+PROJECT_TIMEOUT = 2400                 # seconds a project's render may take
+CHECK_TIMEOUT = 300
+STILLS_MOST = 12
+SKILLS_DIR = MOTION_DIR / "node_modules" / "hyperframes" / "dist" / "skills"   # HyperFrames' own guides (Apache-2.0)
+SFX_DIR = SKILLS_DIR / "media-use" / "audio" / "assets" / "sfx"               # its sound effects (Pixabay licence)
+THREE_DIR = MOTION_DIR / "node_modules" / "three"
+LOTTIE_DIR = MOTION_DIR / "node_modules" / "lottie-web" / "build" / "player"
+CDN = r"(?:https?:)?//(?:cdn\.jsdelivr\.net/npm|unpkg\.com|cdnjs\.cloudflare\.com/ajax/libs)/"
+# The libraries a project may name on a CDN, loaded from the copies here: (pattern, where its copy is in lib/).
+LIBRARIES = [(re.compile(CDN + r"gsap(?:@[\w.-]+)?/(?:[\w.-]+/)?(?:dist/)?(\w+?)(?:\.min)?\.js", re.IGNORECASE),
+              lambda m: "lib/gsap/{}.min.js".format(m.group(1))),
+             (re.compile(CDN + r"three(?:@[\w.-]+)?/build/([\w.-]+\.js)", re.IGNORECASE), lambda m: "./lib/three/build/" + m.group(1)),
+             (re.compile(CDN + r"three(?:@[\w.-]+)?/examples/jsm/([\w./-]+\.js)", re.IGNORECASE),
+              lambda m: "./lib/three/examples/jsm/" + m.group(1)),
+             (re.compile(CDN + r"lottie-web(?:@[\w.-]+)?/(?:build/player/)?(lottie[\w.]*\.js)", re.IGNORECASE),
+              lambda m: "lib/lottie/" + m.group(1))]
+BARE_GSAP = re.compile(r"""(\bsrc\s*=\s*["'])(?:\./)?(\w+\.min\.js)(["'])""")
+IMPORT = re.compile(r"""\bimport\s*\(\s*["']([^"']+)["']|\bfrom\s*["']([^"']+)["']|\bimport\s+["']([^"']+)["']""")
+IMPORT_MAP = ('<script type="importmap">{"imports": {"three": "./lib/three/build/three.module.js", '
+              '"three/addons/": "./lib/three/examples/jsm/"}}</script>')
+TEXT_FILES = {".html", ".css", ".js", ".mjs", ".svg", ".json"}
+
+
+def sound_effects():
+    """The sound effects a project may play by name (assets/sfx/whoosh.mp3)."""
+    return sorted(p.name for p in SFX_DIR.glob("*.mp3")) if SFX_DIR.is_dir() else []
+
+
+def _stage(project, media_files):
+    """Make a copy of a project renderable here: its media in assets/, the sound effects in assets/sfx/, the libraries
+    it names in lib/ (from the copies installed here), and its CDN links pointed at them."""
+    assets = project / "assets"
+    assets.mkdir(exist_ok=True)
+    for name, path in (media_files or {}).items():
+        shutil.copy(path, assets / name)
+    if SFX_DIR.is_dir():
+        shutil.copytree(SFX_DIR, assets / "sfx", dirs_exist_ok=True, ignore=shutil.ignore_patterns("*.md", "*.json"))
+    words = ""
+    for path in project.rglob("*"):
+        if path.is_file() and path.suffix.lower() in TEXT_FILES:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for pattern, local in LIBRARIES:
+                text = pattern.sub(local, text)
+            text = BARE_GSAP.sub(lambda m: m.group(1) + "lib/gsap/" + m.group(2) + m.group(3)
+                                 if (GSAP_DIST / m.group(2)).is_file() else m.group(0), text)
+            path.write_text(text, encoding="utf-8")
+            words += text
+    if GSAP_DIST.is_dir():
+        shutil.copytree(GSAP_DIST, project / "lib" / "gsap", dirs_exist_ok=True, ignore=shutil.ignore_patterns("*.map", "*.cjs"))
+    if "three" in words and THREE_DIR.is_dir():
+        shutil.copytree(THREE_DIR / "build", project / "lib" / "three" / "build", dirs_exist_ok=True, ignore=shutil.ignore_patterns("*.cjs"))
+        if "addons" in words or "examples/jsm" in words:
+            shutil.copytree(THREE_DIR / "examples" / "jsm", project / "lib" / "three" / "examples" / "jsm", dirs_exist_ok=True)
+        index = project / "index.html"
+        page = index.read_text(encoding="utf-8") if index.is_file() else ""
+        if re.search(r"""from\s*["']three""", words) and "importmap" not in page:   # "three" and "three/addons/..." resolve here
+            index.write_text(re.sub(r"(<head[^>]*>)", lambda m: m.group(1) + "\n" + IMPORT_MAP, page, count=1, flags=re.IGNORECASE),
+                             encoding="utf-8")
+    if "lottie" in words and LOTTIE_DIR.is_dir():
+        shutil.copytree(LOTTIE_DIR, project / "lib" / "lottie", dirs_exist_ok=True, ignore=shutil.ignore_patterns("*.d.ts", "cjs", "esm"))
+
+
+def check_project(project):
+    """A staged project, checked before HyperFrames sees it: what its files may reach (nothing off its folder, nothing on
+    the web but fonts), and its index.html's root. Returns (width, height, seconds). Raises MotionError with every problem."""
+    index = project / "index.html"
+    if not index.is_file():
+        raise MotionError("The project has no index.html: write the root composition first.")
+    have = {p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file()}
+    problems = []
+    for path in sorted(project.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in TEXT_FILES or path.relative_to(project).parts[0] == "lib":
+            continue
+        name, text = path.relative_to(project).as_posix(), path.read_text(encoding="utf-8", errors="replace")
+        for pattern, what in BARRED[:3] + BARRED[4:]:   # imports are checked below: a project imports its libraries
+            for found in dict.fromkeys(m.group(1) if m.groups() else m.group(0) for m in pattern.finditer(text)):
+                problems.append("{}: {}".format(name, what.format(found)))
+        for found in IMPORT.finditer(text):
+            spec = next(s for s in found.groups() if s)
+            if not (spec == "three" or spec.startswith("three/addons/") or
+                    (not re.match(r"^[a-z][\w+.-]*:|^/", spec, re.IGNORECASE) and ".." not in spec)):
+                problems.append("{}: an import of {} (import only the libraries here and the project's own files)".format(name, spec[:100]))
+        for found in LINKS.finditer(text):
+            value = next(v for v in (found.group(2), found.group(4), found.group(6)) if v is not None).strip()
+            if not value or value.startswith(("#", "data:", "blob:")) or "${" in value or value.lower().startswith("javascript:void"):
+                continue
+            site = re.match(r"^(?:https?:)?//([^/?#]+)", value, re.IGNORECASE)
+            if site:
+                if site.group(1).lower() not in FONT_SITES:
+                    problems.append("{}: {} is on the web; give the file as media and use assets/<its name>".format(name, value[:100]))
+                continue
+            local = re.split(r"[?#]", value)[0]
+            local = local[2:] if local.startswith("./") else local
+            if re.match(r"^[a-z][\w+.-]*:|^/|^\\", local, re.IGNORECASE) or ".." in local:
+                problems.append("{}: {} is off the project's folder".format(name, value[:100]))
+            elif local and local not in have and not any(h.startswith(local.rstrip("/") + "/") for h in have):
+                problems.append("{}: {} is not in the project (media are assets/<name>, sound effects assets/sfx/<name>)".format(name, value[:100]))
+    page = index.read_text(encoding="utf-8", errors="replace")
+    root = re.search(r"<[^>]*\bdata-composition-id\s*=\s*[\"'][^\"']+[\"'][^>]*>", page, re.IGNORECASE)
+    said = {k.lower(): v for k, v in re.findall(r"\b(data-width|data-height|data-duration)\s*=\s*[\"']([^\"']*)[\"']",
+                                                root.group(0), re.IGNORECASE)} if root else {}
+    try:
+        width, height, seconds = int(float(said["data-width"])), int(float(said["data-height"])), float(said["data-duration"])
+        if not (PAGE_SIDE[0] <= width <= PAGE_SIDE[1] and PAGE_SIDE[0] <= height <= PAGE_SIDE[1] and 0 < seconds <= 180):
+            raise ValueError
+    except (KeyError, ValueError):
+        problems.append("index.html: its root needs data-width and data-height (16 to 3840 px) and data-duration (seconds, at most 180)")
+        width = height = seconds = 0
+    if problems:
+        raise MotionError("The project can't be rendered: {}.".format("; ".join(dict.fromkeys(problems[:20]))))
+    return width, height, seconds
+
+
+MEDIA_NAMED = re.compile(r"""assets/([A-Za-z0-9][\w.-]{0,120}\.[A-Za-z0-9]{2,5})\b""")
+
+
+def quick_check(source):
+    """check_project of a project as it is written, before it has media (no HyperFrames, a second or so): staged in a
+    copy as a render stages it, with an empty stand-in for each assets/<name> it names. Returns (width, height,
+    seconds, [the media names it needs at the render]). Raises MotionError with every problem."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        project = Path(tmp) / "project"
+        shutil.copytree(source, project, ignore=shutil.ignore_patterns(".hyperframes", "renders"))
+        _stage(project, {})
+        words = "".join(p.read_text(encoding="utf-8", errors="replace") for p in project.rglob("*")
+                        if p.is_file() and p.suffix.lower() in TEXT_FILES and p.relative_to(project).parts[0] != "lib")
+        needed = sorted(name for name in set(MEDIA_NAMED.findall(words)) if not (project / "assets" / name).exists())
+        for name in needed:
+            (project / "assets" / name).touch()
+        width, height, seconds = check_project(project)
+    return width, height, seconds, needed
+
+
+async def _check(project, node):
+    """HyperFrames' whole check of a project (lint, runtime, layout, contrast, motion, craft, audio): raises
+    MotionError with its errors, so they can be fixed; returns its warnings."""
+    await _run([node_path(node), str(CLI), "check", str(project), "--json"], project.parent, check=False, timeout=CHECK_TIMEOUT)
+    reports = sorted((project / ".hyperframes" / "artifacts" / "checks").glob("*.json"), key=lambda p: p.stat().st_mtime)
+    try:
+        found = json.loads(reports[-1].read_text(encoding="utf-8")) if reports else {}
+    except ValueError:
+        found = {}
+
+    def said(f):
+        at = " at {:g} s".format(f["time"]) if isinstance(f.get("time"), (int, float)) and f["time"] else ""
+        where = str(f.get("sourceFile") or "").replace("\\", "/")
+        where = where.split("/project/", 1)[-1] if "/project/" in where else where   # the file in the project, not where it was staged
+        return "{}{}: {}{}".format(where, at, f.get("message", ""), " ({})".format(f["fixHint"]) if f.get("fixHint") else "")[:420]
+
+    findings = [f for part in found.values() if isinstance(part, dict) for f in part.get("findings") or [] if isinstance(f, dict)]
+    errors = [said(f) for f in findings if f.get("severity") == "error"]
+    if errors:
+        raise MotionError("HyperFrames' check found {} problem{}: {}".format(len(errors), "" if len(errors) == 1 else "s", " · ".join(errors[:10])))
+    warnings = dict.fromkeys(said(f) for f in findings if f.get("severity") == "warning" and f.get("code") not in QUIET_FINDINGS)
+    return list(warnings)[:14]   # once each: one finding is often made at every sampled moment
+
+
+def project_budget(width, height, seconds, fps, has_video):
+    most = PROJECT_PIXELS_MOST // (VIDEO_SHARE if has_video else 1)
+    if width * height * seconds * fps > most:
+        raise MotionError("That is too much for one render: {:.0f} s at {}x{} and {} fps holds at most {:.0f} s. Render the scenes "
+                          "as projects of their own and join them.".format(seconds, width, height, fps, most / (width * height * fps)))
+
+
+async def render_project(source, target, fps=30, fmt="mp4", media_files=None, frames=None, review=True, node="", work_dir=None):
+    """Render a project the agent wrote (pages.py) to `target`: a video (mp4; webm, see-through; gif), or with `frames`
+    (seconds) one picture of each of those moments (style frames to approve before the whole is made). Before the
+    render the project is checked (check_project, then HyperFrames' own check, whose errors stop it); after it, the
+    review sheets HyperFrames makes of a film (its beats, the seams between scenes, the phone view) are kept to look at,
+    and a video's sound is levelled to the loudness the apps play at.
+
+    Returns {"seconds", "width", "height", "files": [path], "each": [{"_kind", "_name"?, ...}], "notes"?}."""
+    ready = status(node)
+    if not ready["ready"]:
+        raise MotionError(ready["detail"])
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if work_dir:
+        Path(work_dir).mkdir(parents=True, exist_ok=True)
+    files, each = [], []
+    async with _one_at_a_time:
+        with tempfile.TemporaryDirectory(dir=work_dir, ignore_cleanup_errors=True) as tmp:
+            project = Path(tmp) / "project"
+            shutil.copytree(source, project, ignore=shutil.ignore_patterns(".hyperframes", "renders"))
+            _stage(project, media_files)
+            width, height, seconds = check_project(project)
+            if not frames:
+                page = "".join(p.read_text(encoding="utf-8", errors="replace") for p in project.rglob("*.html"))
+                project_budget(width, height, seconds, fps, bool(re.search(r"<\s*video\b", page, re.IGNORECASE)))
+            notes = await _check(project, node)
+            if frames:
+                times = sorted({round(min(max(0.0, float(t)), max(0.0, seconds - 1.0 / fps)), 3) for t in frames})[:STILLS_MOST]
+                shots = Path(tmp) / "stills"
+                await _run([node_path(node), str(CLI), "snapshot", str(project), "--at", ",".join("{:g}".format(t) for t in times),
+                            "--no-end", "--keep", "--output", str(shots)], project.parent, timeout=CHECK_TIMEOUT)
+                for at in times:
+                    found = shots / "at-{:g}s.png".format(at)
+                    if not found.is_file():
+                        continue
+                    kept = target.with_name("{}_at{:g}s.png".format(target.stem, at))
+                    shutil.move(str(found), str(kept))
+                    files.append(kept)
+                    each.append({"_kind": "image", "_name": "Style frame · {:g} s".format(at), "at": at})
+                if not files:
+                    raise MotionError("HyperFrames made no stills of the project.")
+            else:
+                video = target.with_suffix(PAGE_FORMATS[fmt])
+                await _run([node_path(node), str(CLI), "render", str(project), "--output", str(video), "--fps", str(fps),
+                            *(["--format", fmt] if fmt != "mp4" else []), *(["--gif-loop", "0"] if fmt == "gif" else []), "--quiet"],
+                           project.parent, timeout=PROJECT_TIMEOUT)
+                if not video.is_file() or not video.stat().st_size:
+                    raise MotionError("HyperFrames finished without making a video.")
+                files.append(video)
+                each.append({"_kind": "image" if fmt == "gif" else "video"})
+                if review and fmt != "gif":
+                    sheets = Path(tmp) / "review"
+                    await _run([node_path(node), str(CLI), "snapshot", str(project), "--review", "--output", str(sheets)],
+                               project.parent, check=False, timeout=CHECK_TIMEOUT)
+                    for sheet in sorted(sheets.glob("review-*.jpg")):
+                        kept = target.with_name("{}_{}.jpg".format(target.stem, sheet.stem))
+                        shutil.move(str(sheet), str(kept))
+                        files.append(kept)
+                        each.append({"_kind": "image", "_name": "Review sheet · " + sheet.stem.replace("review-", "").replace("-", " ")})
+    if fmt == "mp4" and not frames and (await media.probe(files[0]))["audio"]:   # one loudness for the whole film
+        levelled = files[0].with_name(files[0].stem + "_level.mp4")
+        await media.level(files[0], levelled)
+        levelled.replace(files[0])
+    made = await media.probe(files[0])
+    return {"seconds": 0.0 if frames else made["seconds"], "width": made["width"], "height": made["height"],
+            "files": files, "each": each, **({"notes": notes} if notes else {})}

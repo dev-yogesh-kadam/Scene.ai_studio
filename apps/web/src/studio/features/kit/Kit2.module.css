@@ -1,0 +1,86 @@
+.kit-links-line {
+  padding: 2px 6px 0;
+  font-size: 11px;
+}
+.kit-links {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.kit-links h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.kit-kin {
+  display: grid;
+  gap: 6px;
+}
+.kit-kin-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.kit-kin-row input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.kit-remove {
+  flex: none;
+  opacity: 0.5;
+}
+.kit-row:hover .kit-remove {
+  opacity: 1;
+}
+.kit-empty {
+  padding: 18px 8px;
+  text-align: center;
+}
+.kit-empty p {
+  margin: 4px 0;
+}
+
+.kit-grip {
+  touch-action: none;
+}
+.kit-row.lifted {
+  position: relative;
+  z-index: 3;
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    0 18px 30px -12px rgba(0, 0, 0, 0.55);
+}
+.kit-row.lifted .kit-grip {
+  cursor: grabbing;
+  color: var(--text);
+}
+.views-seg {
+  width: 100%;
+}
+.views-seg button {
+  flex: 1;
+}
+.mem-thumb.video svg {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  color: #fff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.mem-act svg {
+  width: 13px;
+  height: 13px;
+}
+.mem-chev svg {
+  width: 14px;
+  height: 14px;
+}
+.mem-chev.open svg {
+  transform: rotate(90deg);
+}
+.mem-raw-btn.on {
+  color: var(--text);
+  border-color: var(--line-strong);
+}

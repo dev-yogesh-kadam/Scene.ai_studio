@@ -12,8 +12,8 @@ from fastapi.responses import StreamingResponse
 
 import httpx
 
-from .. import sharing, health, kit, media, memory, placement, runs
-from ..db import as_everyone
+from .. import sharing, health, kit, media, memory, placement, runs, storage
+from ..db import as_everyone, offload
 from ..catalog import KINDS
 from ..comfy import workflows
 from ..references import media_kind, owns_upload, read_upload, upload_reference
@@ -67,10 +67,10 @@ async def billed_seconds(state, wf, schema, settings, user_id=None):
         return float(given)
     parent = settings.get("parent")
     if user_id and isinstance(parent, int):
-        row = state.db.one("SELECT filename, context FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (parent, user_id))
+        row = await state.db.aone("SELECT filename, context FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (parent, user_id))
         if row:
             known = json.loads(row["context"] or "{}").get("duration")
-            path = state.outputs.folder(user_id) / row["filename"]
+            path = None if known else await offload(storage.here, await offload(state.outputs.folder, user_id) / row["filename"])
             return float(known) if known else (await media.probe(path))["seconds"] if path.is_file() else None
     return None
 
@@ -78,14 +78,14 @@ async def billed_seconds(state, wf, schema, settings, user_id=None):
 async def price(state, wf, settings, user_id=None):
     """Time estimate and credit cost of a job with these settings. The cost follows what was asked for, not the time."""
     schema = workflows.describe(wf)
-    estimate = workflows.estimate(wf, settings, state.jobs.history())
+    estimate = workflows.estimate(wf, settings, await offload(state.jobs.history))
     estimate["seconds"] = await billed_seconds(state, wf, schema, settings, user_id)
     chosen = workflows.context(schema, settings)
-    estimate["credits"] = state.credits.cost(wf["id"], estimate["seconds"], chosen)
+    estimate["credits"] = await offload(state.credits.cost, wf["id"], estimate["seconds"], chosen)
     # What each other resolution and quality would cost, for the page to show beside them ("1080p · 200 cr").
     others = {"quality": [c["id"] for o in schema["options"] if o["id"] == "quality" for c in o["choices"]],
               "resolution": list(schema["resolutions"]) if "resolution" in chosen else []}
-    estimate["choices"] = {group: {str(v): state.credits.cost(wf["id"], estimate["seconds"], dict(chosen, **{group: v})) for v in values}
+    estimate["choices"] = {group: {str(v): await offload(state.credits.cost, wf["id"], estimate["seconds"], dict(chosen, **{group: v})) for v in values}
                            for group, values in others.items() if values}
     return estimate
 
@@ -143,16 +143,16 @@ async def announcement(request: Request, user: dict = Depends(current_user)):
     """The message an admin wants every user to see, while it lasts. Empty when there is none. Under maintenance, its
     message, in place of any other."""
     db = request.app.state.db
-    closed = health.maintenance(db)
+    closed = await offload(health.maintenance, db)
     if closed:
         return {"text": closed["text"], "level": "warning", "until": None, "maintenance": True}
-    return current_announcement(db)
+    return await offload(current_announcement, db)
 
 
 @router.get("/workflows")
 async def list_workflows(request: Request, user: dict = Depends(current_user)):
     state = request.app.state
-    listed = [w for w in await state.catalog.listing() if state.credits.enabled(w["id"], user)]
+    listed = [w for w in await state.catalog.listing() if await offload(state.credits.enabled, w["id"], user)]
     return {"workflows": listed, "kinds": KINDS, "default": state.catalog.current(state.settings.default_workflow)}
 
 
@@ -160,7 +160,7 @@ async def list_workflows(request: Request, user: dict = Depends(current_user)):
 async def get_workflow(kind: str, name: str, request: Request, user: dict = Depends(current_user)):
     schema = workflows.describe(await request.app.state.catalog.load("{}/{}".format(kind, name)))
     # Only the resolutions an admin left on are offered; "resolutions_off" names the others, for a page to say so.
-    allowed = request.app.state.credits.allowed_resolutions(schema["id"], schema["resolutions"])
+    allowed = await offload(request.app.state.credits.allowed_resolutions, schema["id"], schema["resolutions"])
     schema["resolutions_off"] = [r for r in schema["resolutions"] if r not in allowed]
     schema["resolutions"] = allowed
     return schema
@@ -170,14 +170,14 @@ async def get_workflow(kind: str, name: str, request: Request, user: dict = Depe
 async def estimate(settings: dict, request: Request, user: dict = Depends(current_user)):
     state = request.app.state
     wf = await state.catalog.load(str(settings.get("workflow", "")))
-    switched_on(state, wf["id"], user)
-    note = fit_resolution(state, workflows.describe(wf), settings)   # priced at the resolution it would be made at
-    return dict(await price(state, wf, settings, user["id"]), balance=state.credits.balance(user["id"]), resolution_note=note)
+    await offload(switched_on, state, wf["id"], user)
+    note = await offload(fit_resolution, state, workflows.describe(wf), settings)   # priced at the resolution it would be made at
+    return dict(await price(state, wf, settings, user["id"]), balance=await offload(state.credits.balance, user["id"]), resolution_note=note)
 
 
 @router.get("/jobs")
 async def list_jobs(request: Request, user: dict = Depends(current_user)):
-    return {"jobs": request.app.state.jobs.snapshot(user["id"])}
+    return {"jobs": await offload(request.app.state.jobs.snapshot, user["id"])}
 
 
 def needs_caption(wf, settings, prompt_id):
@@ -233,21 +233,21 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     except (KeyError, ValueError, TypeError):
         raise HTTPException(400, "Missing or broken settings.")
     wf = await state.catalog.load(str(settings.get("workflow", "")))
-    switched_on(state, wf["id"], user)
+    await offload(switched_on, state, wf["id"], user)
     schema = workflows.describe(wf)
     settings["workflow"] = wf["id"]   # the id it goes by now, if it was asked for by the id of a workflow it replaced
     slots = workflows.refs_in_use(schema, settings)   # a file for a slot the chosen mode does not read is not sent on
 
     project_id = settings.get("project_id") or None
     if project_id:   # the user's own project, or one shared with them as a creator or more
-        sharing.require(state.db, user, project_id, "creator")
+        await offload(sharing.require, state.db, user, project_id, "creator")
 
     # The library item this is made from, if any: the canvas puts the result on the same row.
     parent = settings.get("parent")
-    owned = isinstance(parent, int) and state.db.one("SELECT 1 FROM generations WHERE id = ? AND user_id = ?", (parent, user["id"]))
+    owned = isinstance(parent, int) and await state.db.aone("SELECT 1 FROM generations WHERE id = ? AND user_id = ?", (parent, user["id"]))
     if isinstance(parent, int) and not owned and project_id:   # another member's frame in the same shared project
         with as_everyone():
-            owned = state.db.one("SELECT 1 FROM generations WHERE id = ? AND project_id = ?", (parent, project_id))
+            owned = await state.db.aone("SELECT 1 FROM generations WHERE id = ? AND project_id = ?", (parent, project_id))
     settings["parent"] = parent if owned else None
     # A result the agent planned as something to reuse is kept in shared memory when it is done: only a type and a name.
     settings["keep"] = memory.clean_keep(settings.get("keep"), wf["id"].split("/", 1)[0])
@@ -273,7 +273,7 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     values = settings.get("values") if isinstance(settings.get("values"), dict) else {}
     if prompt_id and "@" in str(values.get(prompt_id) or ""):
         given = {s for s, r in (settings.get("refs") or {}).items() if r} | {k[4:] for k in form.keys() if k.startswith("ref:")}
-        values[prompt_id], placed = kit.mentions(schema, values[prompt_id], kit.entries(state.db, user["id"], project_id), given, slots)
+        values[prompt_id], placed = kit.mentions(schema, values[prompt_id], await offload(kit.entries, state.db, user["id"], project_id), given, slots)
         settings["refs"] = {**(settings.get("refs") or {}), **{slot: {"asset_id": asset} for slot, asset in placed.items()}}
 
     refs = {}
@@ -281,10 +281,10 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
         if slot not in slots or not isinstance(ref, dict):
             continue
         if ref.get("asset_id"):
-            keeper = kit.keeper_of(state.db, user["id"], project_id) if project_id else user["id"]   # a shared project's kit is its owner's
+            keeper = await offload(kit.keeper_of, state.db, user["id"], project_id) if project_id else user["id"]   # a shared project's kit is its owner's
             with as_everyone() if keeper != user["id"] else contextlib.nullcontext():
-                asset = state.db.one("SELECT * FROM assets WHERE id = ? AND user_id = ?", (ref["asset_id"], keeper))
-            path = asset and state.assets_dir / str(keeper) / asset["filename"]
+                asset = await state.db.aone("SELECT * FROM assets WHERE id = ? AND user_id = ?", (ref["asset_id"], keeper))
+            path = asset and await offload(storage.here, state.assets_dir / str(keeper) / asset["filename"])
             if not asset or not path.is_file():
                 raise HTTPException(400, "A saved asset used here no longer exists.")
             data = path.read_bytes()
@@ -293,7 +293,7 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
                           "name": asset["name"]}
         elif ref.get("comfy_name"):
             # Only a file this user put on the render server: another user's file name must not be usable.
-            if not owns_upload(state.db, user["id"], ref["comfy_name"]):
+            if not await offload(owns_upload, state.db, user["id"], ref["comfy_name"]):
                 raise HTTPException(400, "A reference file used here is not one of yours. Add it again.")
             refs[slot] = {"comfy_name": str(ref["comfy_name"]), "name": str(ref.get("name", ""))[:200]}
     kinds = {r["id"]: r["kind"] for r in schema["refs"]}
@@ -310,13 +310,13 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
         refs[key[4:]] = {"comfy_name": name, "name": upload.filename[:200]}
         # Shared memory keeps every file dropped into a job, as an upload of this project, so it can be used again by name.
         try:
-            memory.keep_upload(state.db, state.assets_dir / str(user["id"]), user["id"], project_id, upload.filename,
+            await offload(memory.keep_upload, state.db, state.assets_dir / str(user["id"]), user["id"], project_id, upload.filename,
                                data, given or wanted or "image", labels.get(key[4:], ""))
         except OSError:
             pass   # the job does not depend on the copy
     settings["refs"] = refs
 
-    resolution_note = fit_resolution(state, schema, settings)   # a resolution switched off is made at the next one allowed
+    resolution_note = await offload(fit_resolution, state, schema, settings)   # a resolution switched off is made at the next one allowed
     _, ctx = workflows.build_prompt(wf, dict(settings, clips=1))  # fails here, not in the queue, if a setting is wrong
     ctx = dict(workflows.context(schema, settings), seed=ctx.get("seed"))
     # What the library's details panel shows later: the prompt and each named setting as it was used.
@@ -329,22 +329,22 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     settings["workflow_title"] = schema["title"]
     quote = await price(state, wf, settings, user["id"])
     name = str(settings.get("name") or wf["id"].split("/", 1)[1]).strip()[:80]
-    over = state.credits.cap_problem(user["id"], quote["credits"])
+    over = await offload(state.credits.cap_problem, user["id"], quote["credits"])
     if over:
         raise HTTPException(429, over)
     run_of = settings.get("run_of") if isinstance(settings.get("run_of"), str) and runs.RUN.match(settings["run_of"]) else ""
     settings["run_of"] = run_of
-    if not state.credits.charge(user["id"], quote["credits"], "generation"):
+    if not await offload(state.credits.charge, user["id"], quote["credits"], "generation"):
         raise HTTPException(402, "This needs {} credits and you have {}. Ask an admin for more.".format(
-            quote["credits"], state.credits.balance(user["id"])))
-    job_id = state.jobs.add(user["id"], name, wf["id"], settings, workflows.summary(schema, ctx),
+            quote["credits"], await offload(state.credits.balance, user["id"])))
+    job_id = await offload(state.jobs.add, user["id"], name, wf["id"], settings, workflows.summary(schema, ctx),
                             quote["minutes"] * 60 if quote["minutes"] else None, quote["credits"], project_id, quote["seconds"])
     return {"id": job_id, "credits": quote["credits"], "resolution_note": resolution_note}
 
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, request: Request, user: dict = Depends(current_user)):
-    if not request.app.state.jobs.remove(user["id"], job_id):
+    if not await offload(request.app.state.jobs.remove, user["id"], job_id):
         raise HTTPException(404, "No such job.")
     return {"ok": True}
 
@@ -352,7 +352,7 @@ async def delete_job(job_id: str, request: Request, user: dict = Depends(current
 @router.get("/ref-preview")
 async def ref_preview(name: str, request: Request, user: dict = Depends(current_user)):
     """Show a reference of this user's that is already in ComfyUI's input folder (used by "Re-run")."""
-    if not owns_upload(request.app.state.db, user["id"], name):
+    if not await offload(owns_upload, request.app.state.db, user["id"], name):
         raise HTTPException(404, "No such file.")
     response = await request.app.state.comfy.view(name, "", "input")
     if response.status_code != 200:
@@ -372,14 +372,14 @@ async def ref_preview(name: str, request: Request, user: dict = Depends(current_
 async def events(ws: WebSocket):
     state = ws.app.state
     token = ws.cookies.get(COOKIE)
-    user = user_for_token(state.db, token)
+    user = await offload(user_for_token, state.db, token)
     if user is None or not same_origin(ws):   # another site's page must not open a connection with the user's cookie
         await ws.close(code=4401)
         return
     await ws.accept()
     state.hub.add(user["id"], ws)
     try:
-        await ws.send_text(state.live_message(user["id"]))
+        await ws.send_text(await state.db.offload(state.live_message, user["id"]))
         while True:
             # The page tells which part of the studio it shows, for the admin's list of who is online. It also asks
             # now and then whether the connection still works ("ping"), and is answered with where its jobs stand.
@@ -387,10 +387,10 @@ async def events(ws: WebSocket):
                 said = json.loads(await ws.receive_text())
                 if said.get("ping"):
                     # The session is checked again: one signed out, ended by an admin or of a disabled account stops here.
-                    if user_for_token(state.db, token) is None:
+                    if await offload(user_for_token, state.db, token) is None:
                         await ws.close(code=4401)
                         return
-                    await ws.send_text(state.live_message(user["id"]))
+                    await ws.send_text(await state.db.offload(state.live_message, user["id"]))
                     continue
                 page = str(said.get("page", ""))
             except (ValueError, AttributeError):

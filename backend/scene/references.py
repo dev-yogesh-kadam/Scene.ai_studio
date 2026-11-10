@@ -29,7 +29,7 @@ CONVERTED = {".heic", ".heif", ".avif"}
 # What the user brings that is words, filed as "text": a script (.docx, .pdf, .txt, .md), a transcript (.srt, .json) or
 # a sheet a spreadsheet exports (.csv, .tsv: a shot tracker, an asset sheet). A Word document or a PDF is kept as the
 # plain text of it.
-TEXT_SUFFIXES = {".srt", ".json", ".txt", ".md", ".docx", ".pdf", ".csv", ".tsv"}
+TEXT_SUFFIXES = {".srt", ".json", ".txt", ".md", ".docx", ".pdf", ".csv", ".tsv", ".svg"}   # an SVG: a logo, as its markup
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 MAX_DOCX_BYTES = 25 * 1024 * 1024          # a Word file with pictures in it is larger than its words
 MAX_PDF_BYTES = 50 * 1024 * 1024
@@ -135,6 +135,12 @@ async def read_text_upload(upload):
         data.decode("utf-8-sig")
     except UnicodeError:
         raise HTTPException(400, "{} is not a text file.".format(label))
+    if suffix == ".svg":   # a logo: kept as its markup, with nothing in it that runs or reaches out
+        from .logo import LogoError, clean_svg
+        try:
+            data = clean_svg(data.decode("utf-8-sig")).encode("utf-8")
+        except LogoError as error:
+            raise HTTPException(400, "{}: {}".format(label, error))
     return data, name
 
 
@@ -174,7 +180,7 @@ async def upload_reference(comfy, filename, data, mime=None, db=None, user_id=No
     stored = "{}{}_{}".format(UPLOAD_PREFIX, hashlib.sha1(data).hexdigest()[:10], safe_name(filename)[:200])
     name = await comfy.upload(stored, data, mime or mimetypes.guess_type(stored)[0])
     if db is not None and user_id is not None:
-        db.run("INSERT INTO uploads (user_id, name, created) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", (user_id, name, time.time()))
+        await db.arun("INSERT INTO uploads (user_id, name, created) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", (user_id, name, time.time()))
     return name
 
 

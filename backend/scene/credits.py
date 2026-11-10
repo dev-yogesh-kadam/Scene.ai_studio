@@ -10,6 +10,7 @@ less than a 1080p final. The factors are the studio's, set in the console, and a
 A job is charged when it is queued and refunded if it fails or is cancelled.
 """
 
+import contextvars
 import math
 import json
 import time
@@ -59,6 +60,10 @@ def _int(value):
 
 def kind_of(workflow_id):
     return {MOTION: "motion", OVERLAY: "overlay"}.get(workflow_id) or workflow_id.split("/", 1)[0]
+
+
+# The plan whose reservation pays for what is charged now: set by the plan runner while it queues a step (plans.py).
+PREPAID = contextvars.ContextVar("prepaid", default=None)
 
 
 class Credits:
@@ -131,8 +136,15 @@ class Credits:
         return self.llm_cost(model) or self.token_cost(model, tokens)
 
     def pricing(self, workflow_id):
-        """The workflow's own pricing, or None when it follows the rate of its kind."""
-        return self.db.one("SELECT * FROM workflow_pricing WHERE workflow = ?", (workflow_id,))
+        """The workflow's own pricing, or None when it follows the rate of its kind. Kept in the shared cache with several
+        processes (shared.py), dropped when a price changes (pricing_changed)."""
+        read = lambda: self.db.one("SELECT * FROM workflow_pricing WHERE workflow = ?", (workflow_id,))   # noqa: E731
+        return self.db.shared.cached("pricing", workflow_id, read) if self.db.shared is not None else read()
+
+    def pricing_changed(self):
+        """A workflow's price or audience changed: every process reads it again."""
+        if self.db.shared is not None:
+            self.db.shared.changed("pricing")
 
     def enabled(self, workflow_id, user=None):
         """Whether `user` may use the workflow: it is switched on and, while it is tried out by admins alone (the
@@ -252,6 +264,8 @@ class Credits:
 
     def cap_problem(self, user_id, amount):
         """Why a charge of `amount` would go over the user's daily limit, or None. Admins have no limit."""
+        if PREPAID.get() is not None:   # a plan's step: its plan's whole price was checked at approval, and reserved
+            return None
         user = self.db.one("SELECT role, daily_cap FROM users WHERE id = ?", (user_id,))
         if not user or user["role"] == "admin" or amount <= 0:
             return None
@@ -268,9 +282,29 @@ class Credits:
 
     def charge(self, user_id, amount, reason, job_id=None, note="", project_id=None):
         """Take credits if the user has enough. Returns False when they don't. `project_id`: the project it was spent in,
-        when no job says so (a message to the agent)."""
+        when no job says so (a message to the agent). While a plan's step is queued (PREPAID), a generation's price is
+        taken from what was reserved for the plan at its approval, and only what the reservation lacks from the balance."""
         if amount <= 0:
             return True
+        plan = PREPAID.get()
+        if plan is not None and reason == "generation":
+            return self._charge_plan(user_id, plan, amount, reason, job_id, note, project_id)
+        return self._charge(user_id, amount, reason, job_id, note, project_id)
+
+    def _charge_plan(self, user_id, plan, amount, reason, job_id, note, project_id):
+        row = self.db.one("SELECT reserved_left FROM agent_plans WHERE id = ? AND user_id = ?", (plan, user_id))
+        take = min(amount, row["reserved_left"]) if row else 0
+        if take and not self.db.change("UPDATE agent_plans SET reserved_left = reserved_left - ? WHERE id = ? AND reserved_left >= ?",
+                                       (take, plan, take)):
+            take = 0
+        rest = amount - take
+        if rest and not self._charge(user_id, rest, reason, job_id, note, project_id):
+            if take:   # the step is not queued: what it drew goes back to the reservation
+                self.db.run("UPDATE agent_plans SET reserved_left = reserved_left + ? WHERE id = ?", (take, plan))
+            return False
+        return True
+
+    def _charge(self, user_id, amount, reason, job_id=None, note="", project_id=None):
         if not self.db.change("UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?",
                               (amount, user_id, amount)):
             return False
@@ -286,11 +320,13 @@ class Credits:
 
     def add(self, user_id, amount, reason, job_id=None, note=""):
         """Give credits, or take them with a negative amount. A balance never goes below zero.
-        Returns the change that was actually made."""
-        before = self.balance(user_id)
-        amount = max(amount, -before)
+        Returns the change that was actually made. One statement, the user's row locked while it reads the balance: two
+        changes at once (requests run side by side on the database's threads) can't both take what is only there once."""
+        row = self.db.one("UPDATE users u SET credits = GREATEST(u.credits + ?, 0) FROM "
+                          "(SELECT id, credits AS before FROM users WHERE id = ? FOR UPDATE) b WHERE u.id = b.id "
+                          "RETURNING u.credits - b.before AS made", (amount, user_id))
+        amount = row["made"] if row else 0
         if amount:
-            self.db.run("UPDATE users SET credits = credits + ? WHERE id = ?", (amount, user_id))
             self._log(user_id, amount, reason, job_id, note)
         return amount
 

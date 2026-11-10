@@ -1,0 +1,29 @@
+# What never goes into the image: secrets, local data, packages that are installed inside it, build output, tests.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+node_modules
+**/node_modules
+apps/web/dist
+apps/mobile/dist
+apps/web/test-results
+apps/web/playwright-report
+apps/web/tests/look/shots
+test-results
+config.json
+config.example.json
+secret.key
+storage
+docs
+documentation
+legacy
+craft skills
+craft skills v2
+motion/.fonts
+*.mp4
+*.zip
+backend/tests
+workflows/archive
+scene.env

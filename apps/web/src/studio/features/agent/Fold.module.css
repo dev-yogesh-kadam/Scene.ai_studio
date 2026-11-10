@@ -1,0 +1,193 @@
+.fold {
+  display: grid;
+}
+.fold-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: 13px/20px var(--sans);
+  text-align: left;
+}
+button.fold-head {
+  cursor: pointer;
+}
+button.fold-head:hover .fold-title,
+button.fold-head:hover .fold-caret {
+  color: var(--text);
+}
+.fold-head > :global(.icon) {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.fold-title {
+  flex: none;
+}
+.fold-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 500;
+}
+.fold-caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+.fold-caret :global(.icon) {
+  width: 14px;
+  height: 14px;
+}
+.fold-body {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 4px 7px;
+  padding-left: 14px;
+  border-left: 2px solid var(--line);
+}
+.fold-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.fold.info .fold-title {
+  color: var(--text);
+  font-weight: 600;
+}
+.fold.info .fold-sub,
+.fold.cancelled .fold-sub {
+  color: var(--muted);
+  font-weight: 400;
+}
+.fold.nested .fold-head {
+  font-size: 12.5px;
+}
+.work-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+.work-row :global(.icon) {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-top: 2px;
+}
+button.fold-head:active .fold-title {
+  opacity: 0.7;
+}
+:root[data-motion='calm'] .live-spinner {
+  animation: none;
+  border-top-color: color-mix(in srgb, var(--agent) 25%, transparent);
+}
+/* Global rules of the studio, split by area out of the one stylesheet they were in (app.css, then legacy.css). They
+are global because the markup that uses them names its classes as plain strings (shared controls, the shell, and the
+modules carried over from the classic studio and console). Loaded in their old order: common/styles/global.ts. */
+/* ---------------------------------------------------------------- the agent's work between message and reply
+One quiet row: the marks of what it did, how long ("Worked 1m 43s") and its last step, in grey, so the reply is what
+is read first. Opened, it becomes a soft card with the steps down a line. While the agent works it is a card in the
+agent's colour with a turning ring and the clock. */
+.fold.work > .fold-head {
+  gap: 10px;
+}
+.fold.work .fold-title {
+  color: var(--text);
+  font-weight: 600;
+}
+.fold.work .fold-sub {
+  color: var(--muted);
+  font-weight: 400;
+}
+.fold.work.open:not(.nested) {
+  padding: 8px 12px 10px;
+  margin: 0 -12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.fold-glyphs {
+  display: inline-flex;
+  flex: none;
+}
+.fold-glyphs > span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--active);
+  color: var(--text);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.fold-glyphs > span + span {
+  margin-left: -6px;
+}
+.fold-glyphs :global(.icon) {
+  width: 12px;
+  height: 12px;
+}
+.work-foot {
+  margin: 4px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font: 400 11px/1.5 var(--mono);
+  font-stretch: 87.5%;
+  color: var(--faint);
+}
+.live-spinner {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--agent) 25%, transparent);
+  border-top-color: var(--agent);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.stretch {
+  justify-self: stretch;
+}
+[data-live] .fold.work {
+  padding: 10px 12px 12px;
+  margin: 0 -12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--agent) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent) 20%, transparent);
+}
+[data-live] .fold.work .fold-title {
+  color: var(--agent);
+}
+[data-live] .fold.work .fold-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-stretch: 87.5%;
+  margin-left: auto;
+}
+[data-live] .work-row.row-in {
+  animation: row-in 0.3s var(--ease);
+}
+:root[data-motion='calm'] [data-live] .work-row.row-in {
+  animation: none;
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}

@@ -30,13 +30,13 @@ def open_row(db, user_id, project_id, run, model, window):
     """The session row of this tab in this project, made the first time. Returns it as a dict."""
     project_id = int(project_id or 0)
     with as_everyone():
-        row = db.one("SELECT * FROM claude_sessions WHERE user_id = ? AND run = ? AND project_id = ?", (user_id, run, project_id))
+        row = db.one("SELECT * FROM claude_sessions WHERE user_id = ? AND run = ? AND project_id IS NOT DISTINCT FROM NULLIF(?, 0)", (user_id, run, project_id))
         if row is None:
             now = time.time()
             db.run("INSERT INTO claude_sessions (ref, user_id, project_id, run, agent, model, context_window, status, started, active) "
-                   "VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)",
+                   "VALUES (?, ?, NULLIF(?, 0), ?, ?, ?, ?, 'idle', ?, ?) ON CONFLICT DO NOTHING",   # another request made it first
                    (refs.new(refs.SESSION), user_id, project_id, run, agent_ref(run), model, int(window or 0), now, now))
-            row = db.one("SELECT * FROM claude_sessions WHERE user_id = ? AND run = ? AND project_id = ?", (user_id, run, project_id))
+            row = db.one("SELECT * FROM claude_sessions WHERE user_id = ? AND run = ? AND project_id IS NOT DISTINCT FROM NULLIF(?, 0)", (user_id, run, project_id))
     return row
 
 
@@ -94,7 +94,8 @@ def listing(db, q="", status="", limit=200):
         params += [q.strip()] * 5 + [like] * 5
     with as_everyone():
         return db.all(
-            "SELECT s.*, u.name AS user_name, u.email AS user_email, p.name AS project_name, p.ref AS project_ref, "
+            "SELECT s.*, COALESCE(s.project_id, 0) AS project_id, "   # 0 for no project, as the console has always been told
+            "u.name AS user_name, u.email AS user_email, p.name AS project_name, p.ref AS project_ref, "
             "pp.name AS parent_name, pp.ref AS parent_ref, "
             "(SELECT COUNT(*) FROM claude_events e WHERE e.session_id = s.id) AS events "
             "FROM claude_sessions s JOIN users u ON u.id = s.user_id LEFT JOIN projects p ON p.id = s.project_id "
@@ -105,7 +106,8 @@ def listing(db, q="", status="", limit=200):
 def one(db, ref):
     with as_everyone():
         return db.one(
-            "SELECT s.*, u.name AS user_name, u.email AS user_email, p.name AS project_name, p.ref AS project_ref, "
+            "SELECT s.*, COALESCE(s.project_id, 0) AS project_id, "   # 0 for no project, as the console has always been told
+            "u.name AS user_name, u.email AS user_email, p.name AS project_name, p.ref AS project_ref, "
             "pp.name AS parent_name, pp.ref AS parent_ref FROM claude_sessions s JOIN users u ON u.id = s.user_id "
             "LEFT JOIN projects p ON p.id = s.project_id LEFT JOIN projects pp ON pp.id = p.parent_id WHERE s.ref = ?", (ref,))
 

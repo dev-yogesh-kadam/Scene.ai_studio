@@ -1,0 +1,11 @@
+.slot-tag {
+  max-width: 100%;
+  font: 500 11px/16px var(--mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-tag:global(.muted) {
+  color: var(--muted);
+}

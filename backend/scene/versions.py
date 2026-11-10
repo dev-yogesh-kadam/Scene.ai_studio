@@ -32,6 +32,8 @@ def set_audience(db, workflow_id, audience):
     db.run("INSERT INTO workflow_pricing (workflow, enabled, admins_only) VALUES (?, ?, ?) "
            "ON CONFLICT (workflow) DO UPDATE SET enabled = excluded.enabled, admins_only = excluded.admins_only",
            (workflow_id, int(audience != "off"), int(audience == "admins")))
+    if db.shared is not None:
+        db.shared.changed("pricing")   # every process sees who is offered it now (shared.py)
 
 
 def audience(row):

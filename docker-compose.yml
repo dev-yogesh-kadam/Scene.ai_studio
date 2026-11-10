@@ -1,0 +1,80 @@
+# Scene.ai on one machine with everything it can use, as it would run on Azure (docs/azure.md):
+#   db        PostgreSQL 18 with pgvector (Azure Database for PostgreSQL Flexible Server)
+#   blob      Azurite, Microsoft's Azure Storage emulator (Azure Blob Storage)
+#   redis     Redis (Azure Cache for Redis)
+#   migrate   runs the migrations once, as the owner account, then stops
+#   app       the studio (8080) and the admin console (8090)
+#
+#   docker compose up --build
+# The passwords below are for this local setup only. ComfyUI is not in it: point SCENE_COMFY_URL at a render server.
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.1-pg18
+    environment:
+      POSTGRES_PASSWORD: local-postgres
+      SCENE_OWNER_PASSWORD: local-owner
+      SCENE_APP_PASSWORD: local-app
+    volumes:
+      - db:/var/lib/postgresql   # PostgreSQL 18 images keep their data in a folder of their own below this
+      - ./scripts/docker/postgres-init.sh:/docker-entrypoint-initdb.d/scene.sh:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "scene"]
+      interval: 5s
+      retries: 20
+
+  blob:
+    image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+    command: azurite-blob --blobHost 0.0.0.0 --loose --skipApiVersionCheck
+    volumes:
+      - blob:/data
+    # The app shares this container's network (app: network_mode), so the links it signs, http://127.0.0.1:10000/...,
+    # open in a browser on this machine too; on Azure they are https://<account>.blob.core.windows.net/... So the
+    # app's ports are published here.
+    ports:
+      - "127.0.0.1:10000:10000"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8090:8090"
+
+  redis:
+    image: redis:7.4-alpine
+
+  migrate:
+    build: .
+    command: ["python", "/app/scripts/migrate.py", "upgrade"]
+    environment: &settings
+      SCENE_DATABASE_URL: postgresql://scene_app:local-app@db:5432/scene
+      SCENE_DATABASE_OWNER_URL: postgresql://scene_owner:local-owner@db:5432/scene
+      SCENE_STORAGE_BACKEND: azure
+      # Azurite's well-known development account (not a secret).
+      SCENE_AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+      SCENE_REDIS_URL: redis://redis:6379/0
+      SCENE_SECRET_KEY: ${SCENE_SECRET_KEY:?Set SCENE_SECRET_KEY (a Fernet key) in your shell or an .env file}
+      SCENE_COMFY_URL: ${SCENE_COMFY_URL:-http://host.docker.internal:8188}
+      SCENE_BACKUP_DATABASE: "false"
+      SCENE_SECURE_COOKIES: "false"
+      # Through Docker's ports no request comes from "this machine", so the first account (the admin) could not be
+      # made; the studio is published on 127.0.0.1 only, so only this machine reaches it anyway.
+      SCENE_FIRST_ACCOUNT_LOCAL: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    environment: *settings
+    network_mode: service:blob   # its ports are published by blob, above
+    volumes:
+      - data:/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      blob:
+        condition: service_started
+      redis:
+        condition: service_started
+
+volumes:
+  db:
+  blob:
+  data:

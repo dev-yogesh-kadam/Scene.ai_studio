@@ -1,0 +1,14 @@
+.balance {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--field);
+  margin-top: 16px;
+}
+.balance b {
+  font: 500 18px/1.2 var(--sans);
+}

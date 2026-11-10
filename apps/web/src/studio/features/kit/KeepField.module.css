@@ -1,0 +1,21 @@
+.keep-field {
+  margin: 10px 0 4px;
+}
+.keep-check {
+  margin-top: 0;
+  font-size: 13px;
+}
+.keep-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.keep-name {
+  flex: 1;
+  min-width: 0;
+}
+.keep-type {
+  width: auto;
+  flex: none;
+  max-width: 140px;
+}

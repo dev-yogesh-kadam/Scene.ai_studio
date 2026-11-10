@@ -12,6 +12,7 @@ from .. import audit, staff
 from ..security import same_origin, token_hash
 from .auth import check_sign_in, start_session
 from .deps import CONSOLE_COOKIE, admin_problem, admin_user, limited, user_for_token
+from ..db import offload
 
 router = APIRouter(prefix="/api/console", tags=["console"])
 
@@ -27,12 +28,12 @@ async def login(body: dict, request: Request, response: Response):
     user, answer = await check_sign_in(request, body, failed="Failed sign-in to the admin console")
     if answer:
         return answer
-    problem = admin_problem(request.app.state.db, user)
+    problem = await offload(admin_problem, request.app.state.db, user)
     if problem:
-        audit.record(request, user, "Refused the admin console", user["email"], problem)
+        await offload(audit.record, request, user, "Refused the admin console", user["email"], problem)
         raise HTTPException(403, "This account is not an admin." if not staff.is_staff(user) else problem)
-    start_session(request, response, user["id"], console=True)
-    audit.record(request, user, "Signed in to the admin console", user["email"])
+    await offload(start_session, request, response, user["id"], console=True)
+    await offload(audit.record, request, user, "Signed in to the admin console", user["email"])
     return _shown(request.app.state, user)
 
 
@@ -40,7 +41,7 @@ async def login(body: dict, request: Request, response: Response):
 async def logout(request: Request, response: Response):
     token = request.cookies.get(CONSOLE_COOKIE)
     if token:
-        request.app.state.db.run("DELETE FROM sessions WHERE token_hash = ? AND console = 1", (token_hash(token),))
+        await request.app.state.db.arun("DELETE FROM sessions WHERE token_hash = ? AND console = 1", (token_hash(token),))
     response.delete_cookie(CONSOLE_COOKIE)
     return {"ok": True}
 
@@ -55,14 +56,14 @@ async def events(ws: WebSocket):
     """The number of people with the studio open, sent at once and again whenever it changes; the number of open
     alerts, likewise; and a word whenever a job changes, for the pages that follow the queue."""
     state = ws.app.state
-    user = user_for_token(state.db, ws.cookies.get(CONSOLE_COOKIE), console=True)
-    if user is None or admin_problem(state.db, user) or not same_origin(ws):
+    user = await offload(user_for_token, state.db, ws.cookies.get(CONSOLE_COOKIE), console=True)
+    if user is None or await offload(admin_problem, state.db, user) or not same_origin(ws):
         await ws.close(code=4401)
         return
     await ws.accept()
     state.hub.watch(ws)
     try:
-        await ws.send_text(json.dumps({"alerts": len(state.db.all("SELECT id FROM alerts WHERE ended IS NULL")), "jobs": state.hub.queue()}))
+        await ws.send_text(json.dumps({"alerts": len(await state.db.aall("SELECT id FROM alerts WHERE ended IS NULL")), "jobs": await state.db.offload(state.hub.queue)}))
         while True:
             await ws.receive_text()   # the console says nothing; this only notices it leave
     except WebSocketDisconnect:

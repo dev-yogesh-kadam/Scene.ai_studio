@@ -1,0 +1,104 @@
+/* The panel on the right of the canvas: Quick action and the Agent, one at a time. */
+.side-panel {
+  position: absolute;
+  right: 12px;
+  top: 60px;
+  bottom: 16px;
+  width: var(--panel-w, 380px);
+  max-width: calc(100% - 24px);
+  z-index: 4;
+  display: none;
+  flex-direction: column;
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+}
+/* The left edge of the panel, to drag it wider or narrower. */
+.panel-grip {
+  position: absolute;
+  left: -5px;
+  top: 20px;
+  bottom: 20px;
+  width: 10px;
+  z-index: 1;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.panel-grip::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: calc(50% - 20px);
+  width: 3px;
+  height: 40px;
+  border-radius: 2px;
+  background: var(--control);
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.panel-head {
+  padding-left: 14px;
+}
+.panel-title {
+  font: 650 14px/20px var(--display);
+  font-stretch: var(--wide);
+  letter-spacing: 0;
+}
+.agent-name {
+  color: var(--agent);
+}
+
+/* Bulk generation, an admin's tab of the canvas panel (components/bulk.js): one prompt to many workflows at once. */
+.panel-bulk {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  grid-auto-rows: max-content;
+  padding: 4px 2px 20px;
+  overflow: auto;
+}
+[data-panel] > .side-panel {
+  display: flex;
+}
+.panel-grip:hover::after,
+[data-resizing] .panel-grip::after {
+  opacity: 1;
+}
+.panel-head .tabs button {
+  padding: 0 9px;
+  display: grid;
+  place-items: center;
+}
+/* Quick actions, NeuralCore, the agent: each fills the panel under its head. */
+.panel-quick {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Full screen: the panel covers the canvas and the conversation reads in a centred column, the tabs stay along the
+   top. The panel starts 12 px below the tool bars, with the same 12 px on every other side. */
+[data-full] > .side-panel {
+  top: 70px;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: auto;
+  max-width: none;
+  z-index: 6;
+}
+[data-full] > .side-panel > .panel-grip,
+[data-full] > .side-panel > .panel-head {
+  display: none;
+}

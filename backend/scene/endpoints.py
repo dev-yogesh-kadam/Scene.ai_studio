@@ -17,6 +17,7 @@ import httpx
 
 from . import vault
 from .comfy.client import Comfy
+from .db import offload
 
 KINDS = {"comfy": "ComfyUI", "langfuse": "Langfuse"}
 FIELDS = ("kind", "name", "url", "api_key", "models", "active")
@@ -78,16 +79,23 @@ class ComfyPool:
         self.main = Comfy(self.main_url)   # the main server (app.state.comfy)
         self.clients = {}
         self.busy = {}   # url -> the id of the studio's job running there
+        # The comfy rows of the endpoints table, read at start and again after each change (reload): the address is
+        # asked for on every request to the render server, which must not wait for the database.
+        self.rows = listed(db, "comfy")
+
+    def reload(self):
+        """Read the servers again after the console changed them (a database thread)."""
+        self.rows = listed(self.db, "comfy")
 
     def servers(self):
         """[{"name", "url"}] of the servers a render may go to now, the main one first."""
-        rows = listed(self.db, "comfy")
+        rows = self.rows
         if not rows:
             return [{"name": "", "url": self.fallback}] if self.fallback else []
         return [{"name": r["name"], "url": r["url"]} for r in rows if r["active"] and r["url"]]
 
     def main_url(self):
-        every = self.servers() or [{"url": r["url"]} for r in listed(self.db, "comfy")[:1]]
+        every = self.servers() or [{"url": r["url"]} for r in self.rows[:1]]
         return every[0]["url"] if every else self.fallback
 
     def client(self, url):
@@ -153,4 +161,4 @@ async def status(state):
         return item
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2)) as http:
-        return list(await asyncio.gather(*(one(http, row) for row in listed(state.db))))
+        return list(await asyncio.gather(*(one(http, row) for row in await offload(listed, state.db))))

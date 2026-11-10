@@ -1,0 +1,339 @@
+:global(.seg) button.on {
+  background: var(--thumb);
+  color: var(--text);
+  box-shadow: var(--sheen), var(--shadow-s);
+}
+:global(.btn).on {
+  background: var(--agent-soft);
+}
+:global(.btn).on {
+  color: var(--agent);
+}
+/* The message box: typed text with chips in it, one per attached item (a small picture and its name). */
+.agent-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 60px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  line-height: 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  transition: border-color 0.2s var(--ease);
+}
+.agent-input:hover {
+  border-color: var(--muted);
+}
+.agent-input:focus {
+  outline: 3px solid color-mix(in srgb, var(--focus) 45%, transparent);
+  outline-offset: 1px;
+}
+.agent-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  line-height: 20px;
+  display: block;
+  padding: 4px 0;
+}
+.attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: 24px;
+  margin: 0 1px;
+  padding: 0 2px;
+  vertical-align: middle;
+  border-radius: 7px;
+  background: var(--agent-soft);
+  color: var(--agent);
+  font: 500 12px/16px var(--sans);
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+.attach-thumb {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--media-ground);
+}
+.attach-thumb img,
+.attach-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attach-thumb .sound {
+  padding: 0;
+}
+/* The canvas selection, offered under the message: dashed, since it is not part of the message until it is clicked. */
+.agent-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 55%;
+  padding: 0 10px 0 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: 500 12px/16px var(--sans);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.agent-suggest > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-suggest svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.agent-suggest:hover {
+  color: var(--text);
+  border-color: var(--agent);
+  border-style: solid;
+  background: var(--agent-soft);
+}
+.agent-suggest-thumbs {
+  display: inline-flex;
+}
+.agent-suggest-thumbs .attach-thumb {
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--raised);
+}
+.agent-suggest-thumbs .attach-thumb + .attach-thumb {
+  margin-left: -7px;
+}
+.attach-thumb .sound span {
+  display: none;
+}
+.attach-thumb .sound svg:global(.icon) {
+  width: 12px;
+  height: 12px;
+}
+.attach-name {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.attach-drop {
+  width: 16px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.attach-drop:hover {
+  opacity: 1;
+}
+/* The composer: the message box with its bar under it (model, permission, send). */
+.agent-composer {
+  margin: 0 12px 12px;
+  padding: 10px 10px 8px 4px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: text;
+  transition: border-color 0.2s var(--ease);
+}
+.agent-composer:focus-within {
+  border-color: var(--control);
+}
+.agent-composer .agent-input {
+  min-height: 44px;
+  background: none;
+  border: 0;
+  padding: 4px 10px;
+}
+.agent-composer .agent-input:focus {
+  outline: none;
+}
+.agent-composer .agent-input[contenteditable='false'] {
+  cursor: default;
+}
+.agent-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 0 6px;
+  cursor: default;
+}
+.agent-perm {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+.agent-send {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--agent);
+  color: var(--bg);
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--ease),
+    opacity 0.15s;
+}
+.agent-send:hover {
+  transform: scale(1.05);
+}
+.agent-send :global(.icon) {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+}
+.agent-send.stopping {
+  background: var(--text);
+}
+.stop-mark {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--bg);
+}
+.agent-add {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+}
+.agent-add:hover {
+  border-color: var(--control);
+}
+.agent-status {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.agent-status:global(.error) {
+  color: var(--bad);
+}
+/* The agent's model, in the bar under the message box: its name as quiet text that opens the list, with each model's price. */
+.agent-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font: 500 13px/1 var(--sans);
+  cursor: pointer;
+}
+.agent-model-btn:hover,
+.agent-model-btn[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text);
+}
+.agent-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-model-btn :global(.icon) {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.agent-model-effort {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+}
+/* The skills menu above the composer: opened by the square box (with a search field), or by typing /name (inline,
+filtered by the message). It floats over the conversation, just above the input. */
+.agent-composer {
+  position: relative;
+}
+.agent-send {
+  position: relative;
+}
+.send-tip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--shadow-s);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.15s var(--ease),
+    transform 0.15s var(--ease);
+  z-index: 5;
+}
+.send-tip kbd {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+}
+.agent-send:hover .send-tip,
+.agent-send:focus-visible .send-tip {
+  opacity: 1;
+  transform: none;
+}
+.agent-composer.waiting {
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+[data-full] .agent-composer {
+  width: calc(100% - 24px);
+  max-width: 736px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+  margin-bottom: 20px;
+}

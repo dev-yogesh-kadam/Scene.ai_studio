@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, vault, versions
+from .. import __version__, audit, backup, claude, edits, endpoints, errors, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..config import ROOT
@@ -28,6 +28,7 @@ from ..security import new_token, token_hash
 from .deps import CONSOLE_COOKIE, admin_user
 from .library import poster_response
 from .studio import current_announcement, needs_caption
+from ..db import offload
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 DAY = 86400
@@ -86,10 +87,10 @@ def _period(db, start, end):
         "done": done,
         "failed": failed,
         "success_rate": round(100 * done / (done + failed), 1) if done + failed else None,
-        "gpu_seconds": value("SELECT SUM(finished - started) n FROM jobs WHERE status = 'done' AND created > ? AND created <= ?"),
+        "gpu_seconds": value("SELECT SUM(extract(epoch FROM finished - started)) n FROM jobs WHERE status = 'done' AND created > ? AND created <= ?"),
         "credits": -value("SELECT SUM(amount) n FROM credit_events WHERE {} AND created > ? AND created <= ?".format(SPEND)),
-        "avg_wait": value("SELECT AVG(started - created) n FROM jobs WHERE started IS NOT NULL AND created > ? AND created <= ?"),
-        "avg_run": value("SELECT AVG(finished - started) n FROM jobs WHERE status = 'done' AND created > ? AND created <= ?"),
+        "avg_wait": value("SELECT AVG(extract(epoch FROM started - created)) n FROM jobs WHERE started IS NOT NULL AND created > ? AND created <= ?"),
+        "avg_run": value("SELECT AVG(extract(epoch FROM finished - started)) n FROM jobs WHERE status = 'done' AND created > ? AND created <= ?"),
     }
 
 
@@ -137,7 +138,7 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
     state, db, now = request.app.state, request.app.state.db, time.time()
     days = days if days in RANGES else 30
     since = now - days * DAY
-    current, previous = _period(db, since, now), _period(db, since - days * DAY, since)
+    current, previous = await offload(_period, db, since, now), await offload(_period, db, since - days * DAY, since)
     calendar = [(date.today() - timedelta(days=n)).isoformat() for n in range(days - 1, -1, -1)]
 
     def series(table, extra="", value="COUNT(*)", column="created"):
@@ -145,38 +146,38 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
             db.local_day(column), value, table, column, extra), since)
 
     server, model = await asyncio.gather(health.render_server(state), health.model_server(state))
-    running = db.one("SELECT j.id, j.name, j.workflow, j.started, j.est_seconds, u.name AS user_name "
+    running = await db.aone("SELECT j.id, j.name, j.workflow, j.started, j.est_seconds, u.name AS user_name "
                      "FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.status = 'running'")
     if running:
         live = state.jobs.live.get(running["id"], {})
         running.update(step=live.get("step", 0), steps=live.get("steps", 0), clip=live.get("clip", 0),
                        clips=live.get("clips", 0), node=live.get("node", ""))
-    waiting = db.all("SELECT j.id, j.name, j.workflow, j.created, j.est_seconds, j.priority, u.name AS user_name FROM jobs j "
+    waiting = await db.aall("SELECT j.id, j.name, j.workflow, j.created, j.est_seconds, j.priority, u.name AS user_name FROM jobs j "
                      "JOIN users u ON u.id = j.user_id WHERE j.status = 'queued' ORDER BY j.priority DESC, j.created LIMIT 8")
 
     # Things an admin should act on: what the watcher checks for (health.py), then what only matters here.
     attention = [{k: p[k] for k in ("level", "text", "tab")} for p in await health.problems(state, server, model)]
-    closed = health.maintenance(db)
+    closed = await offload(health.maintenance, db)
     if closed:
-        left = db.one("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')")["n"]
+        left = (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')"))["n"]
         attention.append({"level": "warning", "text": "Maintenance has been on since {}: new jobs are refused. {}".format(
             health.clock(closed["since"]), "{} job{} left to finish.".format(left, "" if left == 1 else "s") if left else "The queue is empty."),
             "tab": "system"})
-    if state.jobs.paused():
+    if await offload(state.jobs.paused):
         attention.append({"level": "warning", "text": "Renders are paused. Jobs wait until you resume them.", "tab": "overview"})
-    signups = _signups(state, now)
+    signups = await offload(_signups, state, now)
     for crowd in signups["crowded"]:
         attention.append({"level": "warning", "text": "{} accounts were made from one address ({}) in the last 24 hours.".format(
             crowd["accounts"], crowd["ip"]), "tab": "users"})
-    money = _economics(state, days, titles={w["id"]: w for w in await state.catalog.listing()})
+    money = await offload(_economics, state, days, titles={w["id"]: w for w in await state.catalog.listing()})
     for row in money["workflows"]:
         if row["margin_inr"] is not None and row["margin_inr"] < 0 and row["done"]:
             attention.append({"level": "warning", "text": "{} earned ₹{:,.0f} in {} days but its electricity cost ₹{:,.0f}. Its price no longer covers its cost.".format(
                 row["title"], row["revenue_inr"], days, row["electricity_inr"]), "tab": "pricing"})
-    failed_day = db.one("SELECT COUNT(*) n FROM jobs WHERE status = 'failed' AND created > ?", (now - DAY,))["n"]
+    failed_day = (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status = 'failed' AND created > ?", (now - DAY,)))["n"]
     if failed_day:
         attention.append({"level": "serious", "text": "{} job{} failed in the last 24 hours.".format(failed_day, "" if failed_day == 1 else "s"), "tab": "jobs"})
-    broke = db.one("SELECT COUNT(*) n FROM users WHERE credits <= 0 AND disabled = 0")["n"]
+    broke = (await db.aone("SELECT COUNT(*) n FROM users WHERE credits <= 0 AND disabled = 0"))["n"]
     if broke:
         attention.append({"level": "warning", "text": "{} user{} out of credits.".format(broke, " is" if broke == 1 else "s are"), "tab": "users"})
     unreadable = [w["title"] for w in await state.catalog.listing() if w.get("error")]
@@ -185,11 +186,11 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
 
     activity = [
         {"time": a["created"], "who": a["actor_name"] or a["target"], "text": a["action"] + (": " + a["detail"] if a["detail"] else ""), "kind": "audit"}
-        for a in db.all("SELECT * FROM audit_log ORDER BY id DESC LIMIT 15")
+        for a in await db.aall("SELECT * FROM audit_log ORDER BY id DESC LIMIT 15")
     ] + [
         {"time": j["finished"], "who": j["user_name"], "kind": j["status"],
          "text": "{} \"{}\"".format({"done": "Finished", "failed": "Failed:", "cancelled": "Cancelled"}[j["status"]], j["name"])}
-        for j in db.all("SELECT j.name, j.status, j.finished, u.name AS user_name FROM jobs j JOIN users u ON u.id = j.user_id "
+        for j in await db.aall("SELECT j.name, j.status, j.finished, u.name AS user_name FROM jobs j JOIN users u ON u.id = j.user_id "
                         "WHERE j.status IN ('done', 'failed', 'cancelled') AND j.finished IS NOT NULL ORDER BY j.finished DESC LIMIT 15")
     ]
 
@@ -199,45 +200,45 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
         "previous": previous,
         "calendar": calendar,
         "series": {
-            "videos": series("generations", "AND kind = 'video'"),
-            "images": series("generations", "AND kind = 'image'"),
-            "done": series("jobs", "AND status = 'done'"),
-            "failed": series("jobs", "AND status = 'failed'"),
-            "cancelled": series("jobs", "AND status = 'cancelled'"),
-            "gpu_minutes": [round(v / 60, 1) for v in series("jobs", "AND status = 'done'", "SUM(finished - started)")],
-            "credits": [-v for v in series("credit_events", "AND " + SPEND, "SUM(amount)")],
-            "signups": series("users"),
-            "active_users": series("jobs", "", "COUNT(DISTINCT user_id)"),
+            "videos": await offload(series, "generations", "AND kind = 'video'"),
+            "images": await offload(series, "generations", "AND kind = 'image'"),
+            "done": await offload(series, "jobs", "AND status = 'done'"),
+            "failed": await offload(series, "jobs", "AND status = 'failed'"),
+            "cancelled": await offload(series, "jobs", "AND status = 'cancelled'"),
+            "gpu_minutes": [round(v / 60, 1) for v in await offload(series, "jobs", "AND status = 'done'", "SUM(extract(epoch FROM finished - started))")],
+            "credits": [-v for v in await offload(series, "credit_events", "AND " + SPEND, "SUM(amount)")],
+            "signups": await offload(series, "users"),
+            "active_users": await offload(series, "jobs", "", "COUNT(DISTINCT user_id)"),
         },
-        "top_users": db.all(
+        "top_users": await db.aall(
             "SELECT u.id, u.name, u.email, COUNT(*) AS jobs, SUM(CASE WHEN j.status = 'done' THEN j.cost ELSE 0 END) AS credits, "
-            "SUM(CASE WHEN j.status = 'done' THEN j.finished - j.started ELSE 0 END) AS gpu_seconds "
+            "SUM(CASE WHEN j.status = 'done' THEN extract(epoch FROM j.finished - j.started) ELSE 0 END) AS gpu_seconds "
             "FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.created > ? GROUP BY u.id ORDER BY credits DESC, jobs DESC LIMIT 6", (since,)),
-        "top_workflows": db.all(
+        "top_workflows": await db.aall(
             "SELECT workflow, COUNT(*) AS jobs, " + DONE_FAILED + ", "
-            "AVG(CASE WHEN status = 'done' THEN finished - started END) AS avg_seconds "
+            "AVG(CASE WHEN status = 'done' THEN extract(epoch FROM finished - started) END) AS avg_seconds "
             "FROM jobs WHERE created > ? GROUP BY workflow ORDER BY jobs DESC LIMIT 6", (since,)),
-        "failures": db.all(
+        "failures": await db.aall(
             "SELECT substr(error, 1, 140) AS error, COUNT(*) AS jobs, MAX(created) AS last_seen FROM jobs "
             "WHERE status = 'failed' AND created > ? GROUP BY substr(error, 1, 140) ORDER BY jobs DESC, last_seen DESC LIMIT 5", (since,)),
-        "queue": {"running": running, "waiting": waiting, "paused": state.jobs.paused(),
-                  "waiting_total": db.one("SELECT COUNT(*) n FROM jobs WHERE status = 'queued'")["n"]},
+        "queue": {"running": running, "waiting": waiting, "paused": await offload(state.jobs.paused),
+                  "waiting_total": (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status = 'queued'"))["n"]},
         "server": {"online": server["online"], "version": server.get("system", {}).get("comfyui_version"), "since": server["since"]},
         "model_server": {"online": model["online"], "since": model["since"] if model["url"] else None},
         "health": {"render": server["online"], "model": model["online"], "disk_free": shutil.disk_usage(state.output_dir).free,
                    "last_backup": backup.newest(state.backup_dir), "backups_on": state.settings.backup_keep > 0,
-                   "alerts": len(db.all("SELECT id FROM alerts WHERE ended IS NULL")), "maintenance": bool(closed),
+                   "alerts": len(await db.aall("SELECT id FROM alerts WHERE ended IS NULL")), "maintenance": bool(closed),
                    "node_list": state.catalog.nodes_saved()},
-        "online": _online(state),
+        "online": await offload(_online, state),
         "signups": signups,
         "economics": {"workflows": money["workflows"][:6], "totals": money["totals"], "unmeasured": money["unmeasured"]},
-        "announcement": current_announcement(db),
+        "announcement": await offload(current_announcement, db),
         "attention": attention,
         "activity": sorted(activity, key=lambda a: a["time"], reverse=True)[:14],
-        "totals": {"users": db.one("SELECT COUNT(*) n FROM users")["n"],
+        "totals": {"users": (await db.aone("SELECT COUNT(*) n FROM users"))["n"],
                    "online": state.hub.online(),
-                   "items": db.one("SELECT COUNT(*) n FROM generations")["n"],
-                   "credits_held": db.one("SELECT SUM(credits) n FROM users")["n"] or 0},
+                   "items": (await db.aone("SELECT COUNT(*) n FROM generations"))["n"],
+                   "credits_held": (await db.aone("SELECT SUM(credits) n FROM users"))["n"] or 0},
     }
 
 
@@ -263,35 +264,35 @@ async def list_users(request: Request, q: str = "", show: str = "", user: dict =
     if show in ("admins", "disabled", "no_credits"):
         where.append({"admins": "u.role != 'user'", "disabled": "u.disabled = 1", "no_credits": "u.credits <= 0"}[show])
     sql = USER_ROWS + ("WHERE " + " AND ".join(where) if where else "") + " ORDER BY u.created"
-    return {"users": request.app.state.db.all(sql, params)}
+    return {"users": await request.app.state.db.aall(sql, params)}
 
 
 @router.get("/users/{user_id}")
 async def user_detail(user_id: int, request: Request, user: dict = Depends(admin_user)):
     db = request.app.state.db
-    found = db.one(USER_ROWS + "WHERE u.id = ?", (user_id,))
+    found = await db.aone(USER_ROWS + "WHERE u.id = ?", (user_id,))
     if found is None:
         raise HTTPException(404, "No such user.")
-    stats = db.one(
+    stats = await db.aone(
         "SELECT " + DONE_FAILED + ", " + COUNT_IF.format("status = 'cancelled'") + " AS cancelled, "
-        "SUM(CASE WHEN status = 'done' THEN finished - started ELSE 0 END) AS gpu_seconds FROM jobs WHERE user_id = ?", (user_id,))
+        "SUM(CASE WHEN status = 'done' THEN extract(epoch FROM finished - started) ELSE 0 END) AS gpu_seconds FROM jobs WHERE user_id = ?", (user_id,))
     state = request.app.state
-    limits = {"own": found["daily_cap"], "studio": state.credits.daily_cap, "in_force": state.credits.cap_for(found),
-              "spent_today": state.credits.spent_today(user_id), "exempt": found["role"] == "admin"}
+    limits = {"own": found["daily_cap"], "studio": await offload(lambda: state.credits.daily_cap), "in_force": await offload(state.credits.cap_for, found),
+              "spent_today": await offload(state.credits.spent_today, user_id), "exempt": found["role"] == "admin"}
     return {
         "user": found,
         "limits": limits,
         "stats": {k: v or 0 for k, v in stats.items()},
-        "storage_bytes": (db.one("SELECT SUM(size) n FROM generations WHERE user_id = ?", (user_id,))["n"] or 0)
-        + (db.one("SELECT SUM(size) n FROM assets WHERE user_id = ?", (user_id,))["n"] or 0),
-        "assets": db.one("SELECT COUNT(*) n FROM assets WHERE user_id = ?", (user_id,))["n"],
-        "projects": db.one("SELECT COUNT(*) n FROM projects WHERE user_id = ?", (user_id,))["n"],
-        "jobs": db.all("SELECT id, name, workflow, summary, status, error, cost, created, started, finished FROM jobs "
+        "storage_bytes": ((await db.aone("SELECT SUM(size) n FROM generations WHERE user_id = ?", (user_id,)))["n"] or 0)
+        + ((await db.aone("SELECT SUM(size) n FROM assets WHERE user_id = ?", (user_id,)))["n"] or 0),
+        "assets": (await db.aone("SELECT COUNT(*) n FROM assets WHERE user_id = ?", (user_id,)))["n"],
+        "projects": (await db.aone("SELECT COUNT(*) n FROM projects WHERE user_id = ?", (user_id,)))["n"],
+        "jobs": await db.aall("SELECT id, name, workflow, summary, status, error, cost, created, started, finished FROM jobs "
                        "WHERE user_id = ? ORDER BY created DESC LIMIT 12", (user_id,)),
-        "credits": db.all("SELECT c.amount, c.reason, c.note, c.created, j.name AS job_name FROM credit_events c "
+        "credits": await db.aall("SELECT c.amount, c.reason, c.note, c.created, j.name AS job_name FROM credit_events c "
                           "LEFT JOIN jobs j ON j.id = c.job_id WHERE c.user_id = ? ORDER BY c.id DESC LIMIT 12", (user_id,)),
-        "items": db.all("SELECT id, kind, name, created FROM generations WHERE user_id = ? ORDER BY created DESC LIMIT 8", (user_id,)),
-        "sessions": _sessions(db, user_id, token_hash(request.cookies.get(CONSOLE_COOKIE, ""))),
+        "items": await db.aall("SELECT id, kind, name, created FROM generations WHERE user_id = ? ORDER BY created DESC LIMIT 8", (user_id,)),
+        "sessions": await offload(_sessions, db, user_id, token_hash(request.cookies.get(CONSOLE_COOKIE, ""))),
     }
 
 
@@ -313,7 +314,7 @@ async def start_view(user_id: int, request: Request, user: dict = Depends(admin_
     state = request.app.state
     if user["role"] != "admin":
         raise HTTPException(403, "Only an admin can view the studio as someone.")
-    target = state.db.one("SELECT email, role, disabled FROM users WHERE id = ?", (user_id,))
+    target = await state.db.aone("SELECT email, role, disabled FROM users WHERE id = ?", (user_id,))
     if target is None:
         raise HTTPException(404, "No such user.")
     if target["role"] == "admin" or user_id == user["id"]:
@@ -331,7 +332,7 @@ async def sign_out_user(user_id: int, body: dict, request: Request, user: dict =
     """End a user's sessions: one ({key}: the first characters of its hash, as the user's details list it) or all of them,
     in the studio and the console. This console's own session is kept."""
     db = request.app.state.db
-    target = db.one("SELECT email, role FROM users WHERE id = ?", (user_id,))
+    target = await db.aone("SELECT email, role FROM users WHERE id = ?", (user_id,))
     if target is None:
         raise HTTPException(404, "No such user.")
     if user["role"] != "admin" and target["role"] == "admin" and user_id != user["id"]:
@@ -340,11 +341,11 @@ async def sign_out_user(user_id: int, body: dict, request: Request, user: dict =
     key = str(body.get("key") or "")
     if key and not re.match(r"^[0-9a-f]{12}$", key):
         raise HTTPException(400, "No such session.")
-    ended = db.change("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?" + (" AND token_hash LIKE ?" if key else ""),
+    ended = await db.achange("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?" + (" AND token_hash LIKE ?" if key else ""),
                       (user_id, mine, *([key + "%"] if key else [])))
     if not key:
         request.app.state.hub.drop(user_id)   # their open pages stop getting updates at once
-    audit.record(request, user, "Signed a user out", target["email"], "one session" if key else "everywhere")
+    await offload(audit.record, request, user, "Signed a user out", target["email"], "one session" if key else "everywhere")
     return {"ended": ended}
 
 
@@ -353,7 +354,7 @@ async def update_user(user_id: int, body: dict, request: Request, user: dict = D
     """Change a user's role, add credits (negative takes them away), disable the account, set a new
     password, or turn off their two-step sign-in (when they have lost their phone)."""
     state = request.app.state
-    target = state.db.one("SELECT email, role FROM users WHERE id = ?", (user_id,))
+    target = await state.db.aone("SELECT email, role FROM users WHERE id = ?", (user_id,))
     if target is None:
         raise HTTPException(404, "No such user.")
     problem = staff.user_fields_problem(user["role"], body)
@@ -367,32 +368,32 @@ async def update_user(user_id: int, body: dict, request: Request, user: dict = D
     if "role" in body:
         if body["role"] not in (*staff.roles(), "user"):
             raise HTTPException(400, "The role must be one of: {}.".format(", ".join((*staff.roles(), "user"))))
-        state.db.run("UPDATE users SET role = ? WHERE id = ?", (body["role"], user_id))
-        audit.record(request, user, "Changed role", email, "now " + body["role"])
+        await state.db.arun("UPDATE users SET role = ? WHERE id = ?", (body["role"], user_id))
+        await offload(audit.record, request, user, "Changed role", email, "now " + body["role"])
     if "disabled" in body:
-        state.db.run("UPDATE users SET disabled = ? WHERE id = ?", (1 if body["disabled"] else 0, user_id))
+        await state.db.arun("UPDATE users SET disabled = ? WHERE id = ?", (1 if body["disabled"] else 0, user_id))
         if body["disabled"]:
-            state.db.run("DELETE FROM sessions WHERE user_id = ?", (user_id,))  # signs them out everywhere
+            await state.db.arun("DELETE FROM sessions WHERE user_id = ?", (user_id,))  # signs them out everywhere
             state.hub.drop(user_id)
-        audit.record(request, user, "Disabled account" if body["disabled"] else "Enabled account", email)
+        await offload(audit.record, request, user, "Disabled account" if body["disabled"] else "Enabled account", email)
     if "password" in body:
         if password_problem(str(body["password"])):
             raise HTTPException(400, password_problem(str(body["password"])))
-        state.db.run("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(str(body["password"])), user_id))
+        await state.db.arun("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(str(body["password"])), user_id))
         if user_id != user["id"]:
-            state.db.run("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            await state.db.arun("DELETE FROM sessions WHERE user_id = ?", (user_id,))
             state.hub.drop(user_id)
-        audit.record(request, user, "Set a new password", email)
+        await offload(audit.record, request, user, "Set a new password", email)
     if "daily_cap" in body:
         own = None if body["daily_cap"] in (None, "") else int(_number(body, "daily_cap", 10000000))
-        state.db.run("UPDATE users SET daily_cap = ? WHERE id = ?", (own, user_id))
-        audit.record(request, user, "Set a daily credit limit", email,
+        await state.db.arun("UPDATE users SET daily_cap = ? WHERE id = ?", (own, user_id))
+        await offload(audit.record, request, user, "Set a daily credit limit", email,
                      "follows the studio's limit" if own is None else "no limit" if own == 0 else "{} credits".format(own))
     if body.get("mfa_off"):
-        state.db.run("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user_id,))
-        state.db.run("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        await state.db.arun("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user_id,))
+        await state.db.arun("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         state.hub.drop(user_id)
-        audit.record(request, user, "Turned off two-step sign-in", email)
+        await offload(audit.record, request, user, "Turned off two-step sign-in", email)
     if "add_credits" in body:
         try:
             amount = int(body["add_credits"])
@@ -401,11 +402,11 @@ async def update_user(user_id: int, body: dict, request: Request, user: dict = D
         if amount == 0 or abs(amount) > 10000000:
             raise HTTPException(400, "Enter an amount between 1 and 10,000,000.")
         note = str(body.get("note", "")).strip()[:200]
-        changed = state.credits.add(user_id, amount, "admin grant", note=note)
+        changed = await offload(state.credits.add, user_id, amount, "admin grant", note=note)
         state.notify(user_id)
-        audit.record(request, user, "Gave credits" if changed >= 0 else "Took credits", email,
+        await offload(audit.record, request, user, "Gave credits" if changed >= 0 else "Took credits", email,
                      "{:+d}{}".format(changed, " · " + note if note else ""))
-    return {"ok": True, "credits": state.credits.balance(user_id)}
+    return {"ok": True, "credits": await offload(state.credits.balance, user_id)}
 
 
 # ---------------------------------------------------------------- jobs
@@ -424,8 +425,8 @@ async def list_jobs(request: Request, status: str = "", q: str = "", offset: int
         where.append("(j.name LIKE ? ESCAPE '\\' OR j.workflow LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')")
         params += [_like(q)] * 4
     clause = "WHERE " + " AND ".join(where) if where else ""
-    total = state.db.one("SELECT COUNT(*) n FROM jobs j JOIN users u ON u.id = j.user_id " + clause, params)["n"]
-    jobs = state.db.all(
+    total = (await state.db.aone("SELECT COUNT(*) n FROM jobs j JOIN users u ON u.id = j.user_id " + clause, params))["n"]
+    jobs = await state.db.aall(
         "SELECT j.id, j.name, j.workflow, j.summary, j.status, j.error, j.cost, j.created, j.started, j.finished, "
         "u.id AS user_id, u.name AS user_name, u.email AS user_email FROM jobs j JOIN users u ON u.id = j.user_id "
         "{} ORDER BY j.created DESC LIMIT 50 OFFSET ?".format(clause), params + [max(0, offset)])
@@ -439,12 +440,12 @@ async def list_jobs(request: Request, status: str = "", q: str = "", offset: int
 @router.get("/jobs/{job_id}")
 async def job_detail(job_id: str, request: Request, user: dict = Depends(admin_user)):
     db = request.app.state.db
-    job = db.one("SELECT j.*, u.name AS user_name, u.email AS user_email FROM jobs j JOIN users u ON u.id = j.user_id "
+    job = await db.aone("SELECT j.*, u.name AS user_name, u.email AS user_email FROM jobs j JOIN users u ON u.id = j.user_id "
                  "WHERE j.id = ?", (job_id,))
     if job is None:
         raise HTTPException(404, "No such job.")
     job["settings"] = json.loads(job["settings"])
-    job["items"] = db.all("SELECT id, kind, name, filename, size FROM generations WHERE job_id = ?", (job_id,))
+    job["items"] = await db.aall("SELECT id, kind, name, filename, size FROM generations WHERE job_id = ?", (job_id,))
     job["explained"] = errors.explain(job["error"])
     return job
 
@@ -453,13 +454,13 @@ async def job_detail(job_id: str, request: Request, user: dict = Depends(admin_u
 async def job_to_front(job_id: str, request: Request, user: dict = Depends(admin_user)):
     """Put a waiting job ahead of the others."""
     state = request.app.state
-    job = state.db.one("SELECT j.status, j.name, u.email FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ?", (job_id,))
+    job = await state.db.aone("SELECT j.status, j.name, u.email FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ?", (job_id,))
     if job is None:
         raise HTTPException(404, "No such job.")
     if job["status"] != "queued":
         raise HTTPException(400, "Only a waiting job can be moved.")
-    state.jobs.to_front(job_id)
-    audit.record(request, user, "Moved a job to the front", job["email"], job["name"])
+    await offload(state.jobs.to_front, job_id)
+    await offload(audit.record, request, user, "Moved a job to the front", job["email"], job["name"])
     return {"ok": True}
 
 
@@ -468,7 +469,7 @@ async def retry_job(job_id: str, body: dict, request: Request, user: dict = Depe
     """Run a failed or cancelled job again, for its user, with the same settings. Its first run was refunded, so the
     retry is charged like a new job, unless the admin makes it free ({"free": true}) when the failure was the studio's."""
     state = request.app.state
-    job = state.db.one("SELECT j.*, u.email, u.disabled FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ?", (job_id,))
+    job = await state.db.aone("SELECT j.*, u.email, u.disabled FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ?", (job_id,))
     if job is None:
         raise HTTPException(404, "No such job.")
     if job["status"] not in ("failed", "cancelled"):
@@ -477,12 +478,12 @@ async def retry_job(job_id: str, body: dict, request: Request, user: dict = Depe
         raise HTTPException(400, "This user's account is disabled.")
     free = body.get("free") is True
     cost = 0 if free else job["cost"]
-    if cost and not state.credits.charge(job["user_id"], cost, "generation", note="Run again by an admin"):
+    if cost and not await offload(state.credits.charge, job["user_id"], cost, "generation", note="Run again by an admin"):
         raise HTTPException(402, "This needs {} credits and the user has {}. Give them credits, or run it again for free.".format(
-            cost, state.credits.balance(job["user_id"])))
-    new_id = state.jobs.add(job["user_id"], job["name"], job["workflow"], json.loads(job["settings"]), job["summary"],
+            cost, await offload(state.credits.balance, job["user_id"])))
+    new_id = await offload(state.jobs.add, job["user_id"], job["name"], job["workflow"], json.loads(job["settings"]), job["summary"],
                             job["est_seconds"], cost, job["project_id"], job["seconds_requested"])
-    audit.record(request, user, "Ran a job again", job["email"], "{} · {}".format(job["name"], "free" if free else "{} cr".format(cost)))
+    await offload(audit.record, request, user, "Ran a job again", job["email"], "{} · {}".format(job["name"], "free" if free else "{} cr".format(cost)))
     return {"id": new_id, "credits": cost}
 
 
@@ -490,8 +491,8 @@ async def retry_job(job_id: str, body: dict, request: Request, user: dict = Depe
 async def pause_queue(body: dict, request: Request, user: dict = Depends(admin_user)):
     """Pause or resume the renders. A job already running finishes; edits and motion graphics keep running."""
     paused = body.get("paused") is True
-    request.app.state.jobs.pause(paused)
-    audit.record(request, user, "Paused the renders" if paused else "Resumed the renders")
+    await offload(request.app.state.jobs.pause, paused)
+    await offload(audit.record, request, user, "Paused the renders" if paused else "Resumed the renders")
     return {"paused": paused}
 
 
@@ -505,13 +506,13 @@ async def check_server(request: Request, user: dict = Depends(admin_user)):
 async def cancel_job(job_id: str, request: Request, user: dict = Depends(admin_user)):
     """Cancel any user's waiting or running job. The user gets the credits back."""
     state = request.app.state
-    job = state.db.one("SELECT j.user_id, j.status, j.name, u.email FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ?", (job_id,))
+    job = await state.db.aone("SELECT j.user_id, j.status, j.name, u.email FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ?", (job_id,))
     if job is None:
         raise HTTPException(404, "No such job.")
     if job["status"] not in ("queued", "running"):
         raise HTTPException(400, "This job has already finished.")
-    state.jobs.remove(job["user_id"], job_id)
-    audit.record(request, user, "Cancelled a job", job["email"], job["name"])
+    await offload(state.jobs.remove, job["user_id"], job_id)
+    await offload(audit.record, request, user, "Cancelled a job", job["email"], job["name"])
     return {"ok": True}
 
 
@@ -543,12 +544,12 @@ async def list_library(request: Request, kind: str = "", q: str = "", owner: str
         where.append("g.project_id = ?")
         params.append(int(project))
     if q.strip():
-        where.append("(g.name LIKE ? ESCAPE '\\' OR g.settings LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')")
+        where.append("(g.name LIKE ? ESCAPE '\\' OR g.settings::text LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')")
         params += [_like(q)] * 4
     clause = "WHERE " + " AND ".join(where) if where else ""
     db = request.app.state.db
-    total = db.one("SELECT COUNT(*) n FROM generations g JOIN users u ON u.id = g.user_id " + clause, params)["n"]
-    items = db.all(
+    total = (await db.aone("SELECT COUNT(*) n FROM generations g JOIN users u ON u.id = g.user_id " + clause, params))["n"]
+    items = await db.aall(
         "SELECT g.id, g.job_id, g.kind, g.name, g.filename, g.workflow, g.summary, g.seconds, g.size, g.created, g.settings, "
         "g.context, g.project_id, p.name AS project_name, j.cost, u.id AS user_id, u.name AS user_name, u.email AS user_email "
         "FROM generations g JOIN users u ON u.id = g.user_id LEFT JOIN projects p ON p.id = g.project_id "
@@ -560,16 +561,19 @@ async def list_library(request: Request, kind: str = "", q: str = "", owner: str
     return {
         "items": items, "total": total,
         # What the filters offer: people who have items, and their projects.
-        "owners": db.all("SELECT u.id, u.name, u.email, COUNT(*) AS items FROM generations g JOIN users u ON u.id = g.user_id "
+        "owners": await db.aall("SELECT u.id, u.name, u.email, COUNT(*) AS items FROM generations g JOIN users u ON u.id = g.user_id "
                          "GROUP BY u.id ORDER BY lower(u.name)"),
-        "projects": db.all("SELECT p.id, p.name, p.user_id, u.name AS user_name FROM projects p JOIN users u ON u.id = p.user_id "
+        "projects": await db.aall("SELECT p.id, p.name, p.user_id, u.name AS user_name FROM projects p JOIN users u ON u.id = p.user_id "
                            "ORDER BY lower(p.name)"),
     }
 
 
 @router.get("/library/{item_id}/file")
 async def library_file(item_id: int, request: Request, download: bool = False, user: dict = Depends(admin_user)):
-    _, path = _item(request, item_id)
+    _, path = await offload(_item, request, item_id)
+    elsewhere = storage.signed(request.app.state, "outputs", path, path.name if download else None)
+    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
+        return elsewhere
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path, filename=path.name if download else None)
@@ -577,17 +581,17 @@ async def library_file(item_id: int, request: Request, download: bool = False, u
 
 @router.get("/library/{item_id}/poster")
 async def library_poster(item_id: int, request: Request, user: dict = Depends(admin_user)):
-    return await poster_response(request, _item(request, item_id)[1])
+    return await poster_response(request, (await offload(_item, request, item_id))[1])
 
 
 @router.delete("/library/{item_id}")
 async def delete_library_item(item_id: int, request: Request, user: dict = Depends(admin_user)):
     """Remove an item from its owner's library (for content that breaks the rules)."""
-    row, path = _item(request, item_id)
-    media.remove_result(path)
-    request.app.state.db.run("DELETE FROM generations WHERE id = ?", (item_id,))
+    row, path = await offload(_item, request, item_id)
+    await offload(media.remove_result, path)
+    await request.app.state.db.arun("DELETE FROM generations WHERE id = ?", (item_id,))
     request.app.state.notify(row["user_id"], library_changed=True)
-    audit.record(request, user, "Deleted a library item", row["user_email"], row["name"])
+    await offload(audit.record, request, user, "Deleted a library item", row["user_email"], row["name"])
     return {"ok": True}
 
 
@@ -601,43 +605,47 @@ def _showcase(request):
 
 @router.get("/showcase")
 async def get_showcase(request: Request, user: dict = Depends(admin_user)):
-    return _showcase(request)
+    return await offload(_showcase, request)
 
 
 @router.post("/showcase")
 async def add_to_showcase(body: dict, request: Request, user: dict = Depends(admin_user)):
     """Put a library item on every user's Home page: {item_id, section?, name?}. Its file is copied."""
     try:
-        row, path = _item(request, int(body.get("item_id") or 0))
-        item = showcase.add(request.app.state.db, request.app.state.showcase_dir, row, path, body.get("section") or "", body.get("name") or "")
+        row, path = await offload(_item, request, int(body.get("item_id") or 0))
+        path = await offload(storage.here, path)   # the file is copied: here first, when the media are kept elsewhere
+        item = await offload(showcase.add, request.app.state.db, request.app.state.showcase_dir, row, path, body.get("section") or "", body.get("name") or "")
     except (TypeError, ValueError) as error:
         raise HTTPException(400, str(error) or "No such item.")
-    audit.record(request, user, "Added to the Home page", row["user_email"], item["name"])
-    return _showcase(request)
+    await offload(audit.record, request, user, "Added to the Home page", row["user_email"], item["name"])
+    return await offload(_showcase, request)
 
 
 @router.put("/showcase")
 async def change_showcase(body: dict, request: Request, user: dict = Depends(admin_user)):
     """Sections, order, names and sections of the items: see showcase.change."""
-    showcase.change(request.app.state.db, body)
-    audit.record(request, user, "Changed the Home page")
-    return _showcase(request)
+    await offload(showcase.change, request.app.state.db, body)
+    await offload(audit.record, request, user, "Changed the Home page")
+    return await offload(_showcase, request)
 
 
 @router.delete("/showcase/{key}")
 async def remove_from_showcase(key: str, request: Request, user: dict = Depends(admin_user)):
     try:
-        item = showcase.remove(request.app.state.db, request.app.state.showcase_dir, key)
+        item = await offload(showcase.remove, request.app.state.db, request.app.state.showcase_dir, key)
     except showcase.ShowcaseError as error:
         raise HTTPException(404, str(error))
-    audit.record(request, user, "Took off the Home page", "", item["name"])
-    return _showcase(request)
+    await offload(audit.record, request, user, "Took off the Home page", "", item["name"])
+    return await offload(_showcase, request)
 
 
 @router.get("/showcase/{key}/file")
 async def showcase_file(key: str, request: Request, user: dict = Depends(admin_user)):
     item = showcase.find(request.app.state.db, key)
     path = item and showcase.path_of(request.app.state.showcase_dir, item)
+    elsewhere = path and storage.signed(request.app.state, "showcase", path)
+    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
+        return elsewhere
     if not path or not path.is_file():
         raise HTTPException(404, "No such item on the Home page.")
     return FileResponse(path)
@@ -667,13 +675,13 @@ async def credit_log(request: Request, reason: str = "", q: str = "", user: dict
         return db.one("SELECT SUM(amount) n FROM credit_events WHERE " + condition)["n"] or 0
 
     return {
-        "events": db.all(
+        "events": await db.aall(
             "SELECT c.id, c.amount, c.reason, c.note, c.job_id, c.created, u.name AS user_name, u.email AS user_email, "
             "j.name AS job_name FROM credit_events c JOIN users u ON u.id = c.user_id LEFT JOIN jobs j ON j.id = c.job_id "
             "{} ORDER BY c.id DESC LIMIT 300".format("WHERE " + " AND ".join(where) if where else ""), params),
-        "summary": {"welcome": total("reason = 'welcome'"), "granted": total("reason = 'admin grant'"),
-                    "charged": -total("reason = 'generation'"), "refunded": total("reason = 'refund'"),
-                    "held": db.one("SELECT SUM(credits) n FROM users")["n"] or 0},
+        "summary": {"welcome": await offload(total, "reason = 'welcome'"), "granted": await offload(total, "reason = 'admin grant'"),
+                    "charged": -await offload(total, "reason = 'generation'"), "refunded": await offload(total, "reason = 'refund'"),
+                    "held": (await db.aone("SELECT SUM(credits) n FROM users"))["n"] or 0},
     }
 
 
@@ -690,11 +698,11 @@ async def credits_for_everyone(body: dict, request: Request, user: dict = Depend
     note = " ".join(str(body.get("note") or "").split())[:200]
     if not note:
         raise HTTPException(400, "Write a reason. It shows in every user's credit history.")
-    people = state.db.all("SELECT id FROM users WHERE disabled = 0")
+    people = await state.db.aall("SELECT id FROM users WHERE disabled = 0")
     for person in people:
-        state.credits.add(person["id"], amount, "admin grant", note=note)
+        await offload(state.credits.add, person["id"], amount, "admin grant", note=note)
         state.notify(person["id"])
-    audit.record(request, user, "Gave everyone credits", "{} accounts".format(len(people)), "+{} · {}".format(amount, note))
+    await offload(audit.record, request, user, "Gave everyone credits", "{} accounts".format(len(people)), "+{} · {}".format(amount, note))
     return {"accounts": len(people), "amount": amount}
 
 
@@ -705,17 +713,17 @@ async def workflow_report(request: Request, user: dict = Depends(admin_user)):
     """Each workflow file: whether it can be read, who it is offered to, what it needs that the render server lacked
     when its node list was saved, its versions, and how much it is used. Also what the render PC changed lately."""
     state = request.app.state
-    versions.look(state)
-    usage = {r["workflow"]: r for r in state.db.all(
+    await offload(versions.look, state)
+    usage = {r["workflow"]: r for r in await state.db.aall(
         "SELECT workflow, COUNT(*) AS jobs, " + DONE_FAILED + ", "
-        "AVG(CASE WHEN status = 'done' THEN finished - started END) AS avg_seconds, MAX(created) AS last_used "
+        "AVG(CASE WHEN status = 'done' THEN extract(epoch FROM finished - started) END) AS avg_seconds, MAX(created) AS last_used "
         "FROM jobs GROUP BY workflow")}
-    kept = {r["workflow"]: r for r in state.db.all(
+    kept = {r["workflow"]: r for r in await state.db.aall(
         "SELECT workflow, COUNT(*) AS versions, MAX(seen) AS changed FROM workflow_versions GROUP BY workflow")}
     nodes = state.catalog.object_info or state.catalog.saved
     files = state.catalog.files()
     items = await state.catalog.listing()
-    switches = state.credits.resolutions_off()
+    switches = await offload(state.credits.resolutions_off)
     for item in items:
         path = files[item["id"]]
         used = usage.get(item["id"], {})
@@ -726,17 +734,17 @@ async def workflow_report(request: Request, user: dict = Depends(admin_user)):
         item.update(file=path.name, presets=state.catalog.sidecar_of(path).is_file(),
                     jobs=used.get("jobs", 0), done=used.get("done", 0) or 0, failed=used.get("failed", 0) or 0,
                     avg_seconds=used.get("avg_seconds"), last_used=used.get("last_used"),
-                    audience=versions.audience(state.credits.pricing(item["id"])), example=state.credits.cost(item["id"], 5),
+                    audience=versions.audience(await offload(state.credits.pricing, item["id"])), example=await offload(state.credits.cost, item["id"], 5),
                     missing=needs, versions=kept.get(item["id"], {}).get("versions", 0), changed=kept.get(item["id"], {}).get("changed"),
                     resolutions_off=switches.get(item["id"], []))
     return {"workflows": items, "folder": str(state.catalog.directory), "nodes_saved": state.catalog.nodes_saved(),
-            "new_admins_only": state.db.setting("new_workflows_admins_only", "0") == "1", "resolutions_off": switches, **state.versions.drops()}
+            "new_admins_only": await state.db.asetting("new_workflows_admins_only", "0") == "1", "resolutions_off": switches, **await offload(state.versions.drops)}
 
 
 @router.get("/workflows/history")
 async def workflow_history(workflow: str, request: Request, user: dict = Depends(admin_user)):
     """Every version of one workflow, newest first, each with what changed from the one before."""
-    return {"workflow": workflow, "versions": request.app.state.versions.history(workflow)}
+    return {"workflow": workflow, "versions": await offload(request.app.state.versions.history, workflow)}
 
 
 @router.put("/workflows/audience")
@@ -748,8 +756,8 @@ async def workflow_audience(body: dict, request: Request, user: dict = Depends(a
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     if audience not in versions.AUDIENCES:
         raise HTTPException(400, "Offer it to everyone, admins or nobody.")
-    versions.set_audience(state.db, workflow, audience)
-    audit.record(request, user, "Changed who a workflow is offered to", workflow,
+    await offload(versions.set_audience, state.db, workflow, audience)
+    await offload(audit.record, request, user, "Changed who a workflow is offered to", workflow,
                  {"everyone": "everyone", "admins": "admins only", "off": "switched off"}[audience])
     return {"workflow": workflow, "audience": audience}
 
@@ -758,15 +766,15 @@ async def workflow_audience(body: dict, request: Request, user: dict = Depends(a
 async def workflow_settings(body: dict, request: Request, user: dict = Depends(admin_user)):
     """{new_admins_only}: whether a workflow the render PC adds is offered to admins alone until one offers it to everyone."""
     hold = body.get("new_admins_only") is True
-    request.app.state.db.set_setting("new_workflows_admins_only", "1" if hold else "0")
-    audit.record(request, user, "New workflows start for admins only" if hold else "New workflows start for everyone")
+    await request.app.state.db.aset_setting("new_workflows_admins_only", "1" if hold else "0")
+    await offload(audit.record, request, user, "New workflows start for admins only" if hold else "New workflows start for everyone")
     return {"new_admins_only": hold}
 
 
 @router.get("/workflows/resolutions")
 async def workflow_resolutions(request: Request, user: dict = Depends(admin_user)):
     """The resolutions switched off, for each kind and each workflow: {"tiers", "kinds", "off": {kind or id: [tier]}}."""
-    return {"tiers": list(credits_module.TIERS), "kinds": list(KINDS) + ["upscaler"], "off": request.app.state.credits.resolutions_off()}
+    return {"tiers": list(credits_module.TIERS), "kinds": list(KINDS) + ["upscaler"], "off": await offload(request.app.state.credits.resolutions_off)}
 
 
 @router.put("/workflows/resolutions")
@@ -781,8 +789,8 @@ async def set_workflow_resolutions(body: dict, request: Request, user: dict = De
         raise HTTPException(400, "Name the resolutions to switch off: 480, 720 or 1080.")
     if len({str(t) for t in off}) == len(credits_module.TIERS):
         raise HTTPException(400, "Leave at least one resolution on. To stop a workflow, switch it off instead.")
-    tiers = state.credits.set_resolutions_off(key, off)
-    audit.record(request, user, "Switched resolutions off" if tiers else "Switched every resolution on", key,
+    tiers = await offload(state.credits.set_resolutions_off, key, off)
+    await offload(audit.record, request, user, "Switched resolutions off" if tiers else "Switched every resolution on", key,
                  ", ".join(t + "p" for t in tiers) or "all on")
     return {"key": key, "off": tiers}
 
@@ -822,11 +830,11 @@ async def test_run(body: dict, request: Request, user: dict = Depends(admin_user
         needs_caption(wf, settings, roles["prompt"]["id"])
     settings["details"] = [[c["label"].split(" (")[0], c["default"]] for c in schema["controls"] if not c["role"]]
     settings["workflow_title"] = schema["title"]
-    estimate = workflows.estimate(wf, settings, state.jobs.history())
-    job_id = state.jobs.add(user["id"], "Test · " + schema["title"], wf["id"], settings, workflows.summary(schema, ctx),
+    estimate = workflows.estimate(wf, settings, await offload(state.jobs.history))
+    job_id = await offload(state.jobs.add, user["id"], "Test · " + schema["title"], wf["id"], settings, workflows.summary(schema, ctx),
                             estimate["minutes"] * 60 if estimate["minutes"] else None, 0, during_maintenance=True)
-    state.db.run("UPDATE jobs SET priority = 100 WHERE id = ?", (job_id,))
-    audit.record(request, user, "Test run of a workflow", wf["id"])
+    await state.db.arun("UPDATE jobs SET priority = 100 WHERE id = ?", (job_id,))
+    await offload(audit.record, request, user, "Test run of a workflow", wf["id"])
     return {"id": job_id, "name": "Test · " + schema["title"]}
 
 
@@ -845,23 +853,29 @@ async def system(request: Request, user: dict = Depends(admin_user)):
         ffmpeg = media.ffmpeg_path()
     except media.MediaError:
         ffmpeg = None
-    closed = health.maintenance(db)
+    closed = await offload(health.maintenance, db)
     return {
         "server": server,
         "model_server": model,
-        "maintenance": dict(closed, on=True, left=db.one("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')")["n"])
+        "maintenance": dict(closed, on=True, left=(await db.aone("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')"))["n"])
                        if closed else {"on": False},
-        "alerts": db.all("SELECT * FROM alerts WHERE ended IS NULL ORDER BY started"),
+        "alerts": await db.aall("SELECT * FROM alerts WHERE ended IS NULL ORDER BY started"),
         "app": {"version": __version__, "python": platform.python_version(), "os": "{} {}".format(platform.system(), platform.release()),
                 "uptime_seconds": time.time() - state.started, "ffmpeg": bool(ffmpeg),
                 "online_users": state.hub.online(), "open_connections": sum(len(s) for s in state.hub.sockets.values())},
         "storage": {"folder": str(storage), "disk_total": disk.total, "disk_free": disk.free,
-                    "database": state.db.size(), "database_kind": state.db.kind,
-                    "library": db.one("SELECT SUM(size) n FROM generations")["n"] or 0,
-                    "assets": db.one("SELECT SUM(size) n FROM assets")["n"] or 0,
+                    "database": await state.db.offload(state.db.size), "database_kind": state.db.kind,
+                    "library": (await db.aone("SELECT SUM(size) n FROM generations"))["n"] or 0,
+                    "assets": (await db.aone("SELECT SUM(size) n FROM assets"))["n"] or 0,
                     "backup_folder": str(state.backup_dir), "last_backup": backup.newest(state.backup_dir)},
-        "counts": {name: db.one("SELECT COUNT(*) n FROM " + name)["n"]
+        "counts": {name: (await db.aone("SELECT COUNT(*) n FROM " + name))["n"]
                    for name in ("users", "sessions", "jobs", "generations", "assets", "projects", "credit_events", "audit_log")},
+        # Every table's rows (PostgreSQL's estimate) and size with its indexes, biggest first: what grows.
+        "tables": await db.aall("SELECT c.relname AS name, GREATEST(c.reltuples, 0)::bigint AS rows, "
+                                "pg_total_relation_size(c.oid) AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                                "WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY bytes DESC"),
+        "restore_test": await offload(backup.last_restore_test, db),
+        "retention_days": state.settings.retention_days,
     }
 
 
@@ -879,7 +893,7 @@ async def list_backups(request: Request, user: dict = Depends(admin_user)):
                                "bytes": info.st_size, "made": info.st_mtime})
     copies.sort(key=lambda c: c["made"], reverse=True)
     return {"folder": str(folder), "keep": state.settings.backup_keep, "on": state.settings.backup_keep > 0,
-            "database_kind": state.db.kind, "storage": str(state.storage_dir), "copies": copies, "check": backup.last_check(state.db)}
+            "database_kind": state.db.kind, "storage": str(state.storage_dir), "copies": copies, "check": await offload(backup.last_check, state.db)}
 
 
 @router.post("/backups")
@@ -893,7 +907,7 @@ async def back_up_now(request: Request, user: dict = Depends(admin_user)):
         files = await asyncio.to_thread(backup.copy_files, state.db, state.backup_dir, state.backup_files, state.settings.backup_keep)
     except Exception as error:
         raise HTTPException(400, "The backup failed: {}".format(error))
-    audit.record(request, user, "Backed up the database and files", target.name)
+    await offload(audit.record, request, user, "Backed up the database and files", target.name)
     return {"ok": True, "name": target.name, "bytes": target.stat().st_size, "files": files}
 
 
@@ -922,7 +936,7 @@ async def check_backup(request: Request, user: dict = Depends(admin_user)):
 @router.get("/audit/verify")
 async def verify_audit(request: Request, user: dict = Depends(admin_user)):
     """Check the seals of the audit log: whether any entry was changed or taken out."""
-    return audit.verify(request.app.state.db)
+    return await offload(audit.verify, request.app.state.db)
 
 
 @router.get("/storage")
@@ -931,18 +945,18 @@ async def storage_report(request: Request, user: dict = Depends(admin_user)):
     studio has put on the render server."""
     state, db = request.app.state, request.app.state.db
     people = []
-    for person in db.all("SELECT id, name, email FROM users ORDER BY id"):
-        files, used = await asyncio.to_thread(_folder_size, state.outputs.folder(person["id"]))
+    for person in await db.aall("SELECT id, name, email FROM users ORDER BY id"):
+        files, used = await asyncio.to_thread(_folder_size, await offload(state.outputs.folder, person["id"]))
         asset_files, asset_bytes = await asyncio.to_thread(_folder_size, state.assets_dir / str(person["id"]))
         people.append(dict(person, files=files, bytes=used, asset_files=asset_files, asset_bytes=asset_bytes))
     people.sort(key=lambda p: p["bytes"] + p["asset_bytes"], reverse=True)
-    largest = db.all("SELECT g.id, g.name, g.kind, g.size, g.created, g.filename, u.name AS user_name, u.email AS user_email "
+    largest = await db.aall("SELECT g.id, g.name, g.kind, g.size, g.created, g.filename, u.name AS user_name, u.email AS user_email "
                      "FROM generations g JOIN users u ON u.id = g.user_id WHERE g.size IS NOT NULL ORDER BY g.size DESC LIMIT 12")
-    uploads = db.all("SELECT u.name AS user_name, u.email AS user_email, COUNT(*) AS files, MAX(x.created) AS newest "
+    uploads = await db.aall("SELECT u.name AS user_name, u.email AS user_email, COUNT(*) AS files, MAX(x.created) AS newest "
                      "FROM uploads x JOIN users u ON u.id = x.user_id GROUP BY u.id ORDER BY files DESC")
     return {"people": people, "largest": largest,
             "render_server": {"by_user": uploads, "total": sum(u["files"] for u in uploads),
-                              "newest": db.all("SELECT name, created FROM uploads ORDER BY created DESC LIMIT 10")}}
+                              "newest": await db.aall("SELECT name, created FROM uploads ORDER BY created DESC LIMIT 10")}}
 
 
 @router.get("/audit")
@@ -951,7 +965,7 @@ async def audit_log(request: Request, q: str = "", user: dict = Depends(admin_us
     if q.strip():
         sql += " WHERE actor_name LIKE ? ESCAPE '\\' OR actor_email LIKE ? ESCAPE '\\' OR action LIKE ? ESCAPE '\\' OR target LIKE ? ESCAPE '\\'"
         params = [_like(q)] * 4
-    return {"entries": request.app.state.db.all(sql + " ORDER BY id DESC LIMIT 300", params)}
+    return {"entries": await request.app.state.db.aall(sql + " ORDER BY id DESC LIMIT 300", params)}
 
 
 # ---------------------------------------------------------------- servers and APIs
@@ -966,37 +980,38 @@ async def list_endpoints(request: Request, fresh: bool = False, user: dict = Dep
 
 
 def _endpoints_changed(state, main_before):
+    state.comfy_pool.reload()
     health.forget(state, "endpoints")   # the section shows the change at once
     health.forget(state, "status")
     if state.comfy.url != main_before:   # another main server: its nodes are read again
         state.catalog.forget_nodes()
-    state.jobs.wake.set()   # a new free server takes the waiting renders
+    state.jobs._wake()   # a new free server takes the waiting renders (this runs on a database thread)
 
 
 @router.post("/endpoints")
 async def add_endpoint(body: dict, request: Request, user: dict = Depends(admin_user)):
     state, main = request.app.state, request.app.state.comfy.url
     row = endpoints.clean(body)
-    state.db.run("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    await state.db.arun("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES (?, ?, ?, ?, ?, ?, ?)",
                  (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["active"], time.time()))
-    _endpoints_changed(state, main)
-    audit.record(request, user, "Added a server", row["name"], "{} at {}".format(endpoints.KINDS[row["kind"]], row["url"]))
+    await offload(_endpoints_changed, state, main)
+    await offload(audit.record, request, user, "Added a server", row["name"], "{} at {}".format(endpoints.KINDS[row["kind"]], row["url"]))
     return {}
 
 
 @router.put("/endpoints/{endpoint_id}")
 async def change_endpoint(endpoint_id: int, body: dict, request: Request, user: dict = Depends(admin_user)):
     state, main = request.app.state, request.app.state.comfy.url
-    before = state.db.one("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
+    before = await state.db.aone("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
     if before is None:
         raise HTTPException(404, "There is no such server.")
     if not str(body.get("api_key") or "").strip():
         body = {k: v for k, v in body.items() if k != "api_key"}   # left empty: the key it has is kept
     row = endpoints.clean(body, before)
-    state.db.run("UPDATE endpoints SET kind = ?, name = ?, url = ?, api_key = ?, models = ?, active = ? WHERE id = ?",
+    await state.db.arun("UPDATE endpoints SET kind = ?, name = ?, url = ?, api_key = ?, models = ?, active = ? WHERE id = ?",
                  (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["active"], endpoint_id))
-    _endpoints_changed(state, main)
-    audit.record(request, user, "Changed a server", row["name"], "{} at {}{}".format(
+    await offload(_endpoints_changed, state, main)
+    await offload(audit.record, request, user, "Changed a server", row["name"], "{} at {}{}".format(
         endpoints.KINDS[row["kind"]], row["url"], "" if row["active"] else ", off"))
     return {}
 
@@ -1004,14 +1019,14 @@ async def change_endpoint(endpoint_id: int, body: dict, request: Request, user: 
 @router.delete("/endpoints/{endpoint_id}")
 async def remove_endpoint(endpoint_id: int, request: Request, user: dict = Depends(admin_user)):
     state, main = request.app.state, request.app.state.comfy.url
-    before = state.db.one("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
+    before = await state.db.aone("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
     if before is None:
         raise HTTPException(404, "There is no such server.")
     if before["url"] in state.comfy_pool.busy:
         raise HTTPException(400, "A render is running there. Switch it off, and remove it once the render is done.")
-    state.db.run("DELETE FROM endpoints WHERE id = ?", (endpoint_id,))
-    _endpoints_changed(state, main)
-    audit.record(request, user, "Removed a server", before["name"], before["url"])
+    await state.db.arun("DELETE FROM endpoints WHERE id = ?", (endpoint_id,))
+    await offload(_endpoints_changed, state, main)
+    await offload(audit.record, request, user, "Removed a server", before["name"], before["url"])
     return {}
 
 
@@ -1019,40 +1034,40 @@ async def remove_endpoint(endpoint_id: int, request: Request, user: dict = Depen
 
 @router.get("/settings")
 async def get_settings(request: Request, user: dict = Depends(admin_user)):
-    return _settings(request.app.state)
+    return await offload(_settings, request.app.state)
 
 
 @router.put("/settings")
 async def put_settings(body: dict, request: Request, user: dict = Depends(admin_user)):
     state = request.app.state
-    before = _settings(state)
+    before = await offload(_settings, state)
     if "allow_signup" in body:
-        state.db.set_setting("allow_signup", "1" if body["allow_signup"] else "0")
+        await state.db.aset_setting("allow_signup", "1" if body["allow_signup"] else "0")
     if "signup_credits" in body:
-        state.db.set_setting("signup_credits", int(_number(body, "signup_credits", 1000000)))
+        await state.db.aset_setting("signup_credits", int(_number(body, "signup_credits", 1000000)))
     if "daily_cap" in body:
-        state.db.set_setting("daily_cap", int(_number(body, "daily_cap", 10000000)))
+        await state.db.aset_setting("daily_cap", int(_number(body, "daily_cap", 10000000)))
     if "admin_mfa" in body:
         # Turning it on locks out every admin without two-step sign-in, so the one who turns it on must have it.
         if body["admin_mfa"] and not user["mfa_enabled"]:
             raise HTTPException(400, "Turn on two-step sign-in for your own account first (Settings, Two-step sign-in), "
                                      "so this does not lock you out.")
-        state.db.set_setting("admin_mfa", "1" if body["admin_mfa"] else "0")
+        await state.db.aset_setting("admin_mfa", "1" if body["admin_mfa"] else "0")
     if "langfuse_words" in body:
-        state.db.set_setting("langfuse_words", "1" if body["langfuse_words"] else "0")
+        await state.db.aset_setting("langfuse_words", "1" if body["langfuse_words"] else "0")
     if "langfuse_grade_share" in body:
-        state.db.set_setting("langfuse_grade_share", _number(body, "langfuse_grade_share", 100))
-    after = _settings(state)
+        await state.db.aset_setting("langfuse_grade_share", _number(body, "langfuse_grade_share", 100))
+    after = await offload(_settings, state)
     changed = ["{}: {} to {}".format(k.replace("_", " "), before[k], after[k]) for k in after if after[k] != before[k]]
     if changed:
-        audit.record(request, user, "Changed settings", "", "; ".join(changed))
+        await offload(audit.record, request, user, "Changed settings", "", "; ".join(changed))
     return after
 
 
 @router.get("/admins")
 async def admins_without_mfa(request: Request, user: dict = Depends(admin_user)):
     """The admins, and whether each has two-step sign-in: who would be locked out if it were required."""
-    return {"admins": request.app.state.db.all("SELECT id, name, email, role, mfa_enabled FROM users WHERE role != 'user' AND disabled = 0 ORDER BY id"),
+    return {"admins": await request.app.state.db.aall("SELECT id, name, email, role, mfa_enabled FROM users WHERE role != 'user' AND disabled = 0 ORDER BY id"),
             "roles": [{"id": r, "label": staff.label(r), "about": staff.about(r)} for r in staff.roles()]}
 
 
@@ -1072,7 +1087,7 @@ async def list_projects(request: Request, q: str = "", user: dict = Depends(admi
                   " OR p.ref = ? OR p.id IN (SELECT m.parent_id FROM projects m WHERE m.ref = ?))")
         params = [_like(q.lower())] * 3 + [q.strip()] * 2   # lower case on both sides: PostgreSQL's LIKE minds case
     # Sorted outside: PostgreSQL takes a column's alias (last_job) in ORDER BY alone, not inside an expression.
-    rows = request.app.state.db.all(
+    rows = await request.app.state.db.aall(
         "SELECT * FROM (SELECT p.id, p.ref, p.name, p.created, u.id AS user_id, u.name AS user_name, u.email AS user_email, "
         "(SELECT COUNT(*) FROM projects m WHERE m.parent_id = p.id) AS modules, "
         "(SELECT COUNT(*) FROM assets a WHERE " + IN_PROJECT.format("a") + ") AS kit, "
@@ -1089,19 +1104,19 @@ async def project_detail(project_id: int, request: Request, user: dict = Depends
     """One project: its owner, its modules, its NeuralCore (the entries the agent and the canvas use by name) and its
     latest items."""
     db = request.app.state.db
-    project = db.one("SELECT p.*, u.name AS user_name, u.email AS user_email FROM projects p JOIN users u ON u.id = p.user_id "
+    project = await db.aone("SELECT p.*, u.name AS user_name, u.email AS user_email FROM projects p JOIN users u ON u.id = p.user_id "
                      "WHERE p.id = ?", (project_id,))
     if project is None:
         raise HTTPException(404, "No such project.")
-    modules = db.all("SELECT m.id, m.ref, m.name, m.created, (SELECT COUNT(*) FROM generations g WHERE g.project_id = m.id) AS items, "
+    modules = await db.aall("SELECT m.id, m.ref, m.name, m.created, (SELECT COUNT(*) FROM generations g WHERE g.project_id = m.id) AS items, "
                      "(SELECT COUNT(*) FROM jobs j WHERE j.project_id = m.id) AS jobs FROM projects m WHERE m.parent_id = ? ORDER BY m.id",
                      (project["parent_id"] or project_id,))
     root = project["parent_id"] or project_id
     return {"project": project, "modules": modules,
             "kit": [dict({k: e[k] for k in ("id", "name", "type", "kind", "about", "use_note", "always", "named", "origin", "size", "created")},
                          module=where["name"] if where["id"] != root else "")   # each module's NeuralCore is its own
-                    for where in [{"id": root, "name": ""}, *modules] for e in kit.entries(db, project["user_id"], where["id"])],
-            "items": db.all("SELECT g.id, g.kind, g.name, g.filename, g.created FROM generations g, projects p WHERE p.id = ? AND "
+                    for where in [{"id": root, "name": ""}, *modules] for e in await offload(kit.entries, db, project["user_id"], where["id"])],
+            "items": await db.aall("SELECT g.id, g.kind, g.name, g.filename, g.created FROM generations g, projects p WHERE p.id = ? AND "
                             + IN_PROJECT.format("g") + " ORDER BY g.created DESC LIMIT 12", (root,))}
 
 
@@ -1109,8 +1124,10 @@ async def project_detail(project_id: int, request: Request, user: dict = Depends
 async def asset_file(asset_id: int, request: Request, user: dict = Depends(admin_user)):
     """A kit entry's file, for its picture in the console."""
     state = request.app.state
-    row = state.db.one("SELECT user_id, filename FROM assets WHERE id = ?", (asset_id,))
+    row = await state.db.aone("SELECT user_id, filename FROM assets WHERE id = ?", (asset_id,))
     path = row and (state.assets_dir / str(row["user_id"]) / row["filename"]).resolve()
+    if path and path.is_relative_to(state.assets_dir.resolve()) and state.storage.name != "local":
+        return storage.signed(state, "kit", path)   # kept in Blob Storage: fetched from there (storage.py)
     if not path or not path.is_relative_to(state.assets_dir.resolve()) or not path.is_file():
         raise HTTPException(404, "No such file.")
     return FileResponse(path)
@@ -1122,16 +1139,16 @@ async def asset_file(asset_id: int, request: Request, user: dict = Depends(admin
 async def moderation_queue(request: Request, show: str = "review", user: dict = Depends(admin_user)):
     """What was made in the last 30 days and has no verdict yet, flagged first (its prompt has a listed word); or the
     verdicts (`show` "done") or the refused prompts (`show` "refused"); and the word list."""
-    db, found = request.app.state.db, moderation.settings(request.app.state.db)
+    db, found = request.app.state.db, await offload(moderation.settings, request.app.state.db)
     if show == "refused":
-        rows = db.all("SELECT m.*, u.name AS user_name, u.email AS user_email FROM moderation m LEFT JOIN users u ON u.id = m.user_id "
+        rows = await db.aall("SELECT m.*, u.name AS user_name, u.email AS user_email FROM moderation m LEFT JOIN users u ON u.id = m.user_id "
                       "WHERE m.kind = 'refused' ORDER BY m.id DESC LIMIT 200")
         return {"show": show, "items": rows, **found}
     if show == "done":
-        rows = db.all("SELECT m.*, u.name AS user_name, u.email AS user_email FROM moderation m LEFT JOIN users u ON u.id = m.user_id "
+        rows = await db.aall("SELECT m.*, u.name AS user_name, u.email AS user_email FROM moderation m LEFT JOIN users u ON u.id = m.user_id "
                       "WHERE m.kind = 'review' ORDER BY m.id DESC LIMIT 200")
         return {"show": show, "items": rows, **found}
-    rows = db.all("SELECT g.id, g.kind, g.name, g.filename, g.settings, g.created, u.id AS user_id, u.name AS user_name, u.email AS user_email "
+    rows = await db.aall("SELECT g.id, g.kind, g.name, g.filename, g.settings, g.created, u.id AS user_id, u.name AS user_name, u.email AS user_email "
                   "FROM generations g JOIN users u ON u.id = g.user_id WHERE g.created > ? AND g.run = '' AND NOT EXISTS "
                   "(SELECT 1 FROM moderation m WHERE m.generation_id = g.id) ORDER BY g.created DESC LIMIT 300", (time.time() - 30 * DAY,))
     items = []
@@ -1148,16 +1165,16 @@ async def moderate(item_id: int, body: dict, request: Request, user: dict = Depe
     state, verdict = request.app.state, body.get("verdict")
     if verdict not in ("fine", "removed"):
         raise HTTPException(400, "The verdict is fine or removed.")
-    row, path = _item(request, item_id)
-    prompt = moderation.prompt_of(state.db.one("SELECT settings FROM generations WHERE id = ?", (item_id,))["settings"])
-    words = ", ".join(moderation.matches(prompt + " " + row["name"], moderation.settings(state.db)["words"]))
-    state.db.run("INSERT INTO moderation (kind, generation_id, user_id, verdict, words, prompt, by_name, created) "
+    row, path = await offload(_item, request, item_id)
+    prompt = moderation.prompt_of((await state.db.aone("SELECT settings FROM generations WHERE id = ?", (item_id,)))["settings"])
+    words = ", ".join(moderation.matches(prompt + " " + row["name"], (await offload(moderation.settings, state.db))["words"]))
+    await state.db.arun("INSERT INTO moderation (kind, generation_id, user_id, verdict, words, prompt, by_name, created) "
                  "VALUES ('review', ?, ?, ?, ?, ?, ?, ?)", (item_id, row["user_id"], verdict, words, prompt[:1000], user["name"], time.time()))
     if verdict == "removed":
-        media.remove_result(path)
-        state.db.run("DELETE FROM generations WHERE id = ?", (item_id,))
+        await offload(media.remove_result, path)
+        await state.db.arun("DELETE FROM generations WHERE id = ?", (item_id,))
         state.notify(row["user_id"], library_changed=True)
-    audit.record(request, user, "Moderated an item: " + verdict, row["user_email"], row["name"])
+    await offload(audit.record, request, user, "Moderated an item: " + verdict, row["user_email"], row["name"])
     return {"ok": True}
 
 
@@ -1168,8 +1185,8 @@ async def moderation_settings(body: dict, request: Request, user: dict = Depends
     words = words.splitlines() if isinstance(words, str) else words if isinstance(words, list) else []
     if body.get("mode") not in moderation.MODES:
         raise HTTPException(400, "The mode is off, flag or refuse.")
-    found = moderation.save(request.app.state.db, words, body["mode"])
-    audit.record(request, user, "Changed the moderation words", "", "{} words, {}".format(len(found["words"]), found["mode"]))
+    found = await offload(moderation.save, request.app.state.db, words, body["mode"])
+    await offload(audit.record, request, user, "Changed the moderation words", "", "{} words, {}".format(len(found["words"]), found["mode"]))
     return found
 
 
@@ -1186,11 +1203,11 @@ async def search(request: Request, q: str = "", user: dict = Depends(admin_user)
     like = _like(text.lower())   # lower case on both sides: PostgreSQL's LIKE minds case
     low = text.lower()
     return {
-        "users": db.all("SELECT id, name, email, role, disabled FROM users WHERE LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(email) LIKE ? ESCAPE '\\' "
+        "users": await db.aall("SELECT id, name, email, role, disabled FROM users WHERE LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(email) LIKE ? ESCAPE '\\' "
                         "ORDER BY name LIMIT 6", (like, like)),
-        "jobs": db.all("SELECT j.id, j.name, j.status, j.created, u.name AS user_name FROM jobs j JOIN users u ON u.id = j.user_id "
+        "jobs": await db.aall("SELECT j.id, j.name, j.status, j.created, u.name AS user_name FROM jobs j JOIN users u ON u.id = j.user_id "
                        "WHERE LOWER(j.name) LIKE ? ESCAPE '\\' OR j.id = ? ORDER BY j.created DESC LIMIT 6", (like, text)),
-        "projects": db.all("SELECT p.id, p.name, p.parent_id, u.name AS user_name FROM projects p JOIN users u ON u.id = p.user_id "
+        "projects": await db.aall("SELECT p.id, p.name, p.parent_id, u.name AS user_name FROM projects p JOIN users u ON u.id = p.user_id "
                            "WHERE LOWER(p.name) LIKE ? ESCAPE '\\' ORDER BY p.id DESC LIMIT 6", (like,)),
         "workflows": [{"id": w["id"], "title": w["title"]} for w in await state.catalog.listing()
                       if low in w["id"].lower() or low in w["title"].lower()][:6],
@@ -1220,7 +1237,7 @@ async def agent_report(request: Request, days: int = 7, user: dict = Depends(adm
         models = await state.agent.models()
     except AgentError:
         models = []
-    calls = db.all("SELECT c.*, u.name AS user_name, u.email AS user_email FROM agent_calls c LEFT JOIN users u ON u.id = c.user_id "
+    calls = await db.aall("SELECT c.*, u.name AS user_name, u.email AS user_email FROM agent_calls c LEFT JOIN users u ON u.id = c.user_id "
                    "ORDER BY c.id DESC LIMIT 600")
     runs = {}
     for call in reversed(calls):
@@ -1237,11 +1254,11 @@ async def agent_report(request: Request, days: int = 7, user: dict = Depends(adm
         run["user_name"] = run["user_name"] or call["user_name"]
     return {
         "days": days,
-        "roles": roles.chosen(db), "configured": getattr(state.agent, "configured", {}), "models": models,
-        "totals": _speed(db.one("SELECT " + CALL_STATS + " FROM agent_calls WHERE started > ?", (since,))),
-        "by_model": [_speed(r) for r in db.all("SELECT model, " + CALL_STATS + " FROM agent_calls WHERE started > ? "
+        "roles": await offload(roles.chosen, db), "configured": getattr(state.agent, "configured", {}), "models": models,
+        "totals": _speed(await db.aone("SELECT " + CALL_STATS + " FROM agent_calls WHERE started > ?", (since,))),
+        "by_model": [_speed(r) for r in await db.aall("SELECT model, " + CALL_STATS + " FROM agent_calls WHERE started > ? "
                                                 "GROUP BY model ORDER BY calls DESC", (since,))],
-        "by_purpose": [_speed(r) for r in db.all("SELECT purpose, " + CALL_STATS + " FROM agent_calls WHERE started > ? "
+        "by_purpose": [_speed(r) for r in await db.aall("SELECT purpose, " + CALL_STATS + " FROM agent_calls WHERE started > ? "
                                                   "GROUP BY purpose ORDER BY calls DESC", (since,))],
         "runs": [dict(r, trace=None if r["run"].startswith("call-") else langfuse_trace.trace_id(r["run"]))
                  for r in sorted(runs.values(), key=lambda r: r["started"], reverse=True)[:40]],
@@ -1255,12 +1272,12 @@ async def agent_run(run: str, request: Request, user: dict = Depends(admin_user)
     """The calls of one run, in order."""
     db = request.app.state.db
     if run.startswith("call-") and run[5:].isdigit():
-        found = db.all("SELECT * FROM agent_calls WHERE id = ?", (int(run[5:]),))
+        found = await db.aall("SELECT * FROM agent_calls WHERE id = ?", (int(run[5:]),))
     else:
-        found = db.all("SELECT * FROM agent_calls WHERE run = ? ORDER BY id", (run,))
+        found = await db.aall("SELECT * FROM agent_calls WHERE run = ? ORDER BY id", (run,))
     if not found:
         raise HTTPException(404, "No such run.")
-    who = db.one("SELECT name, email FROM users WHERE id = ?", (found[0]["user_id"],)) if found[0]["user_id"] else None
+    who = await db.aone("SELECT name, email FROM users WHERE id = ?", (found[0]["user_id"],)) if found[0]["user_id"] else None
     return {"run": run, "calls": found, "user": who, "trace": None if run.startswith("call-") else langfuse_trace.trace_id(run),
             "langfuse": await request.app.state.traces.langfuse.link()}
 
@@ -1269,7 +1286,7 @@ async def agent_run(run: str, request: Request, user: dict = Depends(admin_user)
 async def agent_call(call_id: int, request: Request, user: dict = Depends(admin_user)):
     """One call and its words: the messages sent and the answer, while they are kept (a week)."""
     state = request.app.state
-    row = state.db.one("SELECT * FROM agent_calls WHERE id = ?", (call_id,))
+    row = await state.db.aone("SELECT * FROM agent_calls WHERE id = ?", (call_id,))
     if row is None:
         raise HTTPException(404, "No such call.")
     return dict(row, exchange=state.traces.exchange(call_id))
@@ -1287,7 +1304,7 @@ async def replay_call(call_id: int, body: dict, request: Request, user: dict = D
     model = str(body.get("model") or "").strip() or None
     started = time.time()
     answer = await state.agent.chat(messages, kept["format"], model=model, purpose="replay")
-    audit.record(request, user, "Replayed an agent call", str(call_id), answer.get("_model") or "")
+    await offload(audit.record, request, user, "Replayed an agent call", str(call_id), answer.get("_model") or "")
     return {"model": answer.get("_model"), "seconds": round(time.time() - started, 2), "usage": answer.get("_usage"),
             "answer": {k: v for k, v in answer.items() if not k.startswith("_")}, "pictures_left_out": pictures}
 
@@ -1297,7 +1314,7 @@ async def call_to_dataset(call_id: int, body: dict, request: Request, user: dict
     """Keep this call in a Langfuse dataset, to test the agent's prompts and models against later: {dataset, note?}.
     The dataset is made when it is not there. What was sent is the item's input, the answer what is expected."""
     state = request.app.state
-    row = state.db.one("SELECT id, run FROM agent_calls WHERE id = ?", (call_id,))
+    row = await state.db.aone("SELECT id, run FROM agent_calls WHERE id = ?", (call_id,))
     if row is None:
         raise HTTPException(404, "No such call.")
     name = " ".join(str(body.get("dataset") or "").split())[:100]
@@ -1307,7 +1324,7 @@ async def call_to_dataset(call_id: int, body: dict, request: Request, user: dict
     if not kept:
         raise HTTPException(404, "The words of this call are no longer kept: they are kept for a week.")
     sender = state.traces.langfuse
-    if not sender.words():
+    if not await offload(sender.words):
         raise HTTPException(400, "Words are not sent to Langfuse (Settings, Langfuse). Turn that on to keep calls in a dataset.")
     try:
         item = await sender.to_dataset(name, kept["messages"], kept["answer"], row["run"], str(body.get("note") or "").strip()[:500])
@@ -1325,11 +1342,11 @@ async def call_to_dataset(call_id: int, body: dict, request: Request, user: dict
 async def agent_roles(body: dict, request: Request, user: dict = Depends(admin_user)):
     """The models for the agent's roles: {main, fast, vision}; an empty one follows config.json. Takes effect at once."""
     state = request.app.state
-    before = roles.chosen(state.db)
-    found = roles.save(state.db, state.agent, body)
+    before = await offload(roles.chosen, state.db)
+    found = await offload(roles.save, state.db, state.agent, body)
     changed = ["{}: {} to {}".format(role, before[role] or "config.json", found[role] or "config.json") for role in found if found[role] != before[role]]
     if changed:
-        audit.record(request, user, "Changed the agent's models", "", "; ".join(changed))
+        await offload(audit.record, request, user, "Changed the agent's models", "", "; ".join(changed))
     return {"roles": found, "configured": getattr(state.agent, "configured", {})}
 
 
@@ -1342,12 +1359,12 @@ async def set_maintenance(body: dict, request: Request, user: dict = Depends(adm
     db = request.app.state.db
     if body.get("on") is True:
         text = " ".join(str(body.get("text") or "").split())[:300] or "The studio is under maintenance. New jobs can start again soon."
-        db.set_setting("maintenance", json.dumps({"text": text, "since": (health.maintenance(db) or {}).get("since") or time.time()}))
-        audit.record(request, user, "Turned on maintenance mode", "", text[:200])
+        await db.aset_setting("maintenance", json.dumps({"text": text, "since": (await offload(health.maintenance, db) or {}).get("since") or time.time()}))
+        await offload(audit.record, request, user, "Turned on maintenance mode", "", text[:200])
     else:
-        db.set_setting("maintenance", "{}")
-        audit.record(request, user, "Turned off maintenance mode")
-    closed = health.maintenance(db)
+        await db.aset_setting("maintenance", "{}")
+        await offload(audit.record, request, user, "Turned off maintenance mode")
+    closed = await offload(health.maintenance, db)
     return dict(closed, on=True) if closed else {"on": False}
 
 
@@ -1355,9 +1372,9 @@ async def set_maintenance(body: dict, request: Request, user: dict = Depends(adm
 async def alerts(request: Request, user: dict = Depends(admin_user)):
     """What the watcher found: the alerts still open and the latest ones, and where they are sent."""
     db = request.app.state.db
-    return {"open": db.all("SELECT * FROM alerts WHERE ended IS NULL ORDER BY started"),
-            "recent": db.all("SELECT * FROM alerts ORDER BY started DESC LIMIT 40"),
-            "phone": phone.shown(phone.config(db)), "every": health.CHECK_EVERY, "confirm": health.CONFIRM}
+    return {"open": await db.aall("SELECT * FROM alerts WHERE ended IS NULL ORDER BY started"),
+            "recent": await db.aall("SELECT * FROM alerts ORDER BY started DESC LIMIT 40"),
+            "phone": phone.shown(await offload(phone.config, db)), "every": health.CHECK_EVERY, "confirm": health.CONFIRM}
 
 
 @router.put("/alerts/phone")
@@ -1365,7 +1382,7 @@ async def set_phone(body: dict, request: Request, user: dict = Depends(admin_use
     """Where alerts go: {telegram_token, telegram_chat, ntfy_url}. A token left empty keeps the saved one; `telegram:
     false` removes Telegram."""
     db = request.app.state.db
-    found = phone.config(db)
+    found = await offload(phone.config, db)
     if body.get("telegram") is False:
         found.update(telegram_token="", telegram_chat="")
     else:
@@ -1384,8 +1401,8 @@ async def set_phone(body: dict, request: Request, user: dict = Depends(admin_use
         if url and not re.match(r"^https?://[^\s/]+/[\w.-]+$", url):
             raise HTTPException(400, "An ntfy address is the server and a topic, for example https://ntfy.sh/scene-alerts-7f3k.")
         found["ntfy_url"] = url
-    phone.save(db, found)
-    audit.record(request, user, "Changed the phone alerts")
+    await offload(phone.save, db, found)
+    await offload(audit.record, request, user, "Changed the phone alerts")
     return phone.shown(found)
 
 
@@ -1393,7 +1410,7 @@ async def set_phone(body: dict, request: Request, user: dict = Depends(admin_use
 async def find_telegram_chat(request: Request, user: dict = Depends(admin_user)):
     """The admin's chat with their bot, from the newest message they sent it, saved as where alerts go."""
     db = request.app.state.db
-    found = phone.config(db)
+    found = await offload(phone.config, db)
     if not found["telegram_token"]:
         raise HTTPException(400, "Save the bot's token first.")
     async with httpx.AsyncClient(timeout=10) as http:
@@ -1418,7 +1435,7 @@ async def test_alert(request: Request, user: dict = Depends(admin_user)):
 
 @router.get("/announcement")
 async def announcement(request: Request, user: dict = Depends(admin_user)):
-    return current_announcement(request.app.state.db)
+    return await offload(current_announcement, request.app.state.db)
 
 
 @router.put("/announcement")
@@ -1428,15 +1445,15 @@ async def set_announcement(body: dict, request: Request, user: dict = Depends(ad
     db = request.app.state.db
     text = " ".join(str(body.get("text") or "").split())[:300]
     if not text:
-        db.set_setting("announcement", "{}")
-        audit.record(request, user, "Removed the announcement")
+        await db.aset_setting("announcement", "{}")
+        await offload(audit.record, request, user, "Removed the announcement")
         return {}
     hours = _number(body, "hours", 24 * 30) if body.get("hours") not in (None, "") else 0
     found = {"text": text, "level": "warning" if body.get("level") == "warning" else "info",
              "until": time.time() + hours * 3600 if hours else None, "set": time.time()}
-    db.set_setting("announcement", json.dumps(found))
-    audit.record(request, user, "Published an announcement", "", text[:200])
-    return current_announcement(db)
+    await db.aset_setting("announcement", json.dumps(found))
+    await offload(audit.record, request, user, "Published an announcement", "", text[:200])
+    return await offload(current_announcement, db)
 
 
 # ---------------------------------------------------------------- pricing
@@ -1510,7 +1527,7 @@ def _pricing(state, items):
 @router.get("/pricing")
 async def get_pricing(request: Request, user: dict = Depends(admin_user)):
     """The credit rates, each workflow's own pricing, the credit packages and the servers."""
-    return _pricing(request.app.state, await request.app.state.catalog.listing())
+    return await offload(_pricing, request.app.state, await request.app.state.catalog.listing())
 
 
 @router.get("/pricing/llm")
@@ -1521,12 +1538,13 @@ async def get_llm_pricing(request: Request, user: dict = Depends(admin_user)):
         models = await state.agent.models()
     except AgentError:
         models = []
-    prices = state.credits.llm_prices()
+    prices = await offload(state.credits.llm_prices)
     # A Claude model with no flat price is charged by its tokens: "tokens" is Anthropic's price per million of each kind, in $.
     tokens = lambda m: dict(zip(("input", "output", "cache_read", "cache_write"), state.credits.token_prices(m) or ())) or None
     return {"models": [{"model": m, "credits": prices.get(m, 0), "available": m in models, "tokens": tokens(m)}
                        for m in [*models, *(p for p in prices if p not in models)]],
-            "inr_per_1000_credits": state.credits.inr_per_1000, "inr_per_usd": state.credits.inr_per_usd}
+            "inr_per_1000_credits": await offload(lambda: state.credits.inr_per_1000),
+            "inr_per_usd": await offload(lambda: state.credits.inr_per_usd)}
 
 
 @router.put("/pricing/llm")
@@ -1539,10 +1557,10 @@ async def put_llm_pricing(body: dict, request: Request, user: dict = Depends(adm
     value = _amount(body.get("credits"), "Credits per message", maximum=1e5)
     if value is None or value != int(value):
         raise HTTPException(400, "Credits per message is a whole number.")
-    before = state.credits.llm_cost(model)
-    state.credits.set_llm_price(model, int(value))
+    before = await offload(state.credits.llm_cost, model)
+    await offload(state.credits.set_llm_price, model, int(value))
     if int(value) != before:
-        audit.record(request, user, "Changed agent model pricing", model, "{} cr to {} cr a message".format(before, int(value)))
+        await offload(audit.record, request, user, "Changed agent model pricing", model, "{} cr to {} cr a message".format(before, int(value)))
     return await get_llm_pricing(request, user)
 
 
@@ -1555,20 +1573,21 @@ async def put_pricing(body: dict, request: Request, user: dict = Depends(admin_u
     given = body.get("rates") if isinstance(body.get("rates"), dict) else {}
     values = {"rate_" + kind: given[kind] for kind in RATES if kind in given}
     values.update({key: body[key] for key in ("inr_per_1000_credits", "electricity_inr_per_kwh", "inr_per_usd") if key in body})
-    before = {**{"rate_" + k: v for k, v in state.credits.rates().items()},
-              "inr_per_1000_credits": state.credits.inr_per_1000, "electricity_inr_per_kwh": state.credits.electricity_rate,
-              "inr_per_usd": state.credits.inr_per_usd}
+    before = {**{"rate_" + k: v for k, v in (await offload(state.credits.rates)).items()},
+              **await offload(lambda: {"inr_per_1000_credits": state.credits.inr_per_1000,
+                                       "electricity_inr_per_kwh": state.credits.electricity_rate,
+                                       "inr_per_usd": state.credits.inr_per_usd})}
     for key, value in values.items():
         label = key.replace("rate_", "").replace("_", " ")
         value = _amount(value, label.capitalize(), maximum=1e6)
         if value is None:
             raise HTTPException(400, "{} can't be left empty.".format(label.capitalize()))
         if value != before[key]:
-            state.db.set_setting(key, value)
+            await state.db.aset_setting(key, value)
             changed.append("{}: {:g} to {:g}".format(label, before[key], value))
     if changed:
-        audit.record(request, user, "Changed pricing", "", "; ".join(changed))
-    return _pricing(state, await state.catalog.listing())
+        await offload(audit.record, request, user, "Changed pricing", "", "; ".join(changed))
+    return await offload(_pricing, state, await state.catalog.listing())
 
 
 @router.put("/pricing/workflow")
@@ -1587,13 +1606,14 @@ async def put_workflow_pricing(body: dict, request: Request, user: dict = Depend
         "fallback_servers": " ".join(str(body.get("fallback_servers") or "").split())[:200],
         "enabled": 0 if body.get("enabled") is False else 1,
     }
-    state.db.run("INSERT INTO workflow_pricing (workflow, {}) VALUES (?, {}) ON CONFLICT (workflow) DO UPDATE SET {}".format(
+    await state.db.arun("INSERT INTO workflow_pricing (workflow, {}) VALUES (?, {}) ON CONFLICT (workflow) DO UPDATE SET {}".format(
         ", ".join(row), ", ".join("?" * len(row)), ", ".join("{0} = excluded.{0}".format(key) for key in row)),
                  (workflow, *row.values()))
-    base, per_second, multiplier = state.credits.rate_for(workflow)
-    audit.record(request, user, "Changed workflow pricing", workflow, "{:g} cr + {:g} cr/s × {:g}{}".format(
+    await offload(state.credits.pricing_changed)
+    base, per_second, multiplier = await offload(state.credits.rate_for, workflow)
+    await offload(audit.record, request, user, "Changed workflow pricing", workflow, "{:g} cr + {:g} cr/s × {:g}{}".format(
         base, per_second, multiplier, "" if row["enabled"] else " · switched off"))
-    return _pricing(state, await state.catalog.listing())
+    return await offload(_pricing, state, await state.catalog.listing())
 
 
 # ---------------------------------------------------------------- resolution and quality factors
@@ -1635,10 +1655,10 @@ async def get_factors(request: Request, user: dict = Depends(admin_user)):
     """The studio's resolution and quality factors, what they began as, and factors suggested by how long renders of
     each took, with how many jobs each suggestion stands on."""
     state = request.app.state
-    times = _tier_times(state.db)
-    return {"factors": state.credits.factors(), "defaults": credits_module.FACTORS, "suggested": _suggested(times),
+    times = await offload(_tier_times, state.db)
+    return {"factors": await offload(state.credits.factors), "defaults": credits_module.FACTORS, "suggested": _suggested(times),
             "samples": {group: {tier: n for tier, (_, n) in tiers.items()} for group, tiers in times.items()},
-            "rates": state.credits.rates()}
+            "rates": await offload(state.credits.rates)}
 
 
 def _factor_table(body):
@@ -1660,13 +1680,13 @@ def _factor_table(body):
 async def put_factors(body: dict, request: Request, user: dict = Depends(admin_user)):
     """Set the studio's resolution and quality factors; a factor left out goes back to where it began."""
     state = request.app.state
-    before = state.credits.factors()
-    state.db.set_setting("price_factors", json.dumps(_factor_table(body)))
-    after = state.credits.factors()
+    before = await offload(state.credits.factors)
+    await state.db.aset_setting("price_factors", json.dumps(_factor_table(body)))
+    after = await offload(state.credits.factors)
     changed = ["{} {}: {:g} to {:g}".format(group, key, before[group][key], after[group][key])
                for group in after for key in after[group] if before[group].get(key) != after[group][key]]
     if changed:
-        audit.record(request, user, "Changed the price factors", "", "; ".join(changed))
+        await offload(audit.record, request, user, "Changed the price factors", "", "; ".join(changed))
     return await get_factors(request, user)
 
 
@@ -1680,10 +1700,11 @@ async def put_workflow_factors(body: dict, request: Request, user: dict = Depend
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     table = _factor_table(body)
     own = json.dumps(table) if any(table.values()) else ""
-    state.db.run("INSERT INTO workflow_pricing (workflow, factors) VALUES (?, ?) ON CONFLICT (workflow) DO UPDATE SET factors = excluded.factors",
+    await state.db.arun("INSERT INTO workflow_pricing (workflow, factors) VALUES (?, ?) ON CONFLICT (workflow) DO UPDATE SET factors = excluded.factors",
                  (workflow, own))
-    audit.record(request, user, "Changed a workflow's price factors", workflow, own or "follows the studio's")
-    return {"workflow": workflow, "factors": state.credits.factors(workflow), "own": table}
+    await offload(state.credits.pricing_changed)
+    await offload(audit.record, request, user, "Changed a workflow's price factors", workflow, own or "follows the studio's")
+    return {"workflow": workflow, "factors": await offload(state.credits.factors, workflow), "own": table}
 
 
 @router.get("/economics")
@@ -1692,7 +1713,7 @@ async def economics(request: Request, days: int = 30, user: dict = Depends(admin
     electricity only: the time a job ran, at the power of the server it ran on. Edits and motion graphics are jobs
     too, made on the machine that hosts the studio."""
     state = request.app.state
-    return _economics(state, days if days in RANGES else 30, {w["id"]: w for w in await state.catalog.listing()})
+    return await offload(_economics, state, days if days in RANGES else 30, {w["id"]: w for w in await state.catalog.listing()})
 
 
 def _economics(state, days, titles):
@@ -1707,8 +1728,8 @@ def _economics(state, days, titles):
     for row in db.all(
             "SELECT workflow, server, COUNT(*) AS jobs, " + DONE_FAILED + ", "
             + COUNT_IF.format("status = 'cancelled'") + " AS cancelled, SUM(retries) AS retries, SUM(output_size) AS output_bytes, "
-            "SUM(CASE WHEN started IS NOT NULL THEN finished - started ELSE 0 END) AS run_seconds, "
-            "SUM(CASE WHEN status = 'done' THEN finished - started ELSE 0 END) AS done_seconds, "
+            "SUM(CASE WHEN started IS NOT NULL THEN extract(epoch FROM finished - started) ELSE 0 END) AS run_seconds, "
+            "SUM(CASE WHEN status = 'done' THEN extract(epoch FROM finished - started) ELSE 0 END) AS done_seconds, "
             "SUM(CASE WHEN status = 'done' THEN seconds_requested ELSE 0 END) AS seconds_made, "
             "SUM(CASE WHEN status = 'done' THEN cost ELSE 0 END) AS credits, "
             "SUM(CASE WHEN status != 'done' THEN cost ELSE 0 END) AS refunded "
@@ -1761,8 +1782,8 @@ async def add_pricing_row(table: str, body: dict, request: Request, user: dict =
         raise HTTPException(404, "No such list.")
     name, fields, what = TABLES[table]
     row = dict(_row(dict({"name": ""}, **body), fields), created=time.time())
-    new_id = request.app.state.db.run("INSERT INTO {} ({}) VALUES ({})".format(name, ", ".join(row), ", ".join("?" * len(row))), tuple(row.values()))
-    audit.record(request, user, "Added a " + what, row["name"])
+    new_id = await request.app.state.db.arun("INSERT INTO {} ({}) VALUES ({})".format(name, ", ".join(row), ", ".join("?" * len(row))), tuple(row.values()))
+    await offload(audit.record, request, user, "Added a " + what, row["name"])
     return {"id": new_id}
 
 
@@ -1771,13 +1792,13 @@ async def change_pricing_row(table: str, row_id: int, body: dict, request: Reque
     if table not in TABLES:
         raise HTTPException(404, "No such list.")
     name, fields, what = TABLES[table]
-    found = request.app.state.db.one("SELECT name FROM {} WHERE id = ?".format(name), (row_id,))
+    found = await request.app.state.db.aone("SELECT name FROM {} WHERE id = ?".format(name), (row_id,))
     if found is None:
         raise HTTPException(404, "No such {}.".format(what))
     row = _row(body, fields)
     if row:
-        request.app.state.db.run("UPDATE {} SET {} WHERE id = ?".format(name, ", ".join(key + " = ?" for key in row)), (*row.values(), row_id))
-        audit.record(request, user, "Changed a " + what, row.get("name", found["name"]))
+        await request.app.state.db.arun("UPDATE {} SET {} WHERE id = ?".format(name, ", ".join(key + " = ?" for key in row)), (*row.values(), row_id))
+        await offload(audit.record, request, user, "Changed a " + what, row.get("name", found["name"]))
     return {"ok": True}
 
 
@@ -1786,11 +1807,11 @@ async def delete_pricing_row(table: str, row_id: int, request: Request, user: di
     if table not in TABLES:
         raise HTTPException(404, "No such list.")
     name, _, what = TABLES[table]
-    found = request.app.state.db.one("SELECT name FROM {} WHERE id = ?".format(name), (row_id,))
+    found = await request.app.state.db.aone("SELECT name FROM {} WHERE id = ?".format(name), (row_id,))
     if found is None:
         raise HTTPException(404, "No such {}.".format(what))
-    request.app.state.db.run("DELETE FROM {} WHERE id = ?".format(name), (row_id,))
-    audit.record(request, user, "Deleted a " + what, found["name"])
+    await request.app.state.db.arun("DELETE FROM {} WHERE id = ?".format(name), (row_id,))
+    await offload(audit.record, request, user, "Deleted a " + what, found["name"])
     return {"ok": True}
 
 
@@ -1804,8 +1825,8 @@ EXPORTS = {
     "jobs": "SELECT j.id, u.email AS user, j.name, j.workflow, j.summary, j.status, j.cost AS credits, "
             "j.credits_required, j.credits_reserved, j.credits_consumed, j.credits_refunded, j.seconds_requested, j.server, "
             "j.retries, j.output_size, "
-            "{created} AS created_utc, round(CAST(j.started - j.created AS NUMERIC), 1) AS wait_seconds, "
-            "round(CAST(j.finished - j.started AS NUMERIC), 1) AS run_seconds, j.error FROM jobs j JOIN users u ON u.id = j.user_id ORDER BY j.created DESC",
+            "{created} AS created_utc, round(CAST(extract(epoch FROM j.started - j.created) AS NUMERIC), 1) AS wait_seconds, "
+            "round(CAST(extract(epoch FROM j.finished - j.started) AS NUMERIC), 1) AS run_seconds, j.error FROM jobs j JOIN users u ON u.id = j.user_id ORDER BY j.created DESC",
     "credits": "SELECT c.id, u.email AS user, c.amount, c.reason, c.job_id, {created} AS created_utc "
                "FROM credit_events c JOIN users u ON u.id = c.user_id ORDER BY c.id DESC",
     "audit": "SELECT id, actor_email AS actor, action, target, detail, ip, {created} AS created_utc "
@@ -1826,13 +1847,13 @@ async def export(name: str, request: Request, user: dict = Depends(admin_user)):
         raise HTTPException(404, "No such export.")
     db = request.app.state.db
     table = {"users": "u", "jobs": "j", "credits": "c"}.get(name)
-    rows = db.all(EXPORTS[name].format(created=db.utc_text(table + ".created" if table else "created")))
+    rows = await db.aall(EXPORTS[name].format(created=db.utc_text(table + ".created" if table else "created")))
     out = io.StringIO()
     writer = csv.writer(out)
     if rows:
         writer.writerow(rows[0].keys())
         writer.writerows([_cell(v) for v in row.values()] for row in rows)
-    audit.record(request, user, "Exported data", name + ".csv", "{} rows".format(len(rows)))
+    await offload(audit.record, request, user, "Exported data", name + ".csv", "{} rows".format(len(rows)))
     return Response(out.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="scene_{}_{}.csv"'.format(name, date.today().isoformat())})
 
@@ -1898,7 +1919,7 @@ async def admin_publish_skill_draft(draft_id: str, body: dict, request: Request,
     if user["role"] != "admin":
         raise HTTPException(403, "Only an admin can publish a skill.")
     try:
-        saved = skills.publish(draft_id, {k: v for k, v in (body or {}).items() if k in ("title", "desc", "words", "text")})
+        saved = await offload(skills.publish, draft_id, {k: v for k, v in (body or {}).items() if k in ("title", "desc", "words", "text")})
     except ValueError as err:
         raise HTTPException(400, str(err))
     audit.record(request, user, "Published skill", saved["id"], saved["title"])
@@ -1920,7 +1941,7 @@ async def admin_discard_skill_draft(draft_id: str, request: Request, user: dict 
 async def list_roles(request: Request, user: dict = Depends(admin_user)):
     """The staff roles, what each may see and change, how many people have each, and the areas there are to give."""
     db = request.app.state.db
-    counts = {r["role"]: r["n"] for r in db.all("SELECT role, COUNT(*) AS n FROM users GROUP BY role")}
+    counts = {r["role"]: r["n"] for r in await db.aall("SELECT role, COUNT(*) AS n FROM users GROUP BY role")}
     return {"roles": [dict(r, people=counts.get(r["id"], 0)) for r in staff.described()],
             "areas": [{"id": a, "label": label} for a, label in staff.AREAS.items()]}
 
@@ -1929,10 +1950,10 @@ async def list_roles(request: Request, user: dict = Depends(admin_user)):
 async def save_role(role_id: str, body: dict, request: Request, user: dict = Depends(admin_user)):
     """Make a role (role_id "new") or change one: {"label", "about", "read": [area], "write": [area]}."""
     try:
-        saved = staff.save(request.app.state.db, None if role_id == "new" else role_id, body)
+        saved = await offload(staff.save, request.app.state.db, None if role_id == "new" else role_id, body)
     except ValueError as error:
         raise HTTPException(400, str(error))
-    audit.record(request, user, "Saved a role", saved, "sees {}; changes {}".format(", ".join(body.get("read") or []) or "nothing",
+    await offload(audit.record, request, user, "Saved a role", saved, "sees {}; changes {}".format(", ".join(body.get("read") or []) or "nothing",
                                                                                 ", ".join(body.get("write") or []) or "nothing"))
     return {"id": saved, "roles": staff.described()}
 
@@ -1943,10 +1964,10 @@ async def delete_role(role_id: str, request: Request, user: dict = Depends(admin
     db = request.app.state.db
     if role_id not in staff.roles() or role_id == "admin":
         raise HTTPException(404, "No such role.")
-    if db.one("SELECT 1 FROM users WHERE role = ?", (role_id,)):
+    if await db.aone("SELECT 1 FROM users WHERE role = ?", (role_id,)):
         raise HTTPException(400, "Some people have this role. Give them another one first.")
-    staff.delete(db, role_id)
-    audit.record(request, user, "Deleted a role", role_id)
+    await offload(staff.delete, db, role_id)
+    await offload(audit.record, request, user, "Deleted a role", role_id)
     return {"roles": staff.described()}
 
 
@@ -1980,7 +2001,7 @@ def _session_out(request, row):
 async def list_sessions(request: Request, q: str = "", state: str = "", user: dict = Depends(admin_user)):
     """Every agent tab's Claude session, the most recently active first: who, where, which model, how full its context
     is and what it is doing now. `state` keeps only answering, live, idle or deleted ones."""
-    rows = [_session_out(request, row) for row in sessions.listing(request.app.state.db, q)]
+    rows = [_session_out(request, row) for row in await offload(sessions.listing, request.app.state.db, q)]
     if state:
         rows = [row for row in rows if row["state"] == state]
     counts = {}
@@ -1993,8 +2014,8 @@ async def list_sessions(request: Request, q: str = "", state: str = "", user: di
 async def session_detail(ref: str, request: Request, after: int = 0, user: dict = Depends(admin_user)):
     """One session and what happened in it after the event `after` (0: from the start), at most 500 events at a time."""
     db = request.app.state.db
-    row = sessions.one(db, ref)
+    row = await offload(sessions.one, db, ref)
     if row is None:
         raise HTTPException(404, "No such session.")
-    found = sessions.events(db, row["id"], after)
+    found = await offload(sessions.events, db, row["id"], after)
     return {"session": _session_out(request, row), "events": found, "more": len(found) == 500}

@@ -1,0 +1,6 @@
+.toast.critical {
+  border-left-color: var(--status-critical);
+}
+.status-dot.critical {
+  background: var(--status-critical);
+}

@@ -1,0 +1,98 @@
+.health-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.health-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s var(--ease);
+}
+.health-chip:hover {
+  background: var(--hover);
+}
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-good);
+  flex: none;
+}
+.health-chip.bad .health-dot {
+  background: var(--status-critical);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-critical) 25%, transparent);
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+.delta {
+  font-size: 12px;
+}
+.delta.good .arrow {
+  color: var(--ok);
+}
+.delta.bad .arrow {
+  color: var(--bad);
+}
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  padding: 13px 18px;
+  margin-bottom: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.stat-row > div {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+}
+.stat-row b {
+  font-weight: 600;
+}
+.all-clear {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 16px;
+  color: var(--muted);
+}
+.status-dot.good {
+  background: var(--status-good);
+}
+.feed-row.top {
+  align-items: flex-start;
+}
+.tile-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: -2px 0 2px;
+}
+.health-chip:active {
+  scale: 0.97;
+}
+
+.health-chip.warn .health-dot {
+  background: var(--status-warning);
+}

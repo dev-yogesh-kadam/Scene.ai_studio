@@ -32,6 +32,7 @@ from ..comfy.workflows import WorkflowError
 from ..references import media_kind, read_upload, upload_reference
 from .deps import current_user, uploading
 from .studio import needs_caption
+from ..db import offload
 
 router = APIRouter(prefix="/api/bulk", tags=["bulk"])
 KINDS = ("image", "video")
@@ -66,7 +67,7 @@ async def bulk_workflows(request: Request, kind: str = "image", user: dict = Dep
         if not item["id"].startswith(kind + "/"):
             continue
         try:
-            schema, pictures, other = _needs(await state.catalog.load(item["id"]))
+            schema, pictures, other = await offload(_needs, await state.catalog.load(item["id"]))
         except WorkflowError as error:
             found.append({"id": item["id"], "title": item.get("title") or item["id"], "error": str(error)})
             continue
@@ -142,7 +143,7 @@ async def bulk_run(request: Request, user: dict = Depends(admin_only)):
             len(prompts) * len(chosen) * takes, MOST_JOBS))
     project_id = int(form.get("project_id") or 0) or None
     if project_id:
-        sharing.require(state.db, user, project_id, "creator")
+        await offload(sharing.require, state.db, user, project_id, "creator")
     quality = str(form.get("quality") or "")
     resolution = int(form.get("resolution") or 0) or None
     orientation = str(form.get("orientation") or "") or None
@@ -171,16 +172,16 @@ async def bulk_run(request: Request, user: dict = Depends(admin_only)):
                     wf = await state.catalog.load(workflow_id)
                     if not wf["id"].startswith(kind + "/"):
                         raise WorkflowError("It is not {} workflow.".format("an image" if kind == "image" else "a video"))
-                    schema, settings = _settings(wf, prompt, pictures, quality, resolution, orientation, duration)
+                    schema, settings = await offload(_settings, wf, prompt, pictures, quality, resolution, orientation, duration)
                     title = schema["title"]
                     settings.update(run=run, bulk_row=row, bulk_take=take)
                     if same_seed:
                         settings.update(seed_mode="fixed", seed=seeds[take])
-                    _queue(state, user, wf, schema, settings, project_id)
+                    await offload(_queue, state, user, wf, schema, settings, project_id)
                     queued += 1
                 except (WorkflowError, HTTPException) as error:
                     skipped.setdefault(workflow_id, {"id": workflow_id, "title": title, "why": str(getattr(error, "detail", None) or error)})
-    audit.record(request, user, "Bulk run", "{} prompts x {} {} workflows x {} takes".format(len(prompts), len(chosen), kind, takes),
+    await offload(audit.record, request, user, "Bulk run", "{} prompts x {} {} workflows x {} takes".format(len(prompts), len(chosen), kind, takes),
                  "{} queued".format(queued))
     return {"run": run, "queued": queued, "skipped": list(skipped.values())}
 
@@ -198,12 +199,12 @@ def _jobs_of(db, user, run):
 
 @router.get("/runs")
 async def bulk_runs(request: Request, user: dict = Depends(admin_only)):
-    rows = request.app.state.db.all(
+    rows = await request.app.state.db.aall(
         "SELECT run, MIN(created) AS created, COUNT(*) AS cells, " + ", ".join(
             "SUM(CASE WHEN status = '{0}' THEN 1 ELSE 0 END) AS {0}".format(s) for s in ("queued", "running", "done", "failed", "cancelled"))
         + " FROM jobs WHERE user_id = ? AND run LIKE 'bulk-%' GROUP BY run ORDER BY MIN(created) DESC LIMIT 50", (user["id"],))
     for row in rows:   # what it was about: its first prompt, and how many workflows it compared
-        first = request.app.state.db.one("SELECT settings FROM jobs WHERE user_id = ? AND run = ? ORDER BY created LIMIT 1", (user["id"], row["run"]))
+        first = await request.app.state.db.aone("SELECT settings FROM jobs WHERE user_id = ? AND run = ? ORDER BY created LIMIT 1", (user["id"], row["run"]))
         s = json.loads(first["settings"]) if first else {}
         row["prompt"] = str(s.get("prompt") or "")[:140]
         row["kind"] = str(s.get("workflow", "image")).split("/", 1)[0]
@@ -213,16 +214,17 @@ async def bulk_runs(request: Request, user: dict = Depends(admin_only)):
 @router.get("/runs/{run}")
 async def bulk_run_grid(run: str, request: Request, user: dict = Depends(admin_only)):
     """The run as its grid: {"run", "kind", "prompts": [...], "workflows": [{"id", "title"}], "takes", "same_seed",
-    "cells": [{"job", "row", "take", "workflow", "status", "seconds", "eta", "error", "seed", "items": [{"id", "kind"}]}]}."""
+    "cells": [{"job", "row", "take", "workflow", "status", "seconds", "eta", "error", "seed", "items": [{"id", "kind", "name",
+    "rating"}]}]}. An item rated 1 is starred: the best of its row."""
     db = request.app.state.db
-    jobs = _jobs_of(db, user, run)
+    jobs = await offload(_jobs_of, db, user, run)
     made = {}
     ids = [j["id"] for j in jobs]
     for i in range(0, len(ids), 200):
         part = ids[i:i + 200]
-        for g in db.all("SELECT id, job_id, kind, name FROM generations WHERE user_id = ? AND job_id IN ({}) ORDER BY id".format(
+        for g in await db.aall("SELECT id, job_id, kind, name, rating FROM generations WHERE user_id = ? AND job_id IN ({}) ORDER BY id".format(
                 ", ".join("?" * len(part))), (user["id"], *part)):
-            made.setdefault(g["job_id"], []).append({"id": g["id"], "kind": g["kind"], "name": g["name"]})
+            made.setdefault(g["job_id"], []).append({"id": g["id"], "kind": g["kind"], "name": g["name"], "rating": g["rating"] or 0})
     prompts, columns, takes, now = {}, {}, 1, time.time()
     cells = []
     for j in jobs:
@@ -247,10 +249,10 @@ async def bulk_run_grid(run: str, request: Request, user: dict = Depends(admin_o
 async def bulk_stop(run: str, request: Request, user: dict = Depends(admin_only)):
     state = request.app.state
     stopped = 0
-    for j in _jobs_of(state.db, user, run):
-        if j["status"] == "queued" and state.jobs.remove(user["id"], j["id"]):
+    for j in await offload(_jobs_of, state.db, user, run):
+        if j["status"] == "queued" and await offload(state.jobs.remove, user["id"], j["id"]):
             stopped += 1
-    audit.record(request, user, "Stopped a bulk run", run, "{} waiting renders cancelled".format(stopped))
+    await offload(audit.record, request, user, "Stopped a bulk run", run, "{} waiting renders cancelled".format(stopped))
     return {"stopped": stopped}
 
 
@@ -258,7 +260,7 @@ async def bulk_stop(run: str, request: Request, user: dict = Depends(admin_only)
 async def bulk_again(run: str, body: dict, request: Request, user: dict = Depends(admin_only)):
     """One cell made again with what it was given, on a new seed (a cell of a same-seed run keeps its seed)."""
     state = request.app.state
-    job = next((j for j in _jobs_of(state.db, user, run) if j["id"] == body.get("job")), None)
+    job = next((j for j in await offload(_jobs_of, state.db, user, run) if j["id"] == body.get("job")), None)
     if job is None:
         raise HTTPException(404, "That cell is not in this run.")
     if job["status"] in ("queued", "running"):
@@ -266,9 +268,9 @@ async def bulk_again(run: str, body: dict, request: Request, user: dict = Depend
     try:
         wf = await state.catalog.load(job["workflow"])
         schema = workflows.describe(wf)
-        job_id = _queue(state, user, wf, schema, dict(job["settings"]), job["project_id"])
+        job_id = await offload(_queue, state, user, wf, schema, dict(job["settings"]), job["project_id"])
     except WorkflowError as error:
         raise HTTPException(400, str(error))
     # The old job leaves the grid: the new one takes its cell.
-    state.db.run("UPDATE jobs SET run = '' WHERE id = ?", (job["id"],))
+    await state.db.arun("UPDATE jobs SET run = '' WHERE id = ?", (job["id"],))
     return {"job": job_id}

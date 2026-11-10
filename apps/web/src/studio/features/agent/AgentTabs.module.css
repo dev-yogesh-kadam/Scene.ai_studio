@@ -1,0 +1,239 @@
+:global(.seg) button.on {
+  background: var(--thumb);
+  color: var(--text);
+  box-shadow: var(--sheen), var(--shadow-s);
+}
+:global(.btn).on {
+  background: var(--agent-soft);
+}
+:global(.btn).on {
+  color: var(--agent);
+}
+/* Global rules of the studio, split by area out of the one stylesheet they were in (app.css, then legacy.css). They
+are global because the markup that uses them names its classes as plain strings (shared controls, the shell, and the
+modules carried over from the classic studio and console). Loaded in their old order: common/styles/global.ts. */
+/* ---------------------------------------------------------------- agent tabs */
+/* Several conversations in one project: a history menu, the open tabs and a + over the panel. */
+.agent-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.agent-tabs-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.agent-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.agent-history-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0 6px 0 8px;
+  margin-bottom: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--hover);
+  color: var(--agent);
+  cursor: pointer;
+}
+.agent-history-btn :global(.icon) {
+  width: 17px;
+  height: 17px;
+}
+.agent-history-btn :global(.icon):last-child {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+.agent-history-btn:hover,
+.agent-history-btn[aria-expanded='true'] {
+  background: var(--active);
+}
+.agent-tab-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.agent-tab-list::-webkit-scrollbar {
+  display: none;
+}
+.agent-tab {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 170px;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 10px 10px 0 0;
+}
+.agent-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.agent-tab.on {
+  color: var(--text);
+}
+.agent-tab.on::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--agent);
+}
+/* the tab is its name: the ring goes round the whole tab when the name has the keyboard */
+.agent-tab:has(.agent-tab-name:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.agent-tab-name:focus-visible {
+  outline: none;
+}
+.agent-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tab-close {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+.agent-tab:hover .agent-tab-close,
+.agent-tab.on .agent-tab-close,
+.agent-tab-close:focus-visible {
+  opacity: 1;
+}
+.agent-tab-close:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.agent-tab-name-edit {
+  width: 120px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+.agent-tab-add {
+  margin-bottom: 6px;
+}
+.agent-tabs-gap {
+  flex: none;
+  width: 4px;
+}
+.agent-full-btn {
+  flex: none;
+  margin-bottom: 6px;
+}
+.agent-tabs.full .agent-tabs-bar {
+  padding: 8px 12px 0;
+}
+.agent-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 2px;
+  border-radius: 10px;
+}
+.agent-history-row:hover,
+.agent-history-row.on {
+  background: var(--hover);
+}
+.agent-history-row.on .agent-history-open b {
+  color: var(--agent);
+}
+.agent-history-open {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 8px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.agent-history-open b {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-history-tools {
+  display: flex;
+  opacity: 0;
+}
+.agent-history-row:hover .agent-history-tools,
+.agent-history-tools:focus-within {
+  opacity: 1;
+}
+.agent-spend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font: 600 12px/18px var(--sans);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.agent-spend:hover,
+.agent-spend:focus-visible {
+  background: var(--active);
+}
+.coin {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffe08a, #e2a93b);
+  box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.25);
+}
+/* Global rules of the studio, split by area out of the one stylesheet they were in (app.css, then legacy.css). They
+are global because the markup that uses them names its classes as plain strings (shared controls, the shell, and the
+modules carried over from the classic studio and console). Loaded in their old order: common/styles/global.ts. */
+/* ---------------------------------------------------------------- touch and motion
+After Apple's "Designing Fluid Interfaces". Whatever can be pressed answers the moment the pointer goes down, not when
+it lets go. Things that can be dragged lift while they are held; the springs that move them are in js/spring.js. */
+.agent-tab:active {
+  scale: 0.97;
+}
+/* The tabs' list for screen readers (it owns the tab names): no room on the page. */
+.tab-owner {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}

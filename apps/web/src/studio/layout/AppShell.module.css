@@ -1,0 +1,230 @@
+.app-menu-wrap {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 50;
+}
+.app-menu-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: var(--shadow-s);
+  transition:
+    background 0.2s var(--ease),
+    color 0.2s;
+}
+.app-menu-button:hover,
+.app-menu-button[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text);
+}
+.app-menu-button img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px -4px rgba(255, 255, 255, 0.3);
+}
+.app-menu-button :global(.icon) {
+  width: 18px;
+  height: 18px;
+}
+.app-menu-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.app-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 280px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  animation: pop-in 0.14s var(--ease);
+}
+.app-menu > a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+}
+.app-menu > a:hover,
+.app-menu a:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+}
+.app-menu .working {
+  margin: 0 0 4px;
+}
+.app-menu .server {
+  padding: 4px 10px;
+}
+.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 12px 10px;
+}
+.shell.railed .app-menu-wrap {
+  display: none;
+}
+.credit-badge {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px 6px 8px;
+  border-radius: 999px;
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-s);
+  font: 400 12px/16px var(--sans);
+  color: var(--muted);
+}
+.credit-badge b {
+  color: var(--text);
+  font: 650 15px/1 var(--display);
+  font-stretch: var(--wide);
+  letter-spacing: -0.02em;
+}
+.shell.on-canvas .credit-badge {
+  display: none;
+}
+.app-menu-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.shell.on-canvas .topbar-right {
+  display: none;
+}
+.topbar-right {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-right .credit-badge {
+  position: static;
+}
+.top-btn,
+.who-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  color: var(--text);
+  font: 500 13px/1 var(--sans);
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-s);
+}
+.top-btn:hover,
+.who-chip:hover,
+.who-chip[aria-expanded='true'] {
+  background: var(--hover);
+}
+.top-btn :global(.icon) {
+  width: 16px;
+  height: 16px;
+}
+.who-chip {
+  padding: 0 14px 0 4px;
+}
+.who-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-wrap {
+  position: relative;
+}
+.account-menu {
+  left: auto;
+  right: 0;
+}
+@media (max-width: 860px) {
+  .who-name,
+  .top-btn span {
+    display: none;
+  }
+  .topbar-right {
+    top: 10px;
+    right: 10px;
+  }
+  .topbar-right .credit-badge {
+    padding: 6px 10px 6px 6px;
+  }
+}
+.sidebar .working {
+  margin: 0 0 4px;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.97);
+  }
+}

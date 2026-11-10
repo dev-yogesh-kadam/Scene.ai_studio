@@ -28,7 +28,7 @@ import tempfile
 import time
 from pathlib import Path
 
-try:   # the Claude Agent SDK: keeps a conversation's Claude Code running between its messages (converse)
+try:   # the Claude Agent SDK: every message of the agent runs in a live session of Claude Code (converse); service() refuses to start without it
     import claude_agent_sdk as sdk
 except ImportError:
     sdk = None
@@ -90,6 +90,9 @@ def service(models, path="", timeout=600, fast="", home="", window=WINDOW):
     names = [m.strip() for m in str(models or "").split(",") if m.strip()]
     if not names or names[0].lower() in ("off", "none"):
         return None
+    if sdk is None:   # the agent's every message runs in a live session (converse): there is no other way
+        raise RuntimeError("Claude is offered to the agent (claude_models), but the Claude Agent SDK is not installed: "
+                           "pip install claude-agent-sdk (it is in backend/requirements.txt).")
     program = find(path)
     if not program:
         print("Claude is not offered to the agent: Claude Code isn't installed on this machine{}.".format(
@@ -278,11 +281,6 @@ class _Live:
 live = {}   # a conversation's key (thread["key"]) -> its _Live
 
 
-def live_ok(s):
-    """Whether a conversation with the service `s` can go on in a live session: Claude, with the SDK installed."""
-    return sdk is not None and bool(s and s.get("cli"))
-
-
 def _handlers(entry, names):
     """{name: async function(args) -> MCP result}: the tools Claude Code calls. Each runs the tool of the message being
     answered (entry.tools), in that message's request (its context: whose rows the database shows)."""
@@ -298,7 +296,8 @@ def _handlers(entry, names):
                 except (KeyError, ValueError, TypeError):
                     text = "That call could not be run. Check its fields."
             chars = entry.result_chars(name) if callable(entry.result_chars) else entry.result_chars
-            return {"content": [{"type": "text", "text": text[:chars]}]}
+            from .agent import fit_result   # agent.py builds on this module: found once both are loaded
+            return {"content": [{"type": "text", "text": fit_result(text, chars, name)}]}
         return run
     return {name: one(name) for name in names}
 

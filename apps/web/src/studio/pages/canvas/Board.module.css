@@ -1,0 +1,240 @@
+/* The canvas fills the page; what state it is in (the panel open, the agent over the whole of it, the panel's edge
+   being dragged, files dragged over it, a frame being asked for) is on its root as data attributes. */
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+.canvas[data-resizing] {
+  cursor: ew-resize;
+  user-select: none;
+}
+.canvas[data-resizing] .canvas-stage {
+  pointer-events: none;
+}
+.canvas[data-dropping] .canvas-stage {
+  outline: 2px dashed var(--agent);
+  outline-offset: -10px;
+}
+.canvas[data-full] .canvas-stage {
+  visibility: hidden;
+}
+.canvas-stage {
+  position: absolute;
+  inset: 0;
+  background: var(--canvas);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.canvas-stage.panning {
+  cursor: grabbing;
+}
+/* Registration crosses instead of a dot grid. */
+.canvas-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--line-strong);
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Cpath d='M0 4.5V0h4.5M0 91.5V96h4.5M91.5 0H96v4.5M91.5 96H96v-4.5' fill='none' stroke='%23000'/%3E%3C/svg%3E")
+    var(--grid-x, 0) var(--grid-y, 0) / var(--grid, 96px) var(--grid, 96px);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Cpath d='M0 4.5V0h4.5M0 91.5V96h4.5M91.5 0H96v4.5M91.5 96H96v-4.5' fill='none' stroke='%23000'/%3E%3C/svg%3E")
+    var(--grid-x, 0) var(--grid-y, 0) / var(--grid, 96px) var(--grid, 96px);
+}
+.canvas-stage[data-far]::before {
+  display: none;
+}
+.canvas-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+/* A shot is a faint lane behind its frames. */
+.lane {
+  position: absolute;
+  pointer-events: none;
+  border-radius: calc(14px * var(--inv, 1));
+  background-color: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: inset 0 0 0 calc(1px * var(--inv, 1)) color-mix(in srgb, var(--text) 6%, transparent);
+}
+/* While a frame is dragged over the gap between two shots: the line lights up, and dropping there starts a new shot. */
+.insert-mark {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  height: calc(3px * var(--inv, 1));
+  margin-top: calc(-1px * var(--inv, 1));
+  border-radius: 99px;
+  background: var(--agent);
+  box-shadow: 0 0 calc(10px * var(--inv, 1)) var(--agent);
+}
+.insert-mark span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: calc(3px * var(--inv, 1)) calc(10px * var(--inv, 1));
+  border-radius: 99px;
+  background: var(--agent);
+  color: #0b1a2b;
+  font: 600 calc(12px * var(--inv, 1))/1.3 var(--sans);
+  white-space: nowrap;
+}
+/* The line between one shot and the next on the board, kept one pixel thick at any zoom. */
+.lane-divider {
+  position: absolute;
+  pointer-events: none;
+  height: calc(1px * var(--inv, 1));
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+/* The name of a shot, left of its row of frames. --inv is 1 / zoom, so the names stay readable when zoomed out. */
+/* The boards left of the shots: the project's NeuralCore by type, and the finished cut. A card with its title and
+count, the name of each entry above its frame. Sizes follow the zoom like the shots' names, so they stay readable. */
+.board-card {
+  position: absolute;
+  pointer-events: none;
+  border-radius: calc(18px * min(var(--inv, 1), 2));
+  background: color-mix(in srgb, var(--text) 4.5%, var(--canvas));
+  box-shadow: inset 0 0 0 calc(1px * var(--inv, 1)) color-mix(in srgb, var(--text) 8%, transparent);
+}
+.board-chip {
+  position: absolute;
+  left: 16px;
+  top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+  font: 600 calc(12px * min(var(--inv, 1), 1.8))/1.2 var(--sans);
+  white-space: nowrap;
+}
+.board-chip svg {
+  width: calc(13px * min(var(--inv, 1), 1.8));
+  height: calc(13px * min(var(--inv, 1), 1.8));
+  color: var(--muted);
+}
+.board-chip i {
+  font-style: normal;
+  color: var(--muted);
+  font-weight: 500;
+}
+.board-name {
+  position: absolute;
+  pointer-events: none;
+  height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font: 600 calc(12px * min(var(--inv, 1), 1.5))/20px var(--sans);
+}
+.shot-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--muted);
+  font: 500 calc(13px * min(var(--inv, 1), 2.4))/1.3 var(--sans);
+  text-align: right;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: text;
+  overflow: hidden;
+}
+.shot-label:hover {
+  color: var(--text);
+}
+.shot-label .shot-name {
+  width: 100%;
+  height: auto;
+  padding: 2px 6px;
+  font: inherit;
+  text-align: right;
+}
+.minimap {
+  position: absolute;
+  right: 12px;
+  top: 60px;
+  width: 128px;
+  height: 80px;
+  padding: 4px;
+  background: var(--material);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+.minimap i,
+.minimap b {
+  position: absolute;
+  margin: 4px;
+}
+.minimap-layer {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  transform-origin: 0 0;
+}
+.minimap-layer i {
+  margin: 0;
+}
+.minimap i {
+  background: var(--control);
+}
+.minimap i.on {
+  background: var(--brand);
+}
+.minimap b {
+  border: 1px solid var(--text);
+}
+/* The way back to the work, in the middle of the free part of the board. */
+.canvas-lost {
+  position: absolute;
+  left: 50%;
+  bottom: 32px;
+  z-index: 4;
+  transform: translateX(-50%);
+}
+.canvas[data-panel] .canvas-lost {
+  left: calc((100% - var(--panel-w, 380px) - 12px) / 2);
+}
+.canvas-lost svg {
+  width: 15px;
+  height: 15px;
+}
+.canvas-hint {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  margin: 0;
+  text-align: center;
+  pointer-events: none;
+}
+.canvas[data-panel] .canvas-hint {
+  right: calc(var(--panel-w, 380px) + 28px);
+}
+.canvas[data-panel] .minimap {
+  right: calc(var(--panel-w, 380px) + 24px);
+}
+@media (max-width: 900px) {
+  .canvas[data-panel] .minimap,
+  .canvas[data-panel] .canvas-hint,
+  .canvas[data-panel] .canvas-lost {
+    display: none;
+  }
+}
+.canvas[data-full] .minimap,
+.canvas[data-full] .canvas-hint,
+.canvas[data-full] .canvas-lost {
+  display: none;
+}

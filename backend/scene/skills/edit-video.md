@@ -23,7 +23,7 @@ items").
 "source" is the id of a selected video, or of any video of this project; a selected one's length is given as "seconds". For an editing tool set prompt to "" and
 clips to 1.
 
-Every other edit of what exists, you do yourself, now, with the film tool's ffmpeg op: a crossfade or a transition,
+Every other edit of what exists, you do yourself, now, with the ffmpeg tool: a crossfade or a transition,
 a crop or a fit to another shape, a grade or a LUT, a speed change or a ramp, a punch-in, a shake, a flash, a freeze,
 a logo or a see-through overlay, a sound ducked under a voice, captions styled and burned in, a loudness pass, a GIF, a
 still. Load the ffmpeg-recipes skill (read_skill) before the first command; it has the tested commands. Look at what

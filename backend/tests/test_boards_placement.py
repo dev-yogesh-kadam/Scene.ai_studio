@@ -25,6 +25,9 @@ def finish(client, tmp_path, user_id, project_id, name, workflow="image/z", **se
     target.write_bytes(PNG)
     job = {"id": name, "user_id": user_id, "workflow": workflow, "name": name, "summary": "", "started": 0,
            "project_id": project_id, "settings": dict(settings)}
+    client.app.state.db.run("INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created, project_id) "
+                            "VALUES (?, ?, ?, ?, 'image', '{}', 'running', 0, ?) ON CONFLICT (id) DO NOTHING",
+                            (name, user_id, name, workflow, project_id))   # a result is always its job's
     client.app.state.jobs._record(job, "image", target, {})
     return client.app.state.db.one("SELECT id FROM generations WHERE job_id = ?", (name,))["id"]
 

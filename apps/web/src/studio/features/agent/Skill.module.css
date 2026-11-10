@@ -1,0 +1,141 @@
+:global(.seg) button.on {
+  background: var(--thumb);
+  color: var(--text);
+  box-shadow: var(--sheen), var(--shadow-s);
+}
+:global(.btn).on {
+  background: var(--agent-soft);
+}
+:global(.btn).on {
+  color: var(--agent);
+}
+.agent-skillmenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 420px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: pop-in 0.14s var(--ease);
+}
+.skillmenu-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.skillmenu-head :global(.icon) {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  flex: none;
+}
+.skillmenu-search {
+  flex: 1;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: 14px/1.4 var(--sans);
+  outline: none;
+}
+.skillmenu-search::placeholder {
+  color: var(--muted);
+}
+.skillmenu-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.skillmenu-label {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font: 600 11px/1.4 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.skillmenu-empty {
+  padding: 6px 10px 10px;
+}
+.skillmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: 13px/1.35 var(--sans);
+}
+.skillmenu-item.on,
+.skillmenu-item:hover {
+  background: var(--hover);
+}
+.skillmenu-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--field);
+}
+.skillmenu-mark :global(.icon) {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.skillmenu-text {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.skillmenu-text > b {
+  font-weight: 600;
+}
+.skillmenu-desc {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skillmenu-id {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--field);
+  padding: 1px 7px;
+  border-radius: 6px;
+  flex: none;
+}
+.skillmenu-foot {
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  margin-top: 4px;
+  color: var(--agent);
+}
+.skillmenu-foot .skillmenu-mark {
+  background: none;
+}
+.skillmenu-foot .skillmenu-mark :global(.icon) {
+  color: var(--agent);
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}

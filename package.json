@@ -1,0 +1,31 @@
+{
+  "name": "scene-ai",
+  "private": true,
+  "description": "Scene.ai's client apps: apps/web (studio + admin console), apps/mobile (phone site, /m/), packages/shared.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "test": "npm test --workspaces --if-present",
+    "format": "prettier --write apps/web packages/shared",
+    "format:check": "prettier --check apps/web packages/shared",
+    "e2e": "npm run e2e -w apps/web",
+    "smoke": "node apps/web/tests/smoke/smoke.mjs",
+    "tokens": "node packages/shared/tokens/build.mjs",
+    "tokens:check": "node packages/shared/tokens/build.mjs --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-no-unsanitized": "^4.1.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1"
+  }
+}

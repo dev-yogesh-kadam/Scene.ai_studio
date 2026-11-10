@@ -7,6 +7,8 @@ clip before it, joined into one video at the end.
 """
 
 import asyncio
+import inspect
+import contextvars
 import copy
 import json
 import re
@@ -23,7 +25,7 @@ from . import core, edits, errors, health, langfuse_trace, media, memory, modera
 from .comfy import workflows
 from .agent import AgentError
 from .comfy.client import ComfyError
-from .db import as_everyone
+from .db import as_everyone, offload
 
 VIDEO_TYPES = {".mp4", ".webm", ".mov", ".mkv", ".gif"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -35,6 +37,9 @@ JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever
 OFFLINE_CHECK = 10  # seconds between asking whether the render server answers again, while renders wait for it
 CLEAN_VOICE = "audio/audio_separate_voice"   # takes the voice out of music and effects, for a job that asks ("clean_voice")
 
+
+# The plan and step being queued now (plans.py): JobManager.add writes them into the job's own row.
+QUEUEING = contextvars.ContextVar("queueing", default=None)
 
 class Cancelled(Exception):
     pass
@@ -66,6 +71,10 @@ class JobManager:
         self.langfuse = None      # each finished job, as a span of its turn's trace (langfuse_trace.Sender; main.py sets it)
         self.finished = []        # functions(job, status) told when a job ends (aftercare.install: the agent checks its shots)
         self.wake = asyncio.Event()
+        try:   # the loop the workers wait on: add() and pause() may be called from a database thread (db.offload)
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = None
         self.hold_offline = True    # renders wait for the render server instead of failing (settings.hold_queue_offline)
         self.server_down = False    # the render server did not answer the last time a render was about to start
         # A job that was running when the app stopped can't be picked up again. Waiting jobs stay queued.
@@ -91,10 +100,13 @@ class JobManager:
         jobs = []
         # The latest 40, and however many more are waiting, running or just finished: the canvas holds each one's place
         # until what it made comes in, so a job left off this list would see its result land at the bottom instead.
+        # (Three lookups joined, each on an index of its own: one OR over them read every job of the user.)
         for row in self.db.all(
-                "SELECT * FROM jobs WHERE user_id = ? AND hidden = 0 AND (status IN ('queued', 'running') OR finished > ? "
-                "OR id IN (SELECT id FROM jobs WHERE user_id = ? AND hidden = 0 ORDER BY created DESC LIMIT 40)) "
-                "ORDER BY created DESC", (user_id, now - JUST_FINISHED, user_id)):
+                "SELECT * FROM jobs WHERE id IN ("
+                "SELECT id FROM jobs WHERE user_id = ? AND hidden = 0 AND status IN ('queued', 'running') "
+                "UNION SELECT id FROM jobs WHERE user_id = ? AND hidden = 0 AND finished > ? "
+                "UNION (SELECT id FROM jobs WHERE user_id = ? AND hidden = 0 ORDER BY created DESC LIMIT 40)) "
+                "ORDER BY created DESC", (user_id, user_id, now - JUST_FINISHED, user_id)):
             live = self.live.get(row["id"], {})
             row["settings"] = json.loads(row["settings"])
             lane = edits.is_edit(row["workflow"])
@@ -129,13 +141,15 @@ class JobManager:
         # approval), else the one queueing it now.
         settings["turn"] = langfuse_trace.job_turn(settings) or traces.mark()
         job_id = uuid.uuid4().hex[:12]
+        plan, step = QUEUEING.get() or (None, None)   # a plan's step: recorded in the same write that queues it
         self.db.run(
             "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, summary, status, est_seconds, cost, "
-            "credits_required, credits_reserved, seconds_requested, project_id, run, created) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "credits_required, credits_reserved, seconds_requested, project_id, run, created, plan_id, plan_step) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job_id, user_id, name, workflow_id, workflow_id.split("/", 1)[0], json.dumps(settings), summary,
-             est_seconds, cost, cost, cost, seconds, project_id, str(settings.get("run_of") or settings.get("run") or "")[:32], time.time()))
-        self.wake.set()
+             est_seconds, cost, cost, cost, seconds, project_id, str(settings.get("run_of") or settings.get("run") or "")[:32], time.time(),
+             plan, step))
+        self._wake()
         self.notify(user_id)
         return job_id
 
@@ -161,14 +175,14 @@ class JobManager:
         mine = "workflow LIKE 'edit/%'" if local else "workflow NOT LIKE 'edit/%'"
         while True:
             # An admin can pause the renders (while the render server is being restarted, say). Edits keep running.
-            if not local and self.paused():
+            if not local and await offload(self.paused):
                 self.wake.clear()
                 try:
                     await asyncio.wait_for(self.wake.wait(), 5)
                 except asyncio.TimeoutError:
                     pass
                 continue
-            job = self.db.one("SELECT * FROM jobs WHERE status = 'queued' AND {} ORDER BY priority DESC, created LIMIT 1".format(mine))
+            job = await self.db.aone("SELECT * FROM jobs WHERE status = 'queued' AND {} ORDER BY priority DESC, created LIMIT 1".format(mine))
             if job is None:
                 self.wake.clear()
                 await self.wake.wait()
@@ -182,7 +196,7 @@ class JobManager:
                 down = server is None and not alive
                 if down != self.server_down:
                     self.server_down = down
-                    self._notify_all_waiting(None)
+                    await offload(self._notify_all_waiting, None)
                 if server is None:
                     self.wake.clear()
                     try:
@@ -197,16 +211,16 @@ class JobManager:
             # render server is the machine that renders, another server is named as its row in Servers & APIs.
             main = server is None or server["url"] == self.comfy.url
             if main:
-                found = self.db.one("SELECT name FROM servers WHERE renders = ? AND active = 1 ORDER BY id LIMIT 1", (0 if local else 1,))
+                found = await self.db.aone("SELECT name FROM servers WHERE renders = ? AND active = 1 ORDER BY id LIMIT 1", (0 if local else 1,))
                 name = found["name"] if found else ""
             else:
                 name = server["name"]
             if server is not None:
                 self.live[job["id"]]["comfy"] = self.pool.client(server["url"]) if self.pool else self.comfy
-            self.db.run("UPDATE jobs SET status = 'running', started = ?, server = ? WHERE id = ?",
+            await self.db.arun("UPDATE jobs SET status = 'running', started = ?, server = ? WHERE id = ?",
                         (job["started"], name, job["id"]))
             job["server"], job["server_url"] = name, server["url"] if server is not None else ""
-            self._notify_all_waiting(job["user_id"])
+            await offload(self._notify_all_waiting, job["user_id"])
             if local:
                 await self._work(job, local)
                 continue
@@ -257,28 +271,31 @@ class JobManager:
             status, error = "failed", "{}: {}".format(type(e).__name__, e)
         self.live.pop(job["id"], None)
         if status == "resumed":
-            self.db.run("UPDATE jobs SET status = 'queued', started = NULL, error = '', resumes = resumes + 1, "
+            await self.db.arun("UPDATE jobs SET status = 'queued', started = NULL, error = '', resumes = resumes + 1, "
                         "priority = CASE WHEN priority < 50 THEN 50 ELSE priority END WHERE id = ?", (job["id"],))
             self.notify(job["user_id"])
-            self._notify_all_waiting(None)
+            await offload(self._notify_all_waiting, None)
             return
-        self.db.run("UPDATE jobs SET status = ?, error = ?, finished = ? WHERE id = ?",
+        await self.db.arun("UPDATE jobs SET status = ?, error = ?, finished = ? WHERE id = ?",
                     (status, error, time.time(), job["id"]))
-        self._traced(job, status, error)
+        await offload(self._traced, job, status, error)
         if status == "done":
-            self.db.run("UPDATE jobs SET credits_reserved = 0, credits_consumed = cost, output_size = "
+            await self.db.arun("UPDATE jobs SET credits_reserved = 0, credits_consumed = cost, output_size = "
                         "(SELECT SUM(size) FROM generations WHERE job_id = jobs.id) WHERE id = ?", (job["id"],))
         else:
-            self._refund(job)
+            await offload(self._refund, job)
         self.notify(job["user_id"], library_changed=status == "done")
         if status == "done" and job.get("project_id"):   # the others in a shared project see it on their canvas too
-            for person in sharing.people_of(self.db, job["project_id"]):
+            for person in await offload(sharing.people_of, self.db, job["project_id"]):
                 if person != job["user_id"]:
                     self.notify(person, library_changed=True)
-        self._notify_all_waiting(None)
+        await offload(self._notify_all_waiting, None)
         for told in self.finished:   # what is done once a job ends must never stop the queue
             try:
-                told(job, status)
+                if inspect.iscoroutinefunction(told):
+                    await told(job, status)
+                else:
+                    told(job, status)
             except Exception as problem:
                 print("A finished job's follow-up failed: {}".format(problem))
 
@@ -289,12 +306,23 @@ class JobManager:
         except (httpx.HTTPError, ValueError):
             return False
 
+    def _wake(self):
+        """Wake the workers: on their loop, wherever this is called from."""
+        try:
+            here = asyncio.get_running_loop()
+        except RuntimeError:
+            here = None
+        if self.loop is not None and here is not self.loop:
+            self.loop.call_soon_threadsafe(self.wake.set)
+        else:
+            self.wake.set()
+
     def paused(self):
         return self.db.setting("queue_paused", "0") == "1"
 
     def pause(self, paused):
         self.db.set_setting("queue_paused", "1" if paused else "0")
-        self.wake.set()
+        self._wake()
         self._notify_all_waiting(None)
 
     def to_front(self, job_id):
@@ -335,7 +363,7 @@ class JobManager:
     async def _run_edit(self, job):
         """An edit or a motion graphic, made on this machine. It reports no steps; a cancel stops it within a second."""
         live = self.live[job["id"]]
-        work = asyncio.ensure_future(edits.run(job, self.outputs.folder(job["user_id"]), self.db, self.node_path, self.tmp_dir))
+        work = asyncio.ensure_future(edits.run(job, await offload(self.outputs.folder, job["user_id"]), self.db, self.node_path, self.tmp_dir))
         while not work.done():
             await asyncio.wait([work], timeout=1)
             if live.get("cancel") and not work.done():
@@ -345,13 +373,13 @@ class JobManager:
         made = work.result()
         if made[0][2]["duration"]:
             job["summary"] = "{} · {:.0f} s".format(job["summary"], made[0][2]["duration"])
-            self.db.run("UPDATE jobs SET summary = ? WHERE id = ?", (job["summary"], job["id"]))
+            await self.db.arun("UPDATE jobs SET summary = ? WHERE id = ?", (job["summary"], job["id"]))
         for target, kind, ctx in made:
             # An op that makes several files names each (a keyframe's time) and may keep each in the run (save_to).
             name, keep_path, keep = ctx.pop("_name", None), ctx.pop("_keep_at", None), ctx.pop("_keep", None)
-            item_id = self._record(job, kind, target, ctx, name)
+            item_id = await offload(self._record, job, kind, target, ctx, name)
             if keep_path and item_id:
-                edits.keep_at(self.db, job, item_id, keep_path, keep)
+                await offload(edits.keep_at, self.db, job, item_id, keep_path, keep)
 
     async def _captions(self, job):
         """Write the structured caption this job needs (an image model such as Ideogram is trained on them), and those of
@@ -359,7 +387,7 @@ class JobManager:
         it run one after another with the image model loaded. A caption that cannot be written fails its own job only."""
         live = self.live[job["id"]]
         with as_everyone():
-            rows = self.db.all("SELECT id, user_id, settings FROM jobs WHERE status = 'queued' AND settings LIKE ?", ('%"caption": {%',))
+            rows = await self.db.aall("SELECT id, user_id, settings FROM jobs WHERE status = 'queued' AND settings::text LIKE ?", ('%"caption": {%',))
         todo = [(job["id"], job["settings"])] + [(r["id"], json.loads(r["settings"])) for r in rows if r["id"] != job["id"]]
         live["node"] = "Writing the caption…"
         self.notify(job["user_id"])
@@ -378,7 +406,7 @@ class JobManager:
             settings.setdefault("values", {})[rule["prompt"]] = caption
             settings.pop("caption", None)
             with as_everyone():
-                self.db.run("UPDATE jobs SET settings = ? WHERE id = ?", (json.dumps(settings), job_id))
+                await self.db.arun("UPDATE jobs SET settings = ? WHERE id = ?", (json.dumps(settings), job_id))
         live["node"] = ""
 
     async def _run(self, job):
@@ -433,7 +461,7 @@ class JobManager:
         finally:
             listener.cancel()
 
-        folder, stem = self._target(job)
+        folder, stem = await offload(self._target, job)
         saved = 0
         outputs = list(_outputs(entry))
         labels = _output_labels(wf, outputs)
@@ -449,8 +477,8 @@ class JobManager:
                 pass   # nothing to read from a transcript's file
             elif found["width"] and not ctx.get("width"):
                 ctx = dict(ctx, width=found["width"], height=found["height"])
-            self._record(job, kind, target, dict(ctx, output=label) if label else ctx,
-                         name="{} · {}".format(job["name"], label)[:120] if label else None)
+            await offload(self._record, job, kind, target, dict(ctx, output=label) if label else ctx,
+                          name="{} · {}".format(job["name"], label)[:120] if label else None)
             saved += 1
         if not saved:
             raise ComfyError("ComfyUI finished but saved no image, video or sound. Does the workflow have a Save node?")
@@ -543,10 +571,10 @@ class JobManager:
 
             live.update(node="Joining the clips", step=0, steps=0)
             self.notify(job["user_id"])
-            folder, stem = self._target(job)
+            folder, stem = await offload(self._target, job)
             target = folder / (stem + ".mp4")
             await media.join(parts, target)
-        self._record(job, "video", target, full_ctx)
+        await offload(self._record, job, "video", target, full_ctx)
 
     async def _render(self, job, live, wf, settings, client_id):
         """Run one graph on ComfyUI and wait for it. Returns (history entry, context)."""
@@ -633,11 +661,13 @@ class JobManager:
             (job["user_id"], job["id"], job.get("project_id"), job["workflow"], kind, name or job["name"], filename,
              job["summary"], json.dumps({k: v for k, v in job["settings"].items() if k != "turn"}), json.dumps(ctx), round(time.time() - job["started"], 1),
              target.stat().st_size, placement.run_of(job), time.time()))
+        self.outputs.keep(target)   # where the media are kept for good (storage.py): nothing more to do on this machine
         if kind in ("image", "video"):   # its thumbnail, made now rather than when the canvas first asks for it
             try:
                 asyncio.get_running_loop().create_task(media.make_poster_soon(target))
-            except RuntimeError:
-                pass
+            except RuntimeError:   # on one of the database's threads (db.offload): the workers' loop makes it
+                if self.loop is not None:
+                    self.loop.call_soon_threadsafe(lambda: self.loop.create_task(media.make_poster_soon(target)))
         # A step the agent told where to keep its result ("save_to": /videos/3) puts it there; earlier tries become takes.
         slot = (job.get("settings") or {}).get("save_to_state")
         if slot and item_id:

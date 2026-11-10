@@ -1,0 +1,26 @@
+{
+  "name": "@scene/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TypeScript shared by the studio (apps/web) and the phone site (apps/mobile): API client, types, formatting.",
+  "exports": {
+    "./api/*": "./src/api/*.ts",
+    "./types/*": "./src/types/*.ts",
+    "./format": "./src/format/index.ts",
+    "./live": "./src/live/socket.ts",
+    "./live/merge": "./src/live/merge.ts",
+    "./tokens/*": "./src/tokens/*.ts",
+    "./tokens.json": "./tokens/tokens.json",
+    "./monitor": "./src/monitor.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "web-vitals": "^5.3.0"
+  }
+}

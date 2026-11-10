@@ -1,0 +1,30 @@
+.drop {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.drop:first-of-type {
+  border-top: 0;
+}
+.drop-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+}
+.drop-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line-strong);
+}

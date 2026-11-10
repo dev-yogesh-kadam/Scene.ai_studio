@@ -8,10 +8,11 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import core, detect, edits, ffjob, film, montage, motion, reframe, runs, sharing
+from .. import core, detect, edits, ffjob, film, montage, motion, pages, reframe, runs, sharing, storage
 from ..media import FPS, MediaError
 from .deps import current_user
 from .workspace import _project_id
+from ..db import offload
 
 router = APIRouter(prefix="/api", tags=["film"])
 
@@ -54,7 +55,7 @@ def _text(value, most):
 @router.post("/edit/film")
 async def film_edit(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue one film operation. Costs no credits: it needs no GPU. Returns {"job", "name"}."""
-    return queue(request, user, body)
+    return await offload(queue, request, user, body)
 
 
 def queue(request, user, body):
@@ -73,7 +74,7 @@ def queue(request, user, body):
             raise HTTPException(400, "Name {} by its library id.".format(what))
         row = state.db.one("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind IN ({})".format(", ".join("?" * len(kinds))),
                            (item_id, user["id"], *kinds))
-        if row is None or not (folder / row["filename"]).is_file():
+        if row is None or not storage.here(folder / row["filename"]).is_file():
             raise HTTPException(404, "{} is not in your library.".format(what[0].upper() + what[1:]))
         return row["id"]
 
@@ -181,8 +182,12 @@ def queue(request, user, body):
             facts = "{} parts · {}".format(len(settings["parts"]), shape)
         else:
             facts = "{} · parts of {} frames at {} fps".format(shape, reframe.PART_FRAMES, reframe.GEN_FPS)
+    elif op == "logo":
+        settings["logo"] = own(body.get("logo"), ("image", "text"), "the logo")
+        settings["kind"] = kind_of(settings["logo"])
+        facts = "cut out, its colours read"
     elif op in ("html", "ffmpeg"):
-        facts = _written(op, body, settings, own)
+        facts = _project(request, user, body, settings, own) if op == "html" and body.get("project") else _written(op, body, settings, own)
     elif op in MONTAGE_OPS:
         facts = _montage(op, body, settings, own, size, kind_of)
         if body.get("save_to"):
@@ -202,6 +207,45 @@ def queue(request, user, body):
     name = _text(body.get("name"), 80) or title
     job_id = state.jobs.add(user["id"], name, workflow, settings, facts, None, 0, project_id)
     return {"job": job_id, "name": name}
+
+
+def _media(body, own):
+    """The library items a page or a project plays, by the names it gives them: [{"name", "item"}]."""
+    given = body.get("media") or []
+    if not isinstance(given, list) or len(given) > motion.MEDIA_MOST * 3:
+        raise HTTPException(400, "media is a list of at most {} {{\"name\", \"item\"}}.".format(motion.MEDIA_MOST * 3))
+    out = []
+    for entry in given:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not motion.MEDIA_NAME.match(name):
+            raise HTTPException(400, "Each media file needs a bare name like bg.mp4 (letters, digits, - and _, then its type).")
+        out.append({"name": name, "item": own(entry.get("item"), edits.ANY, "the media file {}".format(name))})
+    return out
+
+
+def _project(request, user, body, settings, own):
+    """Check a motion project the agent wrote file by file (pages.py) into `settings`: that it is there with its
+    index.html, how it is to be made (fps, format, stills at "frames", review sheets) and the media it plays. What its
+    files may reach is checked when it is staged for the render. Returns the facts shown with the job."""
+    try:
+        name, inner = pages.split(body.get("project"))
+    except pages.PageError as error:
+        raise HTTPException(400, str(error))
+    module = _project_id(request, user, body.get("project_id")) or 0
+    folder = pages.root(request.app.state.assets_dir.parent, user["id"], module) / name
+    if inner or not (folder / "index.html").is_file():
+        raise HTTPException(400, "There is no motion project \"{}\" with an index.html in this module: write it with page_build first.".format(name))
+    fps = _number(body.get("fps", 30), min(motion.PAGE_FPS), max(motion.PAGE_FPS), "fps", whole=True)
+    fmt = body.get("format", "mp4")
+    if fps not in motion.PAGE_FPS or fmt not in ("mp4", "webm", "gif"):
+        raise HTTPException(400, "fps is one of {} and format one of mp4, webm, gif (stills: \"frames\").".format(", ".join(map(str, motion.PAGE_FPS))))
+    frames = body.get("frames") or []
+    if not isinstance(frames, list) or len(frames) > motion.STILLS_MOST:
+        raise HTTPException(400, "frames is a list of at most {} times in seconds.".format(motion.STILLS_MOST))
+    frames = [_number(t, 0, 180, "a frame's time") for t in frames]
+    settings.update(project_dir=str(folder), project=name, fps=fps, format=fmt, frames=frames, review=body.get("review", True) is not False,
+                    media=_media(body, own))
+    return "{} · {}".format(name, "stills at {}".format(", ".join("{:g} s".format(t) for t in frames)) if frames else "{} fps {}".format(fps, fmt))
 
 
 def _written(op, body, settings, own):

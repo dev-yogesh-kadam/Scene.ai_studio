@@ -8,8 +8,8 @@ The request that queues one checks it and writes what is to be done into the job
 import time
 from pathlib import Path
 
-from . import core, credits, detect, ffjob, film, media, montage, motion, reframe, runs
-from .db import as_everyone
+from . import core, credits, detect, ffjob, film, logo, media, montage, motion, reframe, runs, storage
+from .db import as_everyone, offload
 
 TIMELINE = "edit/timeline"   # the clips of a timeline joined into one video
 SOUND = "edit/sound"         # a sound put on a video
@@ -40,6 +40,7 @@ FILM = {
     "audio_check": ("edit/audio_check", "Sound checked", ".json", "text"),
     "html": ("edit/html", "Motion page", ".mp4", "video"),           # a page written whole, drawn by HyperFrames
     "ffmpeg": ("edit/ffmpeg", "ffmpeg command", ".txt", "text"),     # a command written whole; each output files as its type
+    "logo": ("edit/logo", "Logo, cut out", ".png", "image"),          # a brand's logo made ready for motion (logo.py)
 }
 ANY = ("video", "image", "audio", "text")   # what an ffmpeg command may take in
 TITLES = {TIMELINE: "Timeline export", SOUND: "Sound on a video", MOTION: "Motion graphics", ASSEMBLE: "Final cut",
@@ -59,7 +60,7 @@ async def run(job, folder, db, node_path="", tmp_dir=None):
         kinds = ("audio", "video") if kind == "sound" else kind if isinstance(kind, tuple) else (kind,)
         row = db.one("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind IN ({})".format(", ".join("?" * len(kinds))),
                      (item_id, job["user_id"], *kinds))
-        if row is None or not (folder / row["filename"]).is_file():
+        if row is None or not storage.here(folder / row["filename"]).is_file():
             raise media.MediaError("{} this was to be made from is no longer in the library.".format(
                 {"video": "A video", "image": "A picture", "audio": "The sound", "sound": "The sound"}.get(kind, "A file")))
         return folder / row["filename"]
@@ -82,7 +83,7 @@ async def run(job, folder, db, node_path="", tmp_dir=None):
     found = made.pop("found", None)
     kept_in = job["settings"].get("state_run") or job["settings"].get("run")   # an episode's shared state, or the tab's run
     if found and job["settings"].get("save_to") and kept_in:   # the speech spans, shots or beats, kept in the run
-        runs.write_many(db, job["settings"].get("state_user") or job["user_id"], kept_in, job["settings"]["save_to"],
+        await offload(runs.write_many, db, job["settings"].get("state_user") or job["user_id"], kept_in, job["settings"]["save_to"],
                         {str(n): span for n, span in found.items()}, op or "edit", replace=True)
     context = {"duration": round(made["seconds"], 1), "width": made["width"], "height": made["height"],
                **{k: v for k, v in made.items() if k not in ("seconds", "width", "height")}}
@@ -127,7 +128,7 @@ def _lengths(parts, infos):
 
 
 async def _timeline(settings, item, target, node_path, tmp_dir):
-    parts = [(item(clip["id"]), clip["start"], clip["end"]) for clip in settings["clips"]]
+    parts = [(await offload(item, clip["id"]), clip["start"], clip["end"]) for clip in settings["clips"]]
     seconds = await media.sequence(parts, target)
     lengths = _lengths(parts, [await media.probe(p) for p, _, _ in parts])
     return dict(await media.probe(target), seconds=seconds, **await _measured(target, lengths))
@@ -156,7 +157,7 @@ async def _assemble(settings, item, target, node_path, tmp_dir):
         for clip in settings["clips"]:
             if parts and (clip.get("fade") or len(parts) == 1 and settings.get("title")):
                 fades.add(len(parts))
-            parts.append((item(clip["id"]), clip["start"], clip["end"]))
+            parts.append((await offload(item, clip["id"]), clip["start"], clip["end"]))
         if settings.get("end"):
             fades.add(len(parts))
             parts.append((await card(settings["end"], "end"), 0.0, 0.0))
@@ -166,7 +167,7 @@ async def _assemble(settings, item, target, node_path, tmp_dir):
         overlaps = {i: media.FADE for i in fades if 0 < i < len(lengths) and min(lengths[i - 1], lengths[i]) >= 2 * media.FADE}
         if settings.get("music"):
             mixed = between("mixed")
-            await media.add_sound(joined, item(settings["music"], "audio"), mixed, False)
+            await media.add_sound(joined, await offload(item, settings["music"], "audio"), mixed, False)
             joined = mixed
         if (await media.probe(joined))["audio"]:
             await media.level(joined, target)
@@ -179,7 +180,7 @@ async def _assemble(settings, item, target, node_path, tmp_dir):
 
 
 async def _sound(settings, item, target, node_path, tmp_dir):
-    seconds = await media.add_sound(item(settings["video"]), item(settings["audio"], "audio"), target, settings["replace"])
+    seconds = await media.add_sound(await offload(item, settings["video"]), await offload(item, settings["audio"], "audio"), target, settings["replace"])
     return dict(await media.probe(target), seconds=seconds, **await _measured(target))
 
 
@@ -190,7 +191,7 @@ async def _motion(settings, item, target, node_path, tmp_dir):
         made = await motion.render_sequence(settings["scenes"], settings["look"], settings["shape"], target, node_path, tmp_dir,
                                             alpha or settings.get("look") == "clear")
     else:
-        source = item(settings["parent"]) if settings.get("parent") else None
+        source = await offload(item, settings["parent"]) if settings.get("parent") else None
         made = await motion.render(settings["template"], dict(settings["values"]), target, source, node_path, tmp_dir, alpha)
     file = made.pop("file", None)
     return dict(made, files=[file]) if file else made
@@ -200,27 +201,27 @@ async def _film(settings, item, target, node_path, tmp_dir):
     """One film operation (film.py), its settings checked when it was queued (api/film.py)."""
     op = settings["op"]
     if op == "reference":
-        return await film.reference(item(settings["image"], "image"), target)
+        return await film.reference(await offload(item, settings["image"], "image"), target)
     if op == "slice":
-        return await film.audio_slice(item(settings["audio"], "sound"), settings["f_in"], settings["f_out"], target,
+        return await film.audio_slice(await offload(item, settings["audio"], "sound"), settings["f_in"], settings["f_out"], target,
                                       settings.get("pad") or 0)
     if op == "track":
         return await film.timing_track(settings["frames"], target)
     if op == "trim":
-        return await film.trim(item(settings["video"]), settings["frames"], target, settings["stretch"], settings["size"], settings["max_pad"])
+        return await film.trim(await offload(item, settings["video"]), settings["frames"], target, settings["stretch"], settings["size"], settings["max_pad"])
     if op == "retime":
-        video = item(settings["video"])
+        video = await offload(item, settings["video"])
         segments = film.segment_map(settings["lines"], settings["frames"] / media.FPS, (await media.probe(video))["seconds"])
         return dict(await film.retime(video, segments, settings["frames"], target, settings["size"]), segments=segments)
     if op == "proof":
-        sheets = await film.proof_sheets(item(settings["video"]), settings["marks"], target)
+        sheets = await film.proof_sheets(await offload(item, settings["video"]), settings["marks"], target)
         found = await media.probe(sheets[0])
         return {"seconds": 0, "width": found["width"], "height": found["height"], "files": sheets}
     if op == "subtitles":
-        video, style = item(settings["video"]), settings.get("style")
+        video, style = await offload(item, settings["video"]), settings.get("style")
         lines = settings["lines"]
         if settings.get("words_from"):   # a transcription that has its words' times: for karaoke
-            lines = film.words_for(lines, item(settings["words_from"], "text").read_text(encoding="utf-8"))
+            lines = film.words_for(lines, (await offload(item, settings["words_from"], "text")).read_text(encoding="utf-8"))
         chars = film.ROW_CHARS
         if style:
             style = film.subtitle_style(style)
@@ -229,8 +230,8 @@ async def _film(settings, item, target, node_path, tmp_dir):
         made = await film.burn_subtitles(video, cues, target, style)
         return dict(made, cue_list=[list(c[:3]) for c in cues])
     if op == "film":
-        clips = [item(i) for i in settings["clips"]]
-        made = await film.join_on_master(clips, item(settings["audio"], "sound"), target)
+        clips = [await offload(item, i) for i in settings["clips"]]
+        made = await film.join_on_master(clips, await offload(item, settings["audio"], "sound"), target)
         at, parts = 0, []   # the pictures are copied as they are: each part starts where the frames before it end
         for n, clip in enumerate(clips, start=1):
             frames = await film.frames_of(clip)
@@ -238,7 +239,7 @@ async def _film(settings, item, target, node_path, tmp_dir):
             at += frames
         return dict(made, measured=await media.measure(target), parts=parts)
     if op == "speech":
-        source = item(settings["audio"], "sound")
+        source = await offload(item, settings["audio"], "sound")
         if settings.get("lines"):
             found = await film.speech_spans(source, settings["lines"])
         else:
@@ -247,15 +248,20 @@ async def _film(settings, item, target, node_path, tmp_dir):
         return {"seconds": 0, "width": 0, "height": 0, "spans": len(found) if settings.get("lines") else None,
                 "found": found if settings.get("save_to") else None}
     if op == "reframe":
-        return await reframe.crop(item(settings["video"]), settings["shape"], target, settings["x"], settings["y"])
+        return await reframe.crop(await offload(item, settings["video"]), settings["shape"], target, settings["x"], settings["y"])
     if op == "outpaint_prep":
-        return await reframe.prepare(item(settings["video"]), settings["shape"], target)
+        return await reframe.prepare(await offload(item, settings["video"]), settings["shape"], target)
     if op == "outpaint_join":
-        return await reframe.join(item(settings["video"]), [item(i) for i in settings["parts"]], settings["shape"], target)
+        return await reframe.join(await offload(item, settings["video"]), [await offload(item, i) for i in settings["parts"]], settings["shape"], target)
     if op == "html":
         return await _html(settings, item, target, node_path, tmp_dir)
     if op == "ffmpeg":
         return await _ffmpeg(settings, item, target, tmp_dir)
+    if op == "logo":
+        made = await logo.prepare(await offload(item, settings["logo"], (settings["kind"],)), settings["kind"], target, node_path, tmp_dir)
+        files = made.pop("files")
+        each = [{"_kind": "image"}] + ([{"_kind": "text", "_name": "Logo, SVG cleaned"}] if len(files) > 1 else [])
+        return dict(made, seconds=0, files=files, each=each)
     more = {"shots": _shots, "keyframes": _keyframes, "board": _board, "beats": _beats, "beat_cut": _beat_cut,
             "multicam": _multicam, "gif": _gif, "composite": _composite, "audio_check": _audio_check}.get(op)
     if more:
@@ -271,7 +277,7 @@ def _sized_list(values, most=200):
 
 
 async def _shots(settings, item, target):
-    found = await detect.shots(item(settings["video"]), settings["threshold"], settings["min_shot"])
+    found = await detect.shots(await offload(item, settings["video"]), settings["threshold"], settings["min_shot"])
     film.write_json(found, target)
     spans = {str(s["n"]): {"start": s["start"], "end": s["end"]} for s in found["shots"]}
     return {"seconds": 0, "width": 0, "height": 0, "length": found["seconds"], "count": len(found["shots"]),
@@ -279,7 +285,7 @@ async def _shots(settings, item, target):
 
 
 async def _keyframes(settings, item, target):
-    video = item(settings["video"])
+    video = await offload(item, settings["video"])
     width, height, length, fps = await montage._picture(video)
     marks = montage.keyframe_times(length, fps, settings["from"], settings.get("to"), settings.get("count"), settings.get("every"),
                                    settings.get("times"), settings.get("shots"), settings["pick"])
@@ -307,9 +313,9 @@ async def _board(settings, item, target):
     stills = []
     for still in settings["stills"]:
         if "video" in still:
-            stills.append((item(still["video"]), still["at"]))
+            stills.append((await offload(item, still["video"]), still["at"]))
         else:
-            stills.append((item(still["image"], "image"), None))
+            stills.append((await offload(item, still["image"], "image"), None))
     made = await montage.board(stills, target, settings["panels"], settings["numbered"])
     boards = made.pop("boards")
     each = [{"stills": b["stills"], "grid": "{}x{}".format(b["across"], b["down"]), "_name": "Board {}–{}".format(*b["stills"]),
@@ -321,7 +327,7 @@ async def _board(settings, item, target):
 
 
 async def _beats(settings, item, target):
-    found = await detect.beats(item(settings["audio"], "sound"), settings["from"], settings.get("to"))
+    found = await detect.beats(await offload(item, settings["audio"], "sound"), settings["from"], settings.get("to"))
     film.write_json(found, target)
     return {"seconds": 0, "width": 0, "height": 0, "tempo": found["tempo"], "confidence": found["confidence"],
             "beats": _sized_list(found["beats"], 300), "bars": _sized_list(found["bars"], 100), "onsets": len(found["onsets"]),
@@ -329,34 +335,37 @@ async def _beats(settings, item, target):
 
 
 async def _beat_cut(settings, item, target):
-    music = item(settings["audio"], "sound")
+    music = await offload(item, settings["audio"], "sound")
     beats = settings.get("beats")
     if not beats:
         beats = (await detect.beats(music))["beats"]
     points = detect.cut_points(sorted(beats), len(settings["clips"]), settings["every"], settings["first"])
-    made = await montage.beat_cut([item(i) for i in settings["clips"]], points, music, target, settings.get("size"))
+    made = await montage.beat_cut([await offload(item, i) for i in settings["clips"]], points, music, target, settings.get("size"))
     return dict(made, measured=await media.measure(target))
 
 
 async def _multicam(settings, item, target):
-    return await montage.multicam(item(settings["video"]), settings["cuts"], target, settings.get("cameras"))
+    return await montage.multicam(await offload(item, settings["video"]), settings["cuts"], target, settings.get("cameras"))
 
 
 async def _gif(settings, item, target):
-    return await montage.gif(item(settings["video"]), target, settings["fps"], settings["width"], settings["loop"],
+    return await montage.gif(await offload(item, settings["video"]), target, settings["fps"], settings["width"], settings["loop"],
                              settings["from"], settings.get("to"))
 
 
 async def _composite(settings, item, target):
-    overlay = item(settings["overlay"], settings["overlay_kind"])
-    made = await montage.composite(item(settings["video"]), overlay, target, settings["at"], settings["x"], settings["y"], settings["scale"])
+    overlay = await offload(item, settings["overlay"], settings["overlay_kind"])
+    made = await montage.composite(await offload(item, settings["video"]), overlay, target, settings["at"], settings["x"], settings["y"], settings["scale"])
     return dict(made, measured=await media.measure(target))
 
 
 async def _html(settings, item, target, node_path, tmp_dir):
     """A page the agent wrote whole, drawn by HyperFrames (motion.render_page): a video, a see-through WebM, a GIF or a
     still of its last moment, filed as its type."""
-    files = {m["name"]: item(m["item"], ANY) for m in settings.get("media") or []}
+    files = {m["name"]: await offload(item, m["item"], ANY) for m in settings.get("media") or []}
+    if settings.get("project_dir"):   # a project written file by file (pages.py): a video and its review sheets, or stills
+        return await motion.render_project(settings["project_dir"], target, settings["fps"], settings["format"], files,
+                                           settings.get("frames"), settings.get("review", True), node_path, tmp_dir)
     made = await motion.render_page(settings["html"], settings["width"], settings["height"], settings["duration"], target,
                                     settings["fps"], settings["format"], files, node_path, tmp_dir)
     file = made.pop("file", None) or target
@@ -369,7 +378,7 @@ async def _ffmpeg(settings, item, target, tmp_dir):
     argv, sidecars, timeout = ffjob.check(settings["argv"], settings["inputs"], settings.get("sidecars") or [],
                                           settings["outputs"], settings.get("timeout"))
     names = [o["name"] for o in settings["outputs"]]
-    made = await ffjob.run(argv, {i["name"]: item(i["item"], ANY) for i in settings["inputs"]}, sidecars, names, target, timeout, tmp_dir)
+    made = await ffjob.run(argv, {i["name"]: await offload(item, i["item"], ANY) for i in settings["inputs"]}, sidecars, names, target, timeout, tmp_dir)
     each = []
     for path, name in zip(made["files"], names or ["log.txt"]):
         kind = ffjob.kind_of(name)
@@ -381,7 +390,7 @@ async def _ffmpeg(settings, item, target, tmp_dir):
 
 
 async def _audio_check(settings, item, target):
-    found = await media.audio_check(item(settings["audio"], "sound"))
+    found = await media.audio_check(await offload(item, settings["audio"], "sound"))
     film.write_json(found, target)
     return {"seconds": 0, "width": 0, "height": 0, "length": found["seconds"],
             **{k: v for k, v in found.items() if k != "seconds"}}

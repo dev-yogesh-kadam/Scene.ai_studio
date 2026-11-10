@@ -57,8 +57,17 @@ SECONDS = re.compile(r"\b(\d{1,3}(?:\.\d+)?)\s*-?\s*(s|sec|secs|second|seconds)\
 ONE_CLIP = re.compile(r"\b(a|one|single|quick|short) (short |quick |little )?(clip|shot)\b", re.IGNORECASE)
 LONGER = re.compile(r"\b(minutes?|mins?|scenes|episodes?|story|script|series|several|many)\b", re.IGNORECASE)
 MATERIAL = ("audio", "text")   # an attached sound or script: the work of this skill, whatever the length said
-# ...and not a video of words and shapes: motion graphics are pages the agent designs (the film tool's html op), not a
+# ...and not a video of words and shapes: motion graphics are pages the agent designs (the render_html tool), not a
 # film of shots made from a script.
+MOTION_DEFAULT = "brand-motion"   # the skill of a message that asks for a brand's motion graphics, when the user picked none
+# A message that asks for a brand's motion graphics: a logo reveal, an ident, a brand reel, a promo, a teaser, an
+# explainer of words and shapes, anything made "with HyperFrames".
+BRAND_MOTION = re.compile(
+    r"\bhyper\s?frames?\b|\bmotion[- ]?graphic\w*|\blogo (reveal|animation|intro|outro|sting|build)s?\b"
+    r"|\b(animate|animated) (the |our |my |a )?logo\b|\b(ident|sting|sizzle( reel)?|brand (reel|video|film|promo|teaser|story))s?\b"
+    r"|\b(launch|product|app|service) (teaser|promo|video)s?\b|\bteaser\b|\bpromo\b|\b(services?|product) explainer\b"
+    r"|\bexplainer (video|animation)\b",
+    re.IGNORECASE)
 MOTION_GRAPHICS = re.compile(
     r"\bhyper\s?frames?\b|\bmotion[- ]?graphic\w*|\bkinetic (type|typography|text)\b|\btypograph\w* (video|animation)\b"
     r"|\b(animated|moving) (text|titles?|typography|infographics?|charts?)\b|\btext animation\b|\btitle (card|sequence)s?\b"
@@ -156,7 +165,8 @@ def load(folder=FOLDER):
             continue   # a skill whose words can't be read is left out rather than breaking the agent
         found.append({"id": slug, "title": title, "version": meta.get("version") or "1",
                       "desc": meta.get("desc") or _short(meta.get("user_description") or meta.get("description")), "words": words, "text": text,
-                      "next": [n for n in ids_in(meta.get("next")) if n != slug], "craft": is_on(meta.get("craft"))})
+                      "next": [n for n in ids_in(meta.get("next")) if n != slug], "craft": is_on(meta.get("craft")),
+                      "guide": is_on(meta.get("guide"))})
     return found
 
 
@@ -238,6 +248,16 @@ def pick(instruction, history=(), folder=FOLDER, force=()):
     return [found[i] for i in dict.fromkeys(named) if i in found]
 
 
+def wants_motion(instruction, history=()):
+    """Whether a message asks for a brand's motion graphics to be made now (BRAND_MOTION, as a request), so the
+    default motion skill runs when the user picked none. A short follow-up is about the work of the message before."""
+    said = str(instruction or "")
+    last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
+    if len(said) < 60 and last.get("instruction"):
+        said += "\n" + str(last["instruction"])
+    return bool(BRAND_MOTION.search(said)) and not HABIT.search(said) and bool(REQUEST.search(said) or MAKES_VIDEO.search(said))
+
+
 def wants_video(instruction, history=(), attached=()):
     """Whether a message asks for a film to be made now, so the default skill runs when the user picked none: a video
     asked for, as a request, not a habit, and more than one clip. attached: the kinds of the files attached ("audio",
@@ -247,7 +267,7 @@ def wants_video(instruction, history=(), attached=()):
     last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
     if len(said) < 60 and last.get("instruction"):
         said += "\n" + str(last["instruction"])
-    if not MAKES_VIDEO.search(said) or HABIT.search(said) or MOTION_GRAPHICS.search(said):
+    if not MAKES_VIDEO.search(said) or HABIT.search(said) or MOTION_GRAPHICS.search(said) or BRAND_MOTION.search(said):
         return False
     if any(kind in MATERIAL for kind in attached or ()):
         return True

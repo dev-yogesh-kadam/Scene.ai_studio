@@ -1,0 +1,102 @@
+.home-hero {
+  padding: 7vh 0 28px;
+  text-align: center;
+}
+.home-hero h1 {
+  font: 650 clamp(36px, 4.6vw, 60px)/1.02 var(--display);
+  font-stretch: var(--wide);
+  letter-spacing: -0.04em;
+}
+/* The generate bar stays in reach while the page scrolls under it. */
+.home-bar {
+  position: sticky;
+  top: 16px;
+  z-index: 5;
+  width: min(860px, 100%);
+  margin: 0 auto 8px;
+}
+.home-note {
+  text-align: center;
+}
+.home-section {
+  margin-top: 56px;
+}
+/* Finished work at its own proportions, packed in columns. */
+.made-grid {
+  columns: 5 220px;
+  column-gap: 16px;
+}
+.made {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  background: var(--media-ground);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  break-inside: avoid;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow 0.3s var(--ease-out);
+}
+.made:hover {
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    var(--lift);
+}
+.made img,
+.made video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.5s var(--ease-out);
+}
+.made:hover img,
+.made:hover video {
+  transform: scale(1.04);
+}
+.made span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 24px 12px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+.made:hover span,
+.made:focus-visible span {
+  opacity: 1;
+}
+/* The showcase an admin picked (Made on Scene.ai): bigger tiles, the videos playing while on screen. */
+.made-grid.showcase-grid-home {
+  columns: 4 260px;
+}
+.made:active {
+  scale: 0.98;
+  filter: brightness(0.88);
+}
+/* Surfaces lift a little toward the pointer. */
+.made {
+  transition:
+    box-shadow 0.3s var(--ease-out),
+    translate 0.3s var(--ease-out);
+}
+.made:hover {
+  translate: 0 -2px;
+}
+:root[data-motion='calm'] .made:hover {
+  translate: none;
+  transform: none;
+}

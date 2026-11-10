@@ -111,3 +111,82 @@ def test_an_empty_section_of_the_prompt_structure_is_left_out():
     from scene import agent
     assert agent.EMPTY_SECTION.match("REFERENCES:") and agent.EMPTY_SECTION.match("LIGHT AND LOOK: none")
     assert not agent.EMPTY_SECTION.match("SCENE CONTEXT: a fox in a den.") and not agent.EMPTY_SECTION.match("She says: ")
+
+
+# ---------------------------------------------------------------- the checks in any language (the model says them)
+
+def test_the_checks_take_the_models_word_and_fall_back_to_english_without_it():
+    from scene import agent
+    # with the field, the model's word stands, in any language
+    assert agent.claims_work("इसे बना दो", "मैं इसे अभी बना रहा हूँ।", True)
+    assert not agent.claims_work("generate", "Generating the clip now.", False)
+    assert agent.wants_sound("ponle esta música al vídeo", (), True) and not agent.wants_sound("add music to the video", (), False)
+    assert agent.parts_asked("divídelo en tres", {"tool": "trim", "parts": 3}) == 3
+    assert agent.parts_asked("divídelo en tres", {"tool": "trim", "parts": 9}) == 0   # out of 2 to 6: not trusted
+    # without it, the English words, as before
+    assert agent.claims_work("generate", "Generating the clip now.") and not agent.claims_work("इसे बना दो", "मैं इसे बना रहा हूँ।")
+    assert agent.wants_sound("add the music to this video") and agent.parts_asked("split it in two", {"parts": 1}) == 2
+    # the model is made to decide each: they are required in its answer
+    assert {"claims_making", "wants_sound", "go_ahead"} <= set(agent.reply_format(["w"])["required"])
+    shaped = agent.shaped({"reply": "x", "claims_making": True, "wants_sound": "yes"})
+    assert shaped["claims_making"] is True and shaped["wants_sound"] is None and shaped["go_ahead"] is None
+
+
+def test_a_go_ahead_in_any_language_carries_the_last_reply_and_the_model_decides(client, monkeypatch):
+    from scene import agent
+    register(client)
+    history = [{"instruction": "a pet ad", "reply": "A puppy runs across a lawn chasing a red ball.", "steps": []}]
+    for said in ("इसे बना दो", "hazlo"):   # "make it", "do it": no English word the old check knew
+        assert "A puppy runs across a lawn" in agent.carry_over(said, history) and "go_ahead" in agent.carry_over(said, history)
+    asked, answers = [], [{"reply": "¡Claro!", "steps": [], "go_ahead": True, "claims_making": False},   # said yes, planned nothing
+                          {"reply": "Un plano del cachorro.", "steps": [dict(SHOT, name="Puppy", prompt="A puppy runs across a lawn.")],
+                           "go_ahead": True, "claims_making": True}]
+
+    async def fake_ask(system, message, workflow_ids, history=(), model=None):
+        asked.append(message)
+        return answers.pop(0)
+    monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
+    plan = client.post("/api/agent/plan", json={"instruction": "hazlo", "history": history}).json()
+    assert "A puppy runs across a lawn" in asked[0]
+    assert len(asked) == 2 and agent.NO_STEPS in asked[1]   # asked again, once, to plan what it approved
+    assert [s["name"] for s in plan["steps"]] == ["Puppy"]
+
+
+def test_a_reply_in_hindi_that_claims_work_without_a_plan_is_caught(client, monkeypatch):
+    from scene import agent
+    register(client)
+    asked = []
+
+    async def fake_ask(system, message, workflow_ids, history=(), model=None):
+        asked.append(message)
+        return {"reply": "मैं इसे अभी बना रहा हूँ।", "steps": [], "claims_making": True, "wants_sound": False, "go_ahead": False}
+    monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
+    plan = client.post("/api/agent/plan", json={"instruction": "एक कुत्ते का वीडियो बना दो"}).json()
+    assert len(asked) == 2 and plan["reply"] == agent.EMPTY_CLAIM and plan["steps"] == []
+
+
+def test_sound_and_a_split_asked_in_spanish_are_made(client, monkeypatch):
+    import asyncio
+    from scene import media
+    me = register(client)
+    db = client.app.state.db
+    folder = client.app.state.outputs.folder(me["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=6:r=24", "-pix_fmt", "yuv420p", folder / "clip.mp4"))
+    clip = db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
+                  "VALUES (?, 'x/y', 'video', 'Clip', 'clip.mp4', '', '{}', '{}', 6, 1, 1)", (me["id"],))
+    db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
+           "VALUES (?, 'x/y', 'audio', 'Tune', 'tune.mp3', '', '{}', '{}', 1, 1, 2)", (me["id"],))
+    answers = [{"reply": "No puedo hacerlo.", "steps": [], "wants_sound": True, "claims_making": False, "go_ahead": False},
+               {"reply": "En tres partes.", "steps": [{"tool": "trim", "source": clip, "start": 0, "end": 2, "parts": 3}],
+                "wants_sound": False, "claims_making": True, "go_ahead": False}]
+
+    async def fake_ask(system, message, workflow_ids, history=(), model=None):
+        return answers.pop(0)
+    monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
+    # the model said it wants sound, though it only talked: the step is made anyway
+    sound = client.post("/api/agent/plan", json={"instruction": "ponle la música al vídeo"}).json()["steps"]
+    assert sound and sound[0]["sound"]["video"] == clip
+    # a trim with "parts" 3 is the split into three that was asked for, in words no English check knows
+    pieces = client.post("/api/agent/plan", json={"instruction": "divídelo en tres", "selection": [clip]}).json()["steps"]
+    assert [s["name"] for s in pieces] == ["Clip part 1 of 3", "Clip part 2 of 3", "Clip part 3 of 3"]

@@ -1,0 +1,372 @@
+/* A job that failed, kept on the canvas where its result would have been (canvas.js failedFrame). */
+.frame.failed .shot {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bad) 60%, transparent);
+}
+.failed-shot {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bad) 8%, var(--surface));
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow: hidden;
+}
+.failed-shot b {
+  color: var(--bad);
+  font-size: 13px;
+}
+.failed-credits {
+  color: var(--ok);
+}
+.frame.failed {
+  cursor: pointer;
+}
+.frame.failed:hover .shot,
+.frame.failed:focus-visible .shot {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 80%, transparent);
+}
+
+/* Two opposing brackets on whatever is selected. --inv keeps them the same size on screen when the canvas is zoomed. */
+.gate {
+  position: relative;
+}
+.selected > .gate::before,
+.selected > .gate::after {
+  content: '';
+  position: absolute;
+  width: calc(20px * var(--inv, 1));
+  height: calc(12px * var(--inv, 1));
+  border: 0 solid var(--accent);
+  pointer-events: none;
+}
+.selected > .gate::before {
+  border-top-left-radius: calc(8px * var(--inv, 1));
+  top: calc(-5px * var(--inv, 1));
+  left: calc(-5px * var(--inv, 1));
+  border-top-width: calc(2px * var(--inv, 1));
+  border-left-width: calc(2px * var(--inv, 1));
+}
+.selected > .gate::after {
+  border-bottom-right-radius: calc(8px * var(--inv, 1));
+  bottom: calc(-5px * var(--inv, 1));
+  right: calc(-5px * var(--inv, 1));
+  border-bottom-width: calc(2px * var(--inv, 1));
+  border-right-width: calc(2px * var(--inv, 1));
+}
+
+.frame {
+  position: absolute;
+  width: 240px;
+  cursor: grab;
+  user-select: none;
+}
+/* "+" on a frame: add it to the agent's message. Shown when the pointer is on the frame (always on a touch screen). */
+.frame-attach {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9px;
+  background: rgba(14, 15, 18, 0.72);
+  color: #fff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: scale(0.9);
+  transition:
+    opacity 0.15s var(--ease),
+    transform 0.15s var(--ease);
+}
+.frame-attach svg {
+  width: 16px;
+  height: 16px;
+}
+/* "From canvas" with nothing selected: the next frame clicked is the one used. */
+[data-picking] .frame {
+  cursor: copy;
+}
+[data-picking] .frame:hover .shot {
+  outline: 2px solid var(--agent);
+  outline-offset: 2px;
+}
+/* The list of frames for "@name" in the agent's message, built like the skill menu. */
+.frame:hover .frame-attach,
+.frame-attach:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.frame-attach:hover {
+  background: var(--agent);
+  color: #0b1a2b;
+  border-color: transparent;
+}
+@media (hover: none) {
+  .frame-attach {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Every frame has a line around it, so a dark picture stands out from the canvas. --inv keeps it the same width on screen at any zoom. */
+.frame .shot {
+  background: var(--media-ground);
+  border-radius: var(--radius-media);
+  box-shadow:
+    0 0 0 calc(1px * var(--inv, 1)) color-mix(in srgb, var(--text) 24%, transparent),
+    0 calc(14px * var(--inv, 1)) calc(28px * var(--inv, 1)) calc(-12px * var(--inv, 1)) rgba(0, 0, 0, 0.55);
+}
+.frame .shot img,
+.frame .shot video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  border-radius: var(--radius-media);
+}
+/* Every frame already has a line in the text colour, so a selected one gets a ring with a gap of canvas between. */
+.frame.selected .shot {
+  box-shadow:
+    0 0 0 calc(3px * var(--inv, 1)) var(--canvas),
+    0 0 0 calc(6px * var(--inv, 1)) var(--accent);
+}
+/* The brackets stand clear of the thicker line around a selected frame. */
+.frame.selected > .gate::before {
+  top: calc(-11px * var(--inv, 1));
+  left: calc(-11px * var(--inv, 1));
+}
+.frame.selected > .gate::after {
+  bottom: calc(-11px * var(--inv, 1));
+  right: calc(-11px * var(--inv, 1));
+}
+.frame .slate {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  font: 400 12px/16px var(--sans);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.frame .slate b {
+  font-weight: 600;
+  color: var(--text);
+}
+.frame .slate span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.frame.developing {
+  cursor: default;
+}
+/* A frame being made develops like a print in a tray: film grain over a dark ground that clears and warms
+as --developed (0 to 1, set by canvas.js) rises. A job still waiting stays undeveloped and still. */
+.frame.developing .shot {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  display: grid;
+  place-items: center;
+  box-shadow: none;
+  color: var(--accent);
+  font: 500 12px/16px var(--sans);
+  font-variant-numeric: tabular-nums;
+  background: radial-gradient(
+    circle at 50% 60%,
+    color-mix(in srgb, var(--brand) calc(var(--developed, 0) * 22%), var(--hover)) 0%,
+    var(--hover) 75%
+  );
+}
+.frame.developing .shot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-media);
+  opacity: calc(0.55 - var(--developed, 0) * 0.45);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 0.5s steps(4) infinite;
+}
+.frame.developing.waiting .shot::before {
+  animation: none;
+}
+/* Under the clock of a frame being made, one of two (canvas.js picks), each looping on its own: the paper plane of
+dom.flight, with a short tail of smoke behind it, bobbing a little as it flies; or the clapperboard of dom.clapper,
+snapping every couple of seconds. Hidden while the job waits in the queue. */
+.shot-wait {
+  display: grid;
+  justify-items: center;
+  gap: 6%;
+  width: 100%;
+}
+.frame.developing.waiting .film {
+  display: none;
+}
+.frame.developing.waiting .shot {
+  color: var(--muted);
+}
+:root[data-motion='calm'] .frame.developing .shot::before {
+  animation: none;
+}
+.frame.on-board {
+  cursor: pointer;
+}
+
+.frame.by-agent .shot {
+  color: var(--agent);
+}
+.frame.by-agent .run {
+  --run-color: var(--agent);
+}
+/* The reel under a frame being made, as wide as it: it fills in with the job's steps. */
+.frame > .reel {
+  margin-top: 8px;
+  height: 14px;
+  padding: 4px 3px;
+}
+.frame.developing.waiting > .reel {
+  display: none;
+}
+/* Far away: just the pictures, no slates. */
+[data-far] .slate {
+  visibility: hidden;
+}
+
+/* The canvas glides to an item the conversation points at, and rings it for a moment. */
+.spotlight {
+  content: '';
+  position: absolute;
+  inset: calc(-8px * var(--inv, 1));
+  border: calc(3px * var(--inv, 1)) solid var(--agent);
+  border-radius: calc(var(--radius-media) + 8px);
+  pointer-events: none;
+  animation: spotlight 1.8s ease-out forwards;
+}
+:root[data-motion='calm'] .spotlight {
+  animation: none;
+  opacity: 1;
+}
+
+/* Held: a frame on the canvas, an entry in NeuralCore. */
+.frame.lifted {
+  z-index: 6;
+  cursor: grabbing;
+}
+.frame.lifted .shot {
+  scale: 1.03;
+  box-shadow:
+    0 0 0 calc(3px * var(--inv, 1)) var(--canvas),
+    0 0 0 calc(6px * var(--inv, 1)) var(--accent),
+    0 calc(26px * var(--inv, 1)) calc(44px * var(--inv, 1)) calc(-14px * var(--inv, 1)) rgba(0, 0, 0, 0.75);
+  transition: scale 0.15s var(--ease-out);
+}
+:root[data-motion='calm'] .frame.lifted .shot {
+  transition: none;
+}
+
+/* Canvas: numbered shots and stacks of takes (pages/canvas.js). The badge names the story shot; the earlier takes of a
+stack peek out behind the one on top, dimmed, and the switch on top brings another forward. */
+.shot-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  padding: 1px 8px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--canvas) 78%, transparent);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  color: var(--text);
+  font: 600 11px/18px var(--sans);
+}
+.frame.stack-behind {
+  cursor: pointer;
+}
+.frame.stack-behind .shot {
+  filter: brightness(0.55) saturate(0.7);
+}
+.frame.stack-behind .slate,
+.frame.stack-behind .frame-attach,
+.frame.stack-behind .shot-badge {
+  visibility: hidden;
+}
+.frame.stack-buried {
+  visibility: hidden;
+}
+.stack-switch {
+  position: absolute;
+  bottom: 30px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  color: var(--text);
+  font: 600 11px/20px var(--sans);
+}
+.stack-switch span {
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.stack-step {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: 600 14px/1 var(--sans);
+}
+.stack-step:hover,
+.stack-step:focus-visible {
+  background: var(--accent);
+  color: #0b1a2b;
+}
+@keyframes grain {
+  0% {
+    background-position: 0 0;
+  }
+  25% {
+    background-position: -30px 20px;
+  }
+  50% {
+    background-position: 25px -35px;
+  }
+  75% {
+    background-position: -15px -10px;
+  }
+}
+@keyframes spotlight {
+  0% {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

@@ -1,3 +1,5 @@
+from conftest import POSTGRES, empty_postgres
+
 ADMIN = {"name": "Ada", "email": "ada@example.com", "password": "correct horse"}
 
 
@@ -8,17 +10,16 @@ def test_everything_needs_a_sign_in(client):
 
 
 def test_page_files_are_never_served_stale(client):
-    assert client.get("/assets/js/main.js").headers["cache-control"] == "no-cache"
+    assert client.get("/theme.js").headers["cache-control"] == "no-cache"
     assert "cache-control" not in client.get("/api/auth/state").headers
-    # the page fetches its files from under an address that changes with every change to them
+    # the page names its files by their content, so a new build gives them new addresses
     import re
     page = client.get("/")
-    script = re.search(r'src="(/v/\d+/assets/js/main\.js)"', page.text).group(1)
-    assert page.headers["cache-control"] == "no-cache" and re.search(r'href="/v/\d+/assets/css/app\.css"', page.text)
-    assert client.get(script).text == client.get("/assets/js/main.js").text
+    script = re.search(r'src="(/_app/studio-\w+\.js)"', page.text).group(1)
+    assert page.headers["cache-control"] == "no-cache"
+    assert client.get(script).status_code == 200
     assert "immutable" in client.get(script).headers["cache-control"]                      # its address changes, not its file
-    assert client.get(script.replace("main.js", "pages/home.js")).status_code == 200      # what main.js imports, relatively
-    assert client.get(script.replace("assets/js/main.js", "assets/../index.html")).status_code == 404
+    assert client.get("/_app/..%2fstudio.html").status_code == 404
 
 
 def test_first_account_is_admin_and_later_ones_are_users(client):
@@ -211,7 +212,7 @@ def test_the_admin_console_is_a_site_of_its_own_for_admins_only(client):
     desk = client.console
     # The studio has no admin routes and does not serve the console's page; its sign-in does not open the console.
     assert client.get("/api/admin/users").status_code == 404
-    for path in ("/console.html", "/assets/js/console/main.js", "/v/1/assets/js/console/main.js", "/assets/js/CONSOLE/main.js"):
+    for path in ("/console.html", "/_app/console-XyZ789.js", "/_APP/Console-XyZ789.js", "/assets/js/console/main.js"):
         assert client.get(path).status_code == 404, path
     desk.cookies.set("scene_console", client.cookies.get("scene_session"))
     assert desk.get("/api/admin/users").status_code == 401
@@ -240,7 +241,7 @@ def test_the_admin_console_is_a_site_of_its_own_for_admins_only(client):
     assert "Refused the admin console" in actions
 
     # Its page answers at each section's address; one who stops being an admin is shut out at once.
-    assert "console/main.js" in desk.get("/").text and "console/main.js" in desk.get("/users").text
+    assert "console-XyZ789.js" in desk.get("/").text and "console-XyZ789.js" in desk.get("/users").text
     client.app.state.db.run("UPDATE users SET role = 'user' WHERE id = ?", (me["id"],))
     assert desk.get("/api/admin/overview").status_code == 403
     client.app.state.db.run("UPDATE users SET role = 'admin' WHERE id = ?", (me["id"],))
@@ -251,8 +252,8 @@ def test_one_server_sends_each_port_to_its_site(client):
     from fastapi.testclient import TestClient
     from scene.main import Doors
     doors = Doors(client.app)
-    assert "console/main.js" in TestClient(doors, base_url="http://testserver:8090").get("/").text
-    assert "assets/js/main.js" in TestClient(doors, base_url="http://testserver:8080").get("/").text
+    assert "console-XyZ789.js" in TestClient(doors, base_url="http://testserver:8090").get("/").text
+    assert "studio-AbC123.js" in TestClient(doors, base_url="http://testserver:8080").get("/").text
     assert TestClient(doors, base_url="http://testserver:8080").get("/api/admin/users").status_code == 404
 
 
@@ -463,7 +464,8 @@ def test_a_plain_prompt_becomes_a_caption_just_before_it_renders_with_the_others
         "5": {"class_type": "PrimitiveStringMultiline", "inputs": {"value": "How to write a caption.\n[USER]\nRATIO: {{ratio}}.\nUser idea: {{original_prompt}}"}},
         "9": {"class_type": "SaveImage", "inputs": {"images": ["1", 0], "filename_prefix": "t"}}}))
     (folder / "captioned.studio.json").write_text(json.dumps({"caption": {"template": "5:value", "ratio": "3:shape"}, "hide": ["5:value"]}))
-    app = create_app(Settings(comfy_url="http://127.0.0.1:9", first_account_local=False, claude_models="off", storage_dir=str(tmp_path / "storage"),
+    empty_postgres()
+    app = create_app(Settings(database_url=POSTGRES, comfy_url="http://127.0.0.1:9", first_account_local=False, claude_models="off", storage_dir=str(tmp_path / "storage"),
                               workflows_dir=str(tmp_path / "workflows")))
     asked = []
 
@@ -768,7 +770,9 @@ def test_finished_work_can_be_kept_in_a_folder_outside_storage(tmp_path):
     from fastapi.testclient import TestClient
     from scene.config import Settings
     from scene.main import create_app
-    app = create_app(Settings(comfy_url="http://127.0.0.1:9", first_account_local=False, storage_dir=str(tmp_path / "storage"), output_dir=str(tmp_path / "Outputs")))
+    empty_postgres()
+    app = create_app(Settings(database_url=POSTGRES, comfy_url="http://127.0.0.1:9", first_account_local=False,
+                              storage_dir=str(tmp_path / "storage"), output_dir=str(tmp_path / "Outputs")))
     with TestClient(app):
         assert app.state.output_dir == tmp_path / "Outputs"
         assert app.state.jobs.tmp_dir == tmp_path / "storage" / "tmp"
@@ -1099,11 +1103,10 @@ def test_a_running_edit_can_be_cancelled_and_gives_its_credits_back(client, monk
 
 
 def test_the_database_is_backed_up_at_every_start_and_old_copies_are_dropped(client, tmp_path):
-    import sqlite3
     import subprocess
     from scene import backup, db as storage
     db = client.app.state.db
-    copies = "scene_*" + db.suffix   # a file of SQLite's, or a pg_dump of PostgreSQL's
+    copies = "scene_*" + db.suffix   # a pg_dump of the database
     folder = client.app.state.backup_dir
     assert folder == tmp_path / "backups" and len(list(folder.glob(copies))) == 1     # made when the app started
     register(client)
@@ -1116,11 +1119,8 @@ def test_the_database_is_backed_up_at_every_start_and_old_copies_are_dropped(cli
     made = backup.make(db, folder, tmp_path / "config.json", keep=2)
     assert sorted(f.name for f in folder.glob(copies)) == ["scene_2020-01-03" + db.suffix, made.name]
     assert len(list(folder.glob("config_*.json.enc"))) == 1 and not (folder / "scene.partial").exists()
-    if db.kind == "sqlite":
-        assert sqlite3.connect(made).execute("SELECT email FROM users").fetchall() == [(ADMIN["email"],)]
-    else:
-        listing = subprocess.run([storage.pg_tool("pg_restore"), "--list", str(made)], capture_output=True, text=True, check=True).stdout
-        assert "TABLE DATA public users" in listing
+    listing = subprocess.run([storage.pg_tool("pg_restore"), "--list", str(made)], capture_output=True, text=True, check=True).stdout
+    assert "TABLE DATA public users" in listing
     assert backup.attempt(db, tmp_path / "config.json" / "not a folder") is None    # a failure does not stop the app
     # a folder that holds the copies of one database takes no other: a test copy of the app cannot replace the real ones
     (folder / "database.txt").write_text("C:/somewhere/else/scene.db", encoding="utf-8")
@@ -1298,7 +1298,7 @@ def test_the_studio_pages_have_addresses_of_their_own(client):
         assert page.status_code == 200 and page.text == root.text, path
     assert client.get("/nothing-here").status_code == 404
     assert client.get("/timeline").status_code == 404
-    assert client.get("/assets/css/app.css").status_code == 200
+    assert client.get("/fonts/Archivo-latin.woff2").status_code == 200   # the page's own files
 
 
 def test_a_project_holds_modules_each_with_its_own_kit(client):

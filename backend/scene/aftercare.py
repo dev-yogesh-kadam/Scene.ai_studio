@@ -22,8 +22,8 @@ agent tells the user what the model cannot do and offers another way, as its rul
 import asyncio
 import json
 
-from . import review
-from .db import as_everyone
+from . import review, storage
+from .db import as_everyone, offload
 
 WAIT = 30              # seconds after a job is done before the background looks at its result
 BATCH_POLL = 15        # seconds between looks at whether the rest of a batch is made
@@ -88,10 +88,10 @@ def references_of(state, user_id, settings, item):
             continue
         if isinstance(use.get("asset"), int) and use["asset"]:
             row = state.db.one("SELECT name, kind, filename FROM assets WHERE id = ? AND user_id = ?", (use["asset"], user_id))
-            path = row and state.assets_dir / str(user_id) / row["filename"]
+            path = row and storage.here(state.assets_dir / str(user_id) / row["filename"])
         elif isinstance(use.get("id"), int):
             row = state.db.one("SELECT name, kind, filename FROM generations WHERE id = ? AND user_id = ?", (use["id"], user_id))
-            path = row and state.outputs.folder(user_id) / row["filename"]
+            path = row and storage.here(state.outputs.folder(user_id) / row["filename"])
         else:
             continue
         if row and row["kind"] in ("image", "video") and path.is_file():
@@ -114,7 +114,7 @@ def batch_running(state, job):
 
 async def after_batch(state, job):
     """Check a finished job once the batch it belongs to is made, so its shots are checked together."""
-    while batch_running(state, job):
+    while await offload(batch_running, state, job):
         await asyncio.sleep(BATCH_POLL)
     await after(state, job)
 
@@ -125,7 +125,7 @@ async def after(state, job, wait=None):
     await asyncio.sleep(WAIT if wait is None else wait)
     user_id = job["user_id"]
     with as_everyone():   # outside any request: every statement names the user itself
-        rows = state.db.all("SELECT * FROM generations WHERE job_id = ? AND user_id = ? ORDER BY id", (job["id"], user_id))
+        rows = await state.db.aall("SELECT * FROM generations WHERE job_id = ? AND user_id = ? ORDER BY id", (job["id"], user_id))
         item = next((r for r in rows if r["kind"] in REVIEWED), None)
         if item is None or review.load(item):
             return None
@@ -145,8 +145,8 @@ async def _sound(state, user_id, item, asked):
 
 
 async def _picture(state, user_id, item, settings):
-    verdict = await review.review_item(state, user_id, item, "", references_of(state, user_id, settings, item))
-    return keep(state, user_id, item, dict(verdict, by="auto"))
+    verdict = await review.review_item(state, user_id, item, "", await offload(references_of, state, user_id, settings, item))
+    return await offload(keep, state, user_id, item, dict(verdict, by="auto"))
 
 
 def keep(state, user_id, item, verdict):
@@ -163,11 +163,11 @@ async def failed(state, user_id, item, settings, verdict):
     """A shot that failed its review in the background: a second failure is marked so; a first is made again once when
     the user allows it (retry_on). Returns the verdict kept with the item, which says what was done."""
     if take_of(settings) >= 2:
-        return keep(state, user_id, item, dict(verdict, twice=True))
-    if not retry_on(state.db, user_id):
+        return await offload(keep, state, user_id, item, dict(verdict, twice=True))
+    if not await offload(retry_on, state.db, user_id):
         return verdict
     queued = await retake_now(state, user_id, item, verdict)
-    return keep(state, user_id, item, dict(verdict, **queued))
+    return await offload(keep, state, user_id, item, dict(verdict, **queued))
 
 
 async def retake_now(state, user_id, item, verdict):
@@ -185,12 +185,12 @@ async def retake_now(state, user_id, item, verdict):
         wf = await state.catalog.load(settings["workflow"])
         schema = workflows.describe(wf)
         quote = await price(state, wf, settings, user_id)
-        over = state.credits.cap_problem(user_id, quote["credits"])
+        over = await offload(state.credits.cap_problem, user_id, quote["credits"])
         if over:
             return {"retake_not_made": over}
-        if not state.credits.charge(user_id, quote["credits"], "generation"):
+        if not await offload(state.credits.charge, user_id, quote["credits"], "generation"):
             return {"retake_not_made": "there are not enough credits for it"}
-        job_id = state.jobs.add(user_id, settings["name"], wf["id"], settings, workflows.summary(schema, workflows.context(schema, settings)),
+        job_id = await offload(state.jobs.add, user_id, settings["name"], wf["id"], settings, workflows.summary(schema, workflows.context(schema, settings)),
                                 quote["minutes"] * 60 if quote["minutes"] else None, quote["credits"], item["project_id"], quote["seconds"])
     except (HTTPException, workflows.WorkflowError, ValueError, KeyError) as error:
         return {"retake_not_made": str(getattr(error, "detail", None) or error)}

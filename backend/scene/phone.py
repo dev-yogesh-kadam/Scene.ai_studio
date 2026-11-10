@@ -9,6 +9,7 @@ import json
 import httpx
 
 from . import vault
+from .db import offload
 
 TELEGRAM = "https://api.telegram.org/bot{}/{}"
 LABEL = {"critical": "Critical", "serious": "Serious", "warning": "Warning", "resolved": "Resolved", "test": "Test"}
@@ -39,7 +40,7 @@ def shown(found):
 
 async def send(http, db, level, text):
     """Send one alert everywhere it is set to go. Returns {channel: None if sent, else what went wrong}."""
-    found, results = config(db), {}
+    found, results = await offload(config, db), {}
     label = "Scene.ai: " + LABEL.get(level, level.capitalize())   # plain ASCII: it is also an HTTP header (ntfy's Title)
     if found["telegram_token"] and found["telegram_chat"]:
         results["telegram"] = await _attempt(http.post(TELEGRAM.format(found["telegram_token"], "sendMessage"),

@@ -1,0 +1,61 @@
+/* The look around the design tokens: the note on the design, the bundled typefaces, scrollbars, selection, and the
+   system's wishes (less transparency, more contrast). The tokens themselves, dark and light, are made into
+   tokens.css from packages/shared/tokens/tokens.json (npm run tokens). */
+
+/* Scene.ai styles.
+   The look is HP5, after the black-and-white film: pure greys with no hue at all, so the only colour on screen is the work.
+   Dark is a screening room, light is a lightbox.
+   --brand is paper white in dark and black in light. It is only for Generate, selection and work in progress, as amber was;
+   blue (--agent, Daylight) is only for the agent and is the one hue the interface keeps. The everyday primary button is a
+   strong grey, one step below the brand, so Generate, with its glow and price, stays the brightest control. The canvas has no hue, so it never tints a picture.
+   Depth comes from three things: translucent hairlines, a sheen on the top edge of raised surfaces, and layered shadows.
+   Headings are Archivo set wide, like a title card; body text stays plain. Mono type is kept for timecode and prices.
+   Labels in plain sentence case. Dark and light themes; the theme follows the system unless the user picks one (data-theme on <html>). */
+
+/* The two typefaces ship with the app (Latin letters), so it looks the same offline. */
+@font-face {
+  font-family: Archivo;
+  src: url('/fonts/Archivo-latin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('/fonts/MartianMono-latin.woff2') format('woff2');
+  font-weight: 100 800;
+  font-stretch: 75% 112.5%;
+  font-display: swap;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--active);
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::selection {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --material: var(--raised);
+    --blur: none;
+  }
+}
+@media (prefers-contrast: more) {
+  :root {
+    --material: var(--raised);
+    --blur: none;
+    --line: var(--line-strong);
+    --muted: var(--text);
+  }
+}

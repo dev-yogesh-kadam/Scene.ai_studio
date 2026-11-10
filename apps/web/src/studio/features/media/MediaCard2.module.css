@@ -1,0 +1,14 @@
+.card-menu {
+  min-width: 230px;
+}
+.pop-item:global(.danger),
+.pop-item:global(.danger) :global(.icon) {
+  color: var(--bad);
+}
+.pop-item:global(.danger):hover {
+  background: var(--bad-soft);
+}
+:root[data-motion='calm'] .media .thumb:hover {
+  translate: none;
+  transform: none;
+}

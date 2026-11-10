@@ -1,0 +1,86 @@
+/* The Guide (pages/guide.js). */
+.guide-page {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 720px);
+  gap: 48px;
+  justify-content: center;
+}
+.guide-toc {
+  position: sticky;
+  top: 90px;
+  align-self: start;
+  display: grid;
+  gap: 2px;
+}
+.guide-toc a {
+  padding: 7px 10px;
+  border-radius: 10px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+.guide-toc a:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.guide-toc a.on {
+  color: var(--text);
+  background: var(--active);
+}
+.guide-body h1 {
+  font: 700 40px/1.1 var(--display);
+  font-stretch: 118%;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+.guide-lead {
+  font-size: 16px;
+  margin: 10px 0 28px;
+}
+.guide-section {
+  padding: 24px 0;
+  border-top: 1px solid var(--line);
+  scroll-margin-top: 90px;
+}
+.guide-section h2 {
+  font: 650 22px/1.2 var(--display);
+  font-stretch: 112%;
+  margin: 0 0 12px;
+}
+.guide-section p {
+  line-height: 1.65;
+  margin: 0 0 12px;
+}
+.guide-steps,
+.guide-list {
+  margin: 0 0 12px;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  line-height: 1.6;
+}
+.guide-tip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  line-height: 1.55;
+}
+.guide-tip :global(.icon) {
+  flex: none;
+  color: var(--status-warning);
+  margin-top: 2px;
+}
+@media (max-width: 860px) {
+  .guide-page {
+    grid-template-columns: 1fr;
+  }
+  .guide-toc {
+    position: static;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+}

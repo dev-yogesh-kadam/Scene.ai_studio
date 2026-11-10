@@ -1,0 +1,296 @@
+/* A question in the conversation stands as a record (asked, answered); while it waits, a chip says so and the card
+above the message box is where it is answered. */
+.turn-question {
+  margin: 10px 0 4px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.turn-question-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.turn-question-text {
+  margin: 0;
+  font-weight: 600;
+}
+.turn-question-answer {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--agent-soft);
+  color: var(--agent);
+  font-size: 12px;
+}
+.turn-question-answer.none {
+  background: var(--hover);
+  color: var(--muted);
+}
+.turn-question-answer:empty {
+  display: none;
+}
+/* What the user said, as a bubble on the right; under the newest one the agent thinks while it works. */
+.agent-said {
+  justify-self: end;
+  max-width: 85%;
+  padding: 9px 14px;
+  border-radius: 18px;
+  background: var(--hover);
+}
+.agent-said p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.thinking-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--agent);
+  animation: think 1.2s ease-in-out infinite;
+}
+.thinking-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.thinking-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.thinking-word {
+  background: linear-gradient(90deg, var(--muted) 30%, var(--text) 50%, var(--muted) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.8s linear infinite;
+  font-style: italic;
+}
+.thinking-say {
+  display: inline-block;
+}
+:root[data-motion='calm'] .thinking-dots i,
+:root[data-motion='calm'] .thinking-word {
+  animation: none;
+}
+:root[data-motion='calm'] .thinking-word {
+  color: var(--muted);
+}
+.memory-used {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.kit-flag {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.agent-spend-card {
+  position: fixed;
+  z-index: 70;
+  min-width: 200px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  animation: pop-in 0.12s var(--ease);
+}
+.agent-spend-card div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.agent-spend-card b {
+  font-variant-numeric: tabular-nums;
+}
+.agent-spend-card .none {
+  color: var(--muted);
+}
+.agent-spend-card .none b {
+  font-weight: 500;
+}
+.turn {
+  display: grid;
+  gap: 10px;
+}
+.agent-auto {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+.agent-auto :global(.icon) {
+  width: 13px;
+  height: 13px;
+}
+.turn-reply .md {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.md p {
+  margin: 0 0 8px;
+}
+.md p:last-child,
+.md ul:last-child,
+.md ol:last-child {
+  margin-bottom: 0;
+}
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+.md li {
+  margin: 3px 0;
+}
+.md b {
+  font-weight: 650;
+}
+.md code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--hover);
+  font: 12px/1.4 var(--mono);
+}
+.md.clamped {
+  max-height: 11em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 65%, transparent);
+  mask-image: linear-gradient(#000 65%, transparent);
+}
+.turn-reply:global(.error) .md {
+  color: var(--bad);
+}
+.more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.more-btn:hover {
+  color: var(--text);
+}
+.more-btn :global(.icon) {
+  width: 14px;
+  height: 14px;
+}
+.flip {
+  display: inline-flex;
+  transform: rotate(180deg);
+}
+.turn-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  color: var(--muted);
+  font: 500 12px/1 var(--sans);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.turn-cost .credit-token {
+  width: 13px;
+  height: 13px;
+}
+.turn-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.turn-foot :global(.icon-btn).done {
+  color: var(--ok);
+}
+/* Two sides: the user's messages on the right, the agent on the left. A result keeps its own shape, at most 300 px tall,
+and is a still that opens on the canvas: clips are played there, not here. */
+.turn > :not(.agent-said) {
+  justify-self: stretch;
+}
+.agent-said {
+  max-width: 82%;
+}
+.agent-said p.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.agent-said .more-btn {
+  padding-bottom: 0;
+}
+/* The agent panel's note that a Claude session's context is filling up (components/agent.js). */
+.agent-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+.agent-context :global(.grow) {
+  flex: 1;
+  min-width: 160px;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@keyframes think {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}

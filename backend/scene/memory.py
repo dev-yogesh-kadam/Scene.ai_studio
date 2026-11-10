@@ -17,8 +17,9 @@ import re
 import shutil
 import time
 
-from . import kit, media, review
+from . import kit, media, review, storage
 from .references import safe_name
+from .db import offload
 
 BOOK_ASSETS = 40        # saved assets in the agent's book
 BOOK_UPLOADS = 20       # uploads of the project in the book
@@ -101,10 +102,12 @@ def keep_made(db, folder, user_id, item_id, source, kind, keep):
         stored = "made_{}_{}".format(item_id, safe_name(source.name))
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, folder / stored)
+        storage.keep_file(folder / stored)
         db.run("UPDATE assets SET kind = ?, filename = ?, size = ?, made_from = ?, about = '', created = ? WHERE id = ?",
                (kind, stored, (folder / stored).stat().st_size, item_id, time.time(), before["id"]))
         if before["filename"] != stored and not db.one("SELECT 1 FROM assets WHERE user_id = ? AND filename = ?", (user_id, before["filename"])):
             (folder / before["filename"]).unlink(missing_ok=True)
+            storage.forget_file(folder / before["filename"])
         return before["id"]
     return kit.add(db, folder, user_id, project, source.read_bytes(), source.name, kind, keep["name"], keep["tag"], made_from=item_id)
 
@@ -317,7 +320,7 @@ def kit_row(row):
 
 def _path(state, user_id, where):
     table, filename = where
-    return (state.assets_dir / str(user_id) if table == "asset" else state.outputs.folder(user_id)) / filename
+    return storage.here((state.assets_dir / str(user_id) if table == "asset" else state.outputs.folder(user_id)) / filename)
 
 
 async def _picture(path):
@@ -329,12 +332,12 @@ async def _picture(path):
 async def analyse(state, user_id, entry, model=None):
     """A close study of one picture or clip of the book (agent.analyse), its facts kept in the catalogue (core.py):
     photoreal, has_person, scene, and what must be preserved and avoided. Raises AgentError or OSError."""
-    path = _path(state, user_id, entry["_file"])
+    path = await offload(_path, state, user_id, entry["_file"])
     if not path.is_file():
         raise OSError("its file is gone")
     found = await state.agent.analyse(await _picture(path), entry["name"], entry["kind"], **({"model": model} if model else {}))
     key = entry.get("asset") if entry["_table"] == "assets" else entry.get("item")
-    row = state.db.one("SELECT facts FROM {} WHERE id = ? AND user_id = ?".format(entry["_table"]), (key, user_id))
+    row = await state.db.aone("SELECT facts FROM {} WHERE id = ? AND user_id = ?".format(entry["_table"]), (key, user_id))
     if row is not None:
         try:
             facts = json.loads(row["facts"] or "{}")
@@ -342,7 +345,7 @@ async def analyse(state, user_id, entry, model=None):
             facts = {}
         facts.update(photoreal=found["photoreal"], has_person=found["has_person"], scene=found["scene"][:200],
                      preserve=found["preserve"][:10], avoid=found["avoid"][:10])
-        state.db.run("UPDATE {} SET facts = ? WHERE id = ? AND user_id = ?".format(entry["_table"]),
+        await state.db.arun("UPDATE {} SET facts = ? WHERE id = ? AND user_id = ?".format(entry["_table"]),
                      (json.dumps(facts, ensure_ascii=False)[:4000], key, user_id))
     return found
 
@@ -364,7 +367,7 @@ async def describe_missing(state, user_id, entries, limit=DESCRIBE_AT_ONCE, seco
         key = (entry["_table"], entry.get("asset") or entry.get("item"))
         tried.add(key)
         try:
-            path = _path(state, user_id, entry["_file"])
+            path = await offload(_path, state, user_id, entry["_file"])
             if not path.is_file():
                 return False
             shows = await state.agent.describe(await _picture(path), entry["name"], entry["kind"], **({"model": model} if model else {}))
@@ -372,7 +375,7 @@ async def describe_missing(state, user_id, entries, limit=DESCRIBE_AT_ONCE, seco
             return False
         entry["shows"] = shows if not entry.get("brief") else shows[:90]
         entry.pop("made_from", None)
-        state.db.run("UPDATE {} SET about = ? WHERE id = ? AND user_id = ?".format(entry["_table"]), (shows, key[1], user_id))
+        await state.db.arun("UPDATE {} SET about = ? WHERE id = ? AND user_id = ?".format(entry["_table"]), (shows, key[1], user_id))
         return True
 
     tasks = [asyncio.ensure_future(one(entry)) for entry in waiting]

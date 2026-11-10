@@ -11,8 +11,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from .. import audit
-from ..db import as_everyone
+from .. import audit, storage
+from ..db import as_everyone, offload
 from ..security import token_hash
 from .deps import current_user, limited
 from .library import _own, _path
@@ -31,21 +31,21 @@ def _days(request):
 async def make_link(item_id: int, request: Request, user: dict = Depends(current_user)):
     """A new link to the item: {"path": "/s/<token>", "expires"}. The address in front of the path is the studio's,
     as whoever opens it reaches it (the public one, for someone else)."""
-    row = _own(request, user, item_id, "creator")
+    row = await offload(_own, request, user, item_id, "creator")
     days = _days(request)
     token = secrets.token_urlsafe(18)
     expires = time.time() + days * 86400
-    request.app.state.db.run("INSERT INTO shares (token_hash, user_id, item_id, created, expires) VALUES (?, ?, ?, ?, ?)",
+    await request.app.state.db.arun("INSERT INTO shares (token_hash, user_id, item_id, created, expires) VALUES (?, ?, ?, ?, ?)",
                              (token_hash(token), user["id"], row["id"], time.time(), expires))
-    audit.record(request, user, "Shared a link", row["name"], "{} days".format(days))
+    await offload(audit.record, request, user, "Shared a link", row["name"], "{} days".format(days))
     return {"path": "/s/" + token, "expires": expires}
 
 
 @router.delete("/api/library/{item_id}/share")
 async def stop_links(item_id: int, request: Request, user: dict = Depends(current_user)):
     """Stop every link of yours to the item."""
-    _own(request, user, item_id, "viewer")
-    request.app.state.db.run("DELETE FROM shares WHERE item_id = ? AND user_id = ?", (item_id, user["id"]))
+    await offload(_own, request, user, item_id, "viewer")
+    await request.app.state.db.arun("DELETE FROM shares WHERE item_id = ? AND user_id = ?", (item_id, user["id"]))
     return {"ok": True}
 
 
@@ -62,9 +62,9 @@ def _shared(request, token):
 
 @router.get("/s/{token}", response_class=HTMLResponse, dependencies=[limited("shared", 120, 60, by="address")])
 async def shared_page(token: str, request: Request):
-    link, row = _shared(request, token)
+    link, row = await offload(_shared, request, token)
     with as_everyone():
-        request.app.state.db.run("UPDATE shares SET views = views + 1 WHERE token_hash = ?", (link["token_hash"],))
+        await request.app.state.db.arun("UPDATE shares SET views = views + 1 WHERE token_hash = ?", (link["token_hash"],))
     name = html.escape(row["name"])
     src = "/s/{}/file".format(html.escape(token))
     media = {"video": '<video src="{}" controls autoplay playsinline loop></video>',
@@ -87,8 +87,11 @@ a{{color:#8b7bff}}
 
 @router.get("/s/{token}/file", dependencies=[limited("shared-file", 600, 60, by="address")])
 async def shared_file(token: str, request: Request, download: bool = False):
-    _, row = _shared(request, token)
-    path = _path(request, row)
+    _, row = await offload(_shared, request, token)
+    path = request.app.state.outputs.folder(row["user_id"]) / row["filename"]
+    elsewhere = storage.signed(request.app.state, "outputs", path, path.name if download else None)
+    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
+        return elsewhere
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path, filename=path.name if download else None, headers={"Cache-Control": "private, max-age=3600"})

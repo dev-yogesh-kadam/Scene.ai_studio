@@ -9,6 +9,7 @@ import sys
 import uvicorn
 
 from .config import load_settings
+from .logs import configure as configure_logs
 from .main import Doors, create_app
 
 
@@ -20,6 +21,7 @@ def listen(host, port):
 
 
 settings = load_settings()
+configure_logs(settings.log_format)
 app = create_app(settings)
 sockets = [listen(settings.host, settings.port)]
 print("Scene.ai is running at http://localhost:{}".format(settings.port))

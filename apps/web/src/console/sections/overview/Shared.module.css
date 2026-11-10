@@ -1,0 +1,29 @@
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--chart-neutral);
+}
+.feed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.feed-row:first-of-type {
+  border-top: 0;
+}
+.feed-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.feed-text b {
+  font-weight: 600;
+}
+.feed-row :global(.btn):global(.small) {
+  height: 26px;
+  padding: 0 8px;
+}

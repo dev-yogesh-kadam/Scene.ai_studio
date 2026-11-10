@@ -1,0 +1,26 @@
+.kit-list {
+  display: grid;
+  gap: 10px;
+}
+.kit-entry {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.kit-entry img,
+.kit-entry video,
+.kit-kind {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.kit-kind {
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}

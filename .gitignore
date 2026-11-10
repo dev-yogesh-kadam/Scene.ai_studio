@@ -9,6 +9,13 @@ motion/node_modules/
 # Google Fonts the motion pages name, fetched by HyperFrames once and kept
 motion/.fonts/
 
+# The client apps (npm workspaces apps/*, packages/*): packages installed at the root, built output, test reports
+node_modules/
+apps/web/dist/
+apps/web/test-results/
+apps/web/playwright-report/
+*.tsbuildinfo
+
 # Local settings and data (users, sessions, generated media)
 config.json
 secret.key
@@ -27,3 +34,7 @@ docs/
 
 # The ComfyUI agent's handover folders as they came, after their files were sorted into workflows/: kept local
 workflows/archive/v3_handover_*/
+apps/web/tests/look/shots/
+
+# Secrets of this machine (database passwords, keys): read at start (config.py), never committed
+scene.env

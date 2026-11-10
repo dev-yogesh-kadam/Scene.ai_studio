@@ -1,0 +1,43 @@
+.la-move.on {
+  opacity: 1;
+  transform: none;
+}
+.la-clip.on {
+  border-color: var(--la-hi);
+  box-shadow: 0 0 0 1px var(--la-hi);
+}
+.share-row.member {
+  border-color: transparent;
+  padding: 6px 4px;
+}
+.share-badge.owner {
+  color: color-mix(in srgb, var(--series-1) 88%, var(--text)); /* readable at 12px: 4.5:1 */
+  border-color: color-mix(in srgb, var(--series-1) 45%, transparent);
+}
+.owner-tag.member {
+  color: var(--muted);
+  border-color: var(--line);
+}
+.ses-meter .bar-track {
+  flex: 1;
+  min-width: 60px;
+}
+.ses-facts .facts {
+  font-size: 12px;
+}
+.ses-pane:not(.alone) .ses-facts .facts {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+.nav a:active {
+  scale: 0.97;
+}
+@media (prefers-contrast: more) {
+  .shell.railed .sidebar {
+    border-color: var(--text);
+  }
+}
+.page-head h1 {
+  font-size: 34px;
+  line-height: 1.08;
+  letter-spacing: -0.028em;
+}

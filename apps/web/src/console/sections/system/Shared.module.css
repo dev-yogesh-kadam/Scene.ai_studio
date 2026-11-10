@@ -1,0 +1,10 @@
+ol.steps {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+ol.steps li {
+  overflow-wrap: anywhere;
+}

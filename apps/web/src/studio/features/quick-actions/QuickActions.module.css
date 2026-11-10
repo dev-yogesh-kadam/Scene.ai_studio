@@ -1,0 +1,321 @@
+.notice {
+  font-size: 13px;
+  margin-top: 12px;
+}
+.notice.ok {
+  color: var(--ok);
+}
+.notice:empty {
+  display: none;
+}
+
+.quick {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.quick-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 0;
+  font-size: 14px;
+}
+.quick-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+.quick-body > .field:first-child {
+  margin-top: 0;
+}
+.quick-body .write {
+  height: 24px;
+}
+.quick-body textarea {
+  min-height: 0;
+  resize: none;
+  font-size: 14px;
+}
+.quick-body .notice:empty {
+  display: none;
+}
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.quick-action {
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-height: 100px;
+  padding: 12px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--hover);
+  box-shadow:
+    var(--sheen),
+    0 0 0 1px var(--line);
+  color: var(--text);
+  text-align: left;
+  transition:
+    background 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    transform 0.2s var(--ease);
+}
+.quick-action > svg {
+  width: 30px;
+  height: 30px;
+  padding: 7px;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.quick-action > span {
+  white-space: normal;
+}
+.quick-action b {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+}
+.quick-action:hover {
+  background: var(--active);
+  box-shadow:
+    var(--sheen),
+    0 0 0 1px var(--line-strong);
+}
+.quick-action:active {
+  transform: scale(0.98);
+}
+.quick-action:disabled {
+  cursor: default;
+  background: var(--hover);
+  color: var(--muted);
+  opacity: 0.6;
+}
+.slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.slot {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-width: 0;
+}
+.slot-label {
+  max-width: 100%;
+  font: 500 11px/16px var(--sans);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-box {
+  cursor: pointer;
+  width: 100%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  overflow: hidden;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--muted);
+  transition:
+    border-color 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.slot-box:hover,
+.slot-box.over {
+  border-color: var(--control);
+  background: var(--hover);
+  color: var(--text);
+}
+.slot-box.filled {
+  border-style: solid;
+}
+.slot-box.cast {
+  border-color: var(--accent);
+}
+.slot-box img,
+.slot-box video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* picture references of Generate image: REF 1, REF 2 ... and one empty box until the model's maximum */
+.ref-strip {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 96px));
+}
+.ref-note {
+  margin: 6px 0 0;
+}
+.ref-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+.ref-hint > span {
+  flex-basis: 100%;
+}
+.ref-chip {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--hover);
+  color: var(--text);
+  font: 500 12px/22px var(--mono);
+  cursor: pointer;
+}
+.ref-chip:hover {
+  border-color: var(--control);
+}
+/* How the prompt names a reference ("image 1", <ref_image_0>, <image1>), under its box. */
+.slot-tag {
+  max-width: 100%;
+  font: 500 11px/16px var(--mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-tag.muted {
+  color: var(--muted);
+}
+.ref-license {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--bad);
+}
+/* The × on a filled reference slot: always in view, white on a dark disc so it stands out on any picture. */
+.slot-frame {
+  position: relative;
+  width: 100%;
+}
+.slot-clear {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  background: rgba(10, 10, 12, 0.78);
+  color: #fff;
+  font: 500 17px/1 var(--sans);
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  transition:
+    background 0.15s var(--ease),
+    transform 0.15s var(--ease);
+}
+.slot-clear:hover,
+.slot-clear:focus-visible {
+  background: var(--bad);
+  border-color: transparent;
+  transform: scale(1.08);
+}
+.quick-source {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-s);
+  background: var(--hover);
+  font-size: 13px;
+}
+.quick-source.missing {
+  color: var(--muted);
+}
+.scene-card {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 10px 10px;
+  border-radius: 14px;
+  background: var(--hover);
+  box-shadow: var(--sheen);
+}
+.scene-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.scene-top > span:first-child {
+  min-width: 14px;
+}
+.scene-top button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.quick-foot {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+.quick-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+select.opt,
+a.opt {
+  width: auto;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--hover);
+  color: var(--text);
+  font: 500 12px/28px var(--sans);
+  text-decoration: none;
+}
+select.opt:hover,
+a.opt:hover {
+  background: var(--active);
+}
+a.opt {
+  color: var(--muted);
+  display: inline-block;
+}
+
+.quick-action {
+  transition:
+    background 0.2s var(--ease),
+    translate 0.25s var(--ease-out),
+    box-shadow 0.25s var(--ease-out);
+}
+.quick-action:hover {
+  translate: 0 -2px;
+  box-shadow:
+    var(--sheen),
+    0 0 0 1px var(--line-strong),
+    0 14px 28px -16px rgba(0, 0, 0, 0.7);
+}
+.quick-foot .generate {
+  height: 44px;
+  width: 100%;
+}
+:root[data-motion='calm'] .quick-action:hover {
+  translate: none;
+  transform: none;
+}

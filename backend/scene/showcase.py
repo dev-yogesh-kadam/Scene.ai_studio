@@ -14,7 +14,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import media
+from . import media, storage
 
 SETTING = "showcase"
 MAX_ITEMS = 120
@@ -81,6 +81,7 @@ def add(db, folder, row, source, section="", name=""):
             "from": row["id"], "added": time.time()}
     Path(folder).mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, path_of(folder, item))
+    storage.keep_file(path_of(folder, item))   # where the media are kept for good (storage.py)
     data["items"].append(item)
     save(db, data)
     return item

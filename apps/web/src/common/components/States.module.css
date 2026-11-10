@@ -1,0 +1,43 @@
+/* The page's states (States.tsx). */
+.wide {
+  grid-column: 1 / -1;
+}
+.again {
+  margin-left: 10px;
+}
+/* A grey place for what is coming: it breathes slowly, and stays still with calm motion. */
+.bone {
+  display: block;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+  animation: bone-breathe 1.6s ease-in-out infinite;
+}
+.tile {
+  aspect-ratio: 4 / 3;
+}
+.line {
+  height: 44px;
+  grid-column: 1 / -1;
+}
+@keyframes bone-breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+:root[data-motion='calm'] .bone {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bone {
+    animation: none;
+  }
+}
+.said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

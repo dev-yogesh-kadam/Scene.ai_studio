@@ -5,11 +5,17 @@ Run it from the repo root with the project's Python, with the app stopped (or on
     .venv\\Scripts\\python.exe scripts\\move_to_postgres.py [path to scene.db]     (Windows)
     .venv/bin/python scripts/move_to_postgres.py [path to scene.db]                (macOS, Linux)
 
+Add --leave-out-removed to copy a file that still has columns of features since removed (users.agent): those columns
+are named and left out, instead of the copy being refused.
+
 The SQLite file defaults to scene.db in the storage folder. The PostgreSQL database is the one config.json names
 (database_url, and database_owner_url for the account that owns the tables), or the SCENE_DATABASE_URL and
 SCENE_DATABASE_OWNER_URL environment variables. The PostgreSQL database must be empty: the script refuses to copy
 over accounts that are already there. It reads the SQLite file and never changes it, and the copy is all or
-nothing: if anything fails, PostgreSQL is left as it was. Addresses are printed without their passwords.
+nothing: if anything fails, PostgreSQL is left as it was. The rows are copied into the tables as migration 0001 (the
+baseline) made them, then the database is migrated to the newest (scripts/migrate.py does the same for one copied before).
+Kept for history: the studio left SQLite on 8 October 2026 and runs on PostgreSQL only. Addresses are printed without
+their passwords.
 """
 
 import math
@@ -23,7 +29,8 @@ sys.path.insert(0, str(ROOT / "backend"))
 sys.stdout.reconfigure(encoding="utf-8")
 
 from scene.config import load_settings  # noqa: E402
-from scene.db import ID_TABLES, PostgresDatabase  # noqa: E402
+from scene import schema  # noqa: E402
+from scene.db import ID_TABLES  # noqa: E402
 
 # Users first: every other table that names a user refers to this one.
 FIRST = ["users"]
@@ -78,7 +85,9 @@ def safe(url):
 
 def main():
     settings = load_settings()
-    source = Path(sys.argv[1]) if len(sys.argv) > 1 else settings.path("storage_dir") / "scene.db"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    leave_out = "--leave-out-removed" in sys.argv
+    source = Path(args[0]) if args else settings.path("storage_dir") / "scene.db"
     if not source.is_file():
         raise SystemExit("There is no SQLite database at {}.".format(source))
     if not settings.database_url:
@@ -88,10 +97,14 @@ def main():
     print("To    {} (tables owned by {})".format(safe(settings.database_url), safe(owner_url).split("://")[1].split("@")[0]))
 
     import psycopg
-    with tempfile.TemporaryDirectory() as folder:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
         sqlite = snapshot(source, folder)
-        # Make the tables (and grant the app's account its rights), exactly as the app does when it starts.
-        PostgresDatabase(settings.database_url, settings.signup_credits, settings.database_owner_url).close()
+        left_out = {}
+        # Make the tables as they were when the studio left SQLite (migration 0001, the baseline), with the app's
+        # account granted its rights. The SQLite rows are copied in that shape; the later migrations then bring them to
+        # today's (step 'Now at the newest migration' below), exactly as they did for the studio's own database.
+        app_role = schema.app_role_for(owner_url, settings.database_url)
+        schema.upgrade(owner_url, schema.BASELINE, app_role)
         with psycopg.connect(owner_url) as conn:   # one transaction: all of it, or none
             conn.execute("SELECT set_config('app.user_id', 'all', false)")   # row-level security: every user's rows
             if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
@@ -107,8 +120,11 @@ def main():
                 rows = sqlite.execute("SELECT * FROM {}".format(table)).fetchall()
                 shared = [c for c in (rows[0].keys() if rows else []) if c in columns]
                 missing = [c for c in (rows[0].keys() if rows else []) if c not in columns]
-                if missing:
-                    raise SystemExit("PostgreSQL's {} has no column {}.".format(table, ", ".join(missing)))
+                if missing and not leave_out:
+                    sqlite.close()
+                    raise SystemExit("PostgreSQL's {} has no column {} (a removed feature's? then give --leave-out-removed)."
+                                     .format(table, ", ".join(missing)))
+                left_out.update({table: missing} if missing else {})
                 if rows:
                     sql = "INSERT INTO {} ({}) VALUES ({})".format(table, ", ".join(shared), ", ".join(["%s"] * len(shared)))
                     with conn.cursor() as cursor:
@@ -131,7 +147,7 @@ def main():
                     problems.append("{}: {} rows in SQLite, {} in PostgreSQL".format(table, len(left), len(right)))
                     continue
                 for a, b in zip(left, right):
-                    wrong = [c for c in a.keys() if not same(a[c], b.get(c))]
+                    wrong = [c for c in a.keys() if c not in left_out.get(table, ()) and not same(a[c], b.get(c))]
                     if wrong:
                         problems.append("{} row {}: {} differ".format(table, [a[k] for k in keys if k != "rowid"], ", ".join(wrong)))
                         break
@@ -141,9 +157,14 @@ def main():
                 problems.append("credits held: {} in SQLite, {} in PostgreSQL".format(*credits))
             if problems:
                 conn.rollback()
+                sqlite.close()
                 raise SystemExit("Not copied; PostgreSQL was left as it was:\n  " + "\n  ".join(problems))
         sqlite.close()
+    for line in schema.upgrade(owner_url, "head", app_role):   # Now at the newest migration
+        print(line)
 
+    for table, columns in left_out.items():
+        print("  left out (removed features): " + ", ".join("{}.{}".format(table, c) for c in columns))
     width = max(len(t) for t in counts)
     for table, n in counts.items():
         print("  {:<{}}  {:>6} rows".format(table, width, n))

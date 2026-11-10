@@ -1,0 +1,23 @@
+.showcase-dialog {
+  width: min(980px, calc(100vw - 32px));
+}
+.showcase-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 12px 0;
+}
+.showcase-pick-item {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-width: 0;
+}
+.showcase-pick-item b {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

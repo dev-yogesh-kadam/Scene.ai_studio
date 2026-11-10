@@ -1,0 +1,15 @@
+.page-sub {
+  color: var(--muted);
+  margin: -18px 0 24px;
+  max-width: 78ch;
+}
+.tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}

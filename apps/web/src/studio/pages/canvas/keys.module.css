@@ -1,0 +1,22 @@
+/* The keyboard sheet: each key beside what it does. */
+.keys {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+.keys > div {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+.keys dt,
+.keys dd {
+  margin: 0;
+}
+.keys kbd {
+  font: 500 12px/1 var(--mono);
+  padding: 3px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}

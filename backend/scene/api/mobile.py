@@ -8,13 +8,13 @@ from pathlib import PurePath
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import audit, placement
+from .. import audit, conversations, placement
 from ..catalog import KINDS
 from ..comfy import workflows
-from ..db import as_everyone
+from ..db import as_everyone, offload
 from .deps import current_user, limited
 from ..outputs import MAIN_CANVAS
-from .library import _own, _own_project
+from .library import _own, _own_project, search_sql
 
 router = APIRouter(prefix="/api", tags=["mobile"])
 
@@ -30,11 +30,11 @@ async def mobile_jobs(request: Request, user: dict = Depends(current_user)):
     """The user's jobs as the queue has them, each with the prompt it was made from and, once done, the library items
     it made (for the player). "paused": an admin paused the renders."""
     state = request.app.state
-    jobs = state.jobs.snapshot(user["id"])
+    jobs = await offload(state.jobs.snapshot, user["id"])
     done = [j["id"] for j in jobs if j["status"] == "done"]
     made = {}
     if done:
-        rows = state.db.all("SELECT id, job_id, kind FROM generations WHERE user_id = ? AND job_id IN ({}) ORDER BY id"
+        rows = await state.db.aall("SELECT id, job_id, kind FROM generations WHERE user_id = ? AND job_id IN ({}) ORDER BY id"
                             .format(",".join("?" * len(done))), [user["id"], *done])
         for row in rows:
             made.setdefault(row["job_id"], []).append({"id": row["id"], "kind": row["kind"]})
@@ -45,7 +45,7 @@ async def mobile_jobs(request: Request, user: dict = Depends(current_user)):
         slim.update(prompt=str(settings.get("prompt") or "")[:500], workflow_title=settings.get("workflow_title") or "",
                     items=made.get(job["id"], []))
         shown.append(slim)
-    return {"jobs": shown, "paused": state.jobs.paused()}
+    return {"jobs": shown, "paused": await offload(state.jobs.paused)}
 
 
 def _slim_item(item, user_id):
@@ -68,7 +68,7 @@ async def mobile_library(request: Request, kind: str = "", q: str = "", project:
     as GET /api/library, without the settings and context each carries there. `starred=1`: only the ones rated up.
     `project`: a project with its modules, or with `exact=1` only that project's own canvas (or that one module)."""
     offset, limit = max(0, offset), max(1, min(limit, MOST))
-    shared = project.isdigit() and int(project) > 0 and bool(_own_project(request, user, int(project), "viewer"))
+    shared = project.isdigit() and int(project) > 0 and bool(await offload(_own_project, request, user, int(project), "viewer"))
     sql = ("SELECT g.*, j.cost, p.name AS project_name, u.name AS made_by FROM generations g LEFT JOIN jobs j ON j.id = g.job_id "
            "LEFT JOIN projects p ON p.id = g.project_id LEFT JOIN users u ON u.id = g.user_id WHERE g.run = '' AND "
            + (("g.project_id = ?" if exact else "g.project_id IN (SELECT id FROM projects WHERE id = ? OR parent_id = ?)")
@@ -78,25 +78,23 @@ async def mobile_library(request: Request, kind: str = "", q: str = "", project:
         sql, params = sql + " AND g.kind = ?", params + [kind]
     if starred:
         sql += " AND g.rating > 0"
-    for word in q.split()[:6]:
-        like = "%{}%".format(word.replace("%", r"\%").replace("_", r"\_"))
-        sql += " AND (g.name LIKE ? ESCAPE '\\' OR g.summary LIKE ? ESCAPE '\\' OR g.settings LIKE ? ESCAPE '\\')"
-        params += [like] * 3
+    found, values = search_sql(q)   # as the studio's library searches (api/library.py)
+    sql, params = sql + found, params + values
     with as_everyone() if shared else contextlib.nullcontext():
-        rows = request.app.state.db.all(sql + " ORDER BY g.created DESC, g.id DESC LIMIT ? OFFSET ?", params + [limit + 1, offset])
+        rows = await request.app.state.db.aall(sql + " ORDER BY g.created DESC, g.id DESC LIMIT ? OFFSET ?", params + [limit + 1, offset])
     more = len(rows) > limit
-    return {"items": [_slim_item(r, user["id"]) for r in rows[:limit]], "next_offset": offset + limit if more else None}
+    return {"items": [await offload(_slim_item, r, user["id"]) for r in rows[:limit]], "next_offset": offset + limit if more else None}
 
 
 @router.get("/mobile/library/{item_id}")
 async def mobile_item(item_id: int, request: Request, user: dict = Depends(current_user)):
     """One item as the list shows it, for the player opened from a push or a finished job."""
-    row = _own(request, user, item_id, "viewer")
+    row = await offload(_own, request, user, item_id, "viewer")
     db = request.app.state.db
     with as_everyone():   # an item of a project shared with the user is not one of their rows
-        extra = db.one("SELECT j.cost, p.name AS project_name, u.name AS made_by FROM generations g LEFT JOIN jobs j ON j.id = g.job_id "
+        extra = await db.aone("SELECT j.cost, p.name AS project_name, u.name AS made_by FROM generations g LEFT JOIN jobs j ON j.id = g.job_id "
                        "LEFT JOIN projects p ON p.id = g.project_id LEFT JOIN users u ON u.id = g.user_id WHERE g.id = ?", (item_id,))
-    return _slim_item(dict(row, **extra), user["id"])
+    return await offload(_slim_item, dict(row, **extra), user["id"])
 
 
 MODULE_ITEMS = 2000
@@ -108,13 +106,13 @@ async def mobile_module(project_id: int, request: Request, user: dict = Depends(
     order, each with its takes newest first; its boards (Characters, Locations, Outputs...) with their stacks; and how
     many items it holds. Every item as the library list shows it."""
     db = request.app.state.db
-    here = _own_project(request, user, project_id, "viewer")
+    here = await offload(_own_project, request, user, project_id, "viewer")
     with as_everyone():   # what everyone in the project made, now that the user is found to be in it
-        rows = db.all("SELECT g.*, j.cost, p.name AS project_name, u.name AS made_by FROM generations g LEFT JOIN jobs j ON j.id = g.job_id "
+        rows = await db.aall("SELECT g.*, j.cost, p.name AS project_name, u.name AS made_by FROM generations g LEFT JOIN jobs j ON j.id = g.job_id "
                       "LEFT JOIN projects p ON p.id = g.project_id LEFT JOIN users u ON u.id = g.user_id "
                       "WHERE g.project_id = ? AND g.run = '' ORDER BY g.created DESC, g.id DESC LIMIT ?", (project_id, MODULE_ITEMS))
-        top = db.one("SELECT id, ref, name, canvas_name FROM projects WHERE id = ?", (here["top_id"],))
-    shown = {row["id"]: _slim_item(row, user["id"]) for row in rows}
+        top = await db.aone("SELECT id, ref, name, canvas_name FROM projects WHERE id = ?", (here["top_id"],))
+    shown = {row["id"]: await offload(_slim_item, row, user["id"]) for row in rows}
 
     # The story: every result made for a numbered shot, retakes stacked on their shot, the newest take first.
     shots = {}
@@ -125,7 +123,7 @@ async def mobile_module(project_id: int, request: Request, user: dict = Depends(
     story = [{"number": n, "takes": shots[n]} for n in sorted(shots)]
 
     boards = []
-    for board in placement.boards(db, here["owner_id"], project_id, set(shown)):
+    for board in await offload(placement.boards, db, here["owner_id"], project_id, set(shown)):
         stacks = [{"group": s["group"], "shot_number": s.get("shot_number"), "items": [shown[i] for i in s["items"]]} for s in board["stacks"]]
         if stacks:
             boards.append({"name": board["name"], "stacks": stacks})
@@ -145,7 +143,7 @@ async def mobile_workflows(request: Request, user: dict = Depends(current_user))
     state = request.app.state
     found = []
     for listed in await state.catalog.listing():
-        if listed.get("error") or listed["kind"] not in KINDS or not state.credits.enabled(listed["id"], user):
+        if listed.get("error") or listed["kind"] not in KINDS or not await offload(state.credits.enabled, listed["id"], user):
             continue
         try:
             schema = workflows.describe(await state.catalog.load(listed["id"]))
@@ -156,7 +154,7 @@ async def mobile_workflows(request: Request, user: dict = Depends(current_user))
             continue
         controls = [{k: c.get(k) for k in ("id", "type", "role", "label", "default", "choices")}
                     for c in schema["controls"] if c["role"] in ("prompt", "duration") or (c.get("primary") and not c["role"])]
-        allowed = state.credits.allowed_resolutions(schema["id"], schema["resolutions"]) if schema["size"] else []
+        allowed = await offload(state.credits.allowed_resolutions, schema["id"], schema["resolutions"]) if schema["size"] else []
         found.append({"id": schema["id"], "kind": listed["kind"], "title": schema["title"], "description": schema["description"],
                       "hints": schema["hints"][:4], "controls": controls, "options": schema["options"],
                       "size": schema["size"], "resolutions": allowed, "prompt_optional": bool(schema.get("prompt_optional")),
@@ -172,7 +170,7 @@ async def credit_request(body: dict, request: Request, user: dict = Depends(curr
     if not isinstance(amount, int) or isinstance(amount, bool) or not 1 <= amount <= 1_000_000:
         raise HTTPException(400, "Ask for between 1 and 1,000,000 credits.")
     note = " ".join(str(body.get("note") or "").split())[:300]
-    audit.record(request, user, "Asked for credits", user["email"], "{} cr{}".format(amount, " · " + note if note else ""))
+    await offload(audit.record, request, user, "Asked for credits", user["email"], "{} cr{}".format(amount, " · " + note if note else ""))
     return {"ok": True}
 
 
@@ -182,21 +180,16 @@ async def waiting_plans(request: Request, user: dict = Depends(current_user)):
     "project", "tab", "tab_name", "instruction", "reply", "steps", "total", "at"}]. A plan waits from when the agent
     proposes it until it is approved or turned down, in the studio or on the phone."""
     db = request.app.state.db
-    rows = db.all("SELECT project_id, kind, data, updated FROM boards WHERE user_id = ? AND kind LIKE 'agent-%' "
-                  "AND data LIKE ? ORDER BY updated DESC LIMIT 30", (user["id"], '%"state": "proposed"%'))
     found = []
-    for row in rows:
-        try:
-            runs_ = json.loads(row["data"]).get("runs") or []
-        except ValueError:
-            continue
-        last = next((r for r in reversed(runs_) if isinstance(r, dict) and r.get("state") == "proposed"), None)
+    for waiting in await offload(conversations.waiting, db, user["id"]):   # the newest proposed turn of each tab
+        last = waiting["run"] if isinstance(waiting["run"], dict) else None
+        row = {"project_id": waiting["project_id"], "kind": "agent-" + waiting["tab"]}
         if not last or not row["project_id"]:
             continue
         with as_everyone():
-            place = db.one("SELECT p.id, p.name, p.canvas_name, p.parent_id, pp.name AS parent_name FROM projects p "
+            place = await db.aone("SELECT p.id, p.name, p.canvas_name, p.parent_id, pp.name AS parent_name FROM projects p "
                            "LEFT JOIN projects pp ON pp.id = p.parent_id WHERE p.id = ?", (row["project_id"],))
-        index = db.one("SELECT data FROM boards WHERE user_id = ? AND project_id = ? AND kind = 'agent'", (user["id"], row["project_id"]))
+        index = await db.aone("SELECT data FROM boards WHERE user_id = ? AND project_id = ? AND kind = 'agent'", (user["id"], row["project_id"]))
         tabs = (json.loads(index["data"]).get("tabs") or []) if index else []
         tab = row["kind"][len("agent-"):]
         if not place:
@@ -213,10 +206,10 @@ async def waiting_plans(request: Request, user: dict = Depends(current_user)):
 async def mobile_credits(request: Request, user: dict = Depends(current_user)):
     """The user's balance and their latest 30 credit changes, newest first."""
     db = request.app.state.db
-    events = db.all("SELECT c.amount, c.reason, c.note, c.created, j.name AS job_name FROM credit_events c "
+    events = await db.aall("SELECT c.amount, c.reason, c.note, c.created, j.name AS job_name FROM credit_events c "
                     "LEFT JOIN jobs j ON j.id = c.job_id WHERE c.user_id = ? ORDER BY c.created DESC, c.id DESC LIMIT 30",
                     (user["id"],))
-    return {"balance": request.app.state.credits.balance(user["id"]), "events": events}
+    return {"balance": await offload(request.app.state.credits.balance, user["id"]), "events": events}
 
 
 @router.post("/jobs/{job_id}/retry", dependencies=[limited("jobs", 30, 60)])
@@ -224,18 +217,18 @@ async def retry_job(job_id: str, request: Request, user: dict = Depends(current_
     """Run one of the user's failed or cancelled jobs again with the same settings. Its first run was given back, so
     this is charged like a new job: {"id", "credits"}."""
     state = request.app.state
-    job = state.db.one("SELECT * FROM jobs WHERE id = ? AND user_id = ?", (job_id, user["id"]))
+    job = await state.db.aone("SELECT * FROM jobs WHERE id = ? AND user_id = ?", (job_id, user["id"]))
     if job is None:
         raise HTTPException(404, "No such job.")
     if job["status"] not in ("failed", "cancelled"):
         raise HTTPException(400, "Only a failed or cancelled job can be run again.")
     cost = job["cost"] or 0
-    over = state.credits.cap_problem(user["id"], cost)
+    over = await offload(state.credits.cap_problem, user["id"], cost)
     if over:
         raise HTTPException(429, over)
-    if cost and not state.credits.charge(user["id"], cost, "generation", note="Run again"):
+    if cost and not await offload(state.credits.charge, user["id"], cost, "generation", note="Run again"):
         raise HTTPException(402, "This needs {} credits and you have {}. Ask an admin for more.".format(
-            cost, state.credits.balance(user["id"])))
-    new_id = state.jobs.add(user["id"], job["name"], job["workflow"], json.loads(job["settings"]), job["summary"],
+            cost, await offload(state.credits.balance, user["id"])))
+    new_id = await offload(state.jobs.add, user["id"], job["name"], job["workflow"], json.loads(job["settings"]), job["summary"],
                             job["est_seconds"], cost, job["project_id"], job["seconds_requested"])
     return {"id": new_id, "credits": cost}

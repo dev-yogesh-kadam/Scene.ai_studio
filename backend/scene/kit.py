@@ -21,6 +21,7 @@ import contextlib
 import hashlib
 import re
 import time
+from . import storage
 from .db import as_everyone
 from pathlib import Path
 
@@ -242,6 +243,7 @@ def add(db, folder, user_id, project, data, filename, kind, name, tag="other", a
         return before["id"]
     folder.mkdir(parents=True, exist_ok=True)
     (folder / stored).write_bytes(data)
+    storage.keep_file(folder / stored)   # where the media are kept for good (storage.py)
     asset = db.run("INSERT INTO assets (user_id, name, tag, kind, filename, size, created, origin, project_id, about, use_note, "
                    "made_from, always, position, named) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                    (user_id, name, tag, kind, stored, len(data), time.time(), origin, project or None, clean_note(about),
@@ -310,6 +312,7 @@ def remove(db, folder, user_id, asset_id):
     if not db.one("SELECT 1 FROM assets WHERE user_id = ? AND filename = ?", (user_id, row["filename"])):
         try:
             (folder / row["filename"]).unlink(missing_ok=True)   # another project may have the same file: then it stays
+            storage.forget_file(folder / row["filename"])
         except OSError:
             pass   # held open for the moment (a download of it): the entry is gone, the file goes with the next cleanup
     return True
@@ -479,7 +482,7 @@ def copy_entry(db, assets_dir, row, user_id, project, origin="copied"):
     asset = add(db, Path(assets_dir) / str(user_id), user_id, project, data, row["filename"].split("_", 1)[-1], row["kind"],
                 row["name"], row["tag"], False, True, row["about"], row["use_note"], None, origin)
     if asset and row.get("facts"):
-        db.run("UPDATE assets SET facts = ? WHERE id = ? AND facts = ''", (row["facts"], asset))
+        db.run("UPDATE assets SET facts = ? WHERE id = ? AND facts IS NULL", (row["facts"], asset))
     return asset
 
 

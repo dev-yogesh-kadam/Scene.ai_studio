@@ -1,0 +1,39 @@
+{
+  "name": "scene-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The desktop studio and the admin console: React + TypeScript + Vite, two entries and two separate builds.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.studio.config.ts",
+    "dev:console": "vite --config vite.console.config.ts",
+    "build": "vite build --config vite.studio.config.ts && vite build --config vite.console.config.ts && node scripts/bundle.mjs --check",
+    "preview": "vite preview --config vite.studio.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "e2e": "npm run build && playwright test",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.107.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router": "^8.5.1",
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.65.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/react": "~19.3.0",
+    "@types/react-dom": "~19.3.0",
+    "@types/three": "0.160.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "jsdom": "^31.0.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,10 +1,11 @@
 id: ffmpeg-recipes
-title: ffmpeg recipes — your own commands with the film tool's ffmpeg op
+title: ffmpeg recipes — your own commands with the ffmpeg tool
 version: 1
-desc: Load before writing a command for the film tool's ffmpeg op, and again when one fails: the rules of its folder, quoting, and tested commands for cutting, joining, fitting, grading, effects, sound, captions and measuring.
+desc: Load before writing a command for the ffmpeg tool, and again when one fails: the rules of its folder, quoting, and tested commands for cutting, joining, fitting, grading, effects, sound, captions and measuring.
 words: (?!)
+guide: true
 ---
-The film tool's ffmpeg op runs a command you write with ffmpeg 9 on this machine. It is for work on media that already
+The ffmpeg tool runs a command you write with ffmpeg 9 on this machine. It is for work on media that already
 exists: cut, join, crossfade, fit to a shape, grade, speed, punch in, shake, freeze, lay one thing over another, mix
 and duck sound, burn captions, make stills and GIFs, and measure. It makes nothing new and knows nothing of what is in
 the picture: look at a clip first, then cut it. It is free and quick (most commands take a second or two).

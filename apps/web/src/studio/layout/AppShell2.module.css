@@ -1,0 +1,59 @@
+.sidebar .server {
+  padding: 4px 10px;
+}
+@media (max-width: 860px) {
+  .view.full {
+    height: 100dvh;
+  }
+  .app-menu-wrap {
+    top: 10px;
+    left: 10px;
+  }
+}
+.view.full {
+  padding: 0;
+  max-width: none;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+.top-btn:active {
+  scale: 0.97;
+}
+.app-menu {
+  transform-origin: top left;
+}
+.credit-badge {
+  font-weight: 500;
+}
+@media (prefers-contrast: more) {
+  .app-menu {
+    border-color: var(--text);
+  }
+}
+.view.entering {
+  animation: page-in 0.34s var(--ease-out) backwards;
+}
+:root[data-motion='calm'] .view.entering {
+  animation: page-fade 0.2s linear backwards;
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes page-fade {
+  from {
+    opacity: 0;
+  }
+}
+/* Words for screen readers only (the account chip says what it opens). */
+.unseen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

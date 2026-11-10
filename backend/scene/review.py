@@ -24,7 +24,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import media
+from . import media, storage
+from .db import offload
 
 CHECKS = ("who", "what", "clean", "coherence", "continuity")
 LEVELS = ("fine", "minor", "major")
@@ -150,7 +151,7 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
     empty). references: [(label, path)] of the reference pictures it was made with. previous: (path, kind) of the
     shot it continues, or None. model: the one that reviews; the agent's usual one when not given. Keeps the verdict
     with the item and returns it."""
-    path = state.outputs.folder(user_id) / item["filename"]
+    path = await offload(storage.here, await offload(state.outputs.folder, user_id) / item["filename"])
     if item["kind"] not in ("image", "video"):
         raise ReviewError("Only pictures and videos can be reviewed.")
     if not path.is_file():
@@ -187,7 +188,7 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
         raise ReviewError(str(error))
     answer = await state.agent.review([p for _, p in pictures], [label for label, _ in pictures], prompt, item["kind"], **({"model": model} if model else {}))
     verdict = verdict_from(answer)
-    state.db.run("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
+    await state.db.arun("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
     return verdict
 
 
@@ -220,7 +221,7 @@ async def review_sound(state, user_id, item, asked=None):
     """Check a sound the agent made (music, a voice track): its length against what was asked, its loudness and its
     silences, measured with ffmpeg (media.audio_check, the film tool's audio_check), not by a model: nothing is
     charged. Keeps the verdict with the item."""
-    path = state.outputs.folder(user_id) / item["filename"]
+    path = await offload(storage.here, await offload(state.outputs.folder, user_id) / item["filename"])
     if item["kind"] != "audio":
         raise ReviewError("Only sounds are checked this way.")
     if not path.is_file():
@@ -229,5 +230,5 @@ async def review_sound(state, user_id, item, asked=None):
         verdict = sound_verdict(await media.audio_check(path), asked)
     except media.MediaError as error:
         raise ReviewError(str(error))
-    state.db.run("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
+    await state.db.arun("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
     return verdict

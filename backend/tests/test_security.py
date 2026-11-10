@@ -26,7 +26,8 @@ def test_a_change_sent_from_another_site_is_refused(client):
 def test_every_answer_carries_the_security_headers_and_the_api_map_is_hidden(client):
     page = client.get("/")
     policy = page.headers["content-security-policy"]
-    assert "script-src 'self'" in policy and "frame-ancestors 'none'" in policy and "unsafe-inline" not in policy.split("style-src")[0]
+    assert "script-src 'self'" in policy and "frame-ancestors 'none'" in policy and "unsafe-inline" not in policy
+    assert "style-src 'self';" in policy   # no inline style either (X2): the pages set styles through the CSSOM
     assert page.headers["x-content-type-options"] == "nosniff" and page.headers["x-frame-options"] == "DENY"
     assert "<script>" not in page.text   # no inline script, which the policy would block
     assert "strict-transport-security" not in page.headers   # plain http here
@@ -143,12 +144,10 @@ def test_totp_matches_the_rfc_test_vector():
 
 
 def test_row_level_security_keeps_each_user_to_their_own_rows(client):
-    """PostgreSQL only: the database itself refuses other users' rows, even to SQL that forgot to ask for one user's."""
+    """The database itself refuses other users' rows, even to SQL that forgot to ask for one user's."""
     import pytest
     from scene import db as storage
     db = client.app.state.db
-    if db.kind != "postgres":
-        pytest.skip("row-level security is PostgreSQL's")
     ada = account(client)["id"]
     client.post("/api/projects", json={"name": "Ada's"})
     eve = account(client, "eve@example.com")["id"]

@@ -1,0 +1,9 @@
+.skill-editor {
+  width: min(94vw, 680px);
+}
+.skill-editor textarea {
+  font: 12.5px/1.6 var(--mono);
+}
+.skill-editor :global(.field) + :global(.field) {
+  margin-top: 12px;
+}

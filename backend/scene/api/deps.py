@@ -6,7 +6,7 @@ import time
 from fastapi import Depends, HTTPException, Request
 
 from .. import staff
-from ..db import act_for, act_for_everyone
+from ..db import act_for, act_for_everyone, offload
 from ..security import client_address, token_hash
 
 COOKIE = "scene_session"
@@ -37,7 +37,7 @@ def user_for_token(db, token, console=False):
 async def current_user(request: Request):
     """The signed-in user. From here on the request's statements see only that user's rows (row-level security).
     Async on purpose: a dependency run in a thread could not pass that on to the request."""
-    user = user_for_token(request.app.state.db, request.cookies.get(COOKIE))
+    user = await offload(user_for_token, request.app.state.db, request.cookies.get(COOKIE))
     if user is None:
         raise HTTPException(401, "Please sign in.")
     if user.get("viewing") and request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -62,16 +62,24 @@ async def admin_user(request: Request):
     """An admin signed in to the admin console, whose requests see every user's rows: the console is about all of
     them. A sign-in to the studio is not enough."""
     db = request.app.state.db
-    user = user_for_token(db, request.cookies.get(CONSOLE_COOKIE), console=True)
+    user = await offload(user_for_token, db, request.cookies.get(CONSOLE_COOKIE), console=True)
     if user is None:
         raise HTTPException(401, "Please sign in to the admin console.")
-    problem = admin_problem(db, user)
+    problem = await offload(admin_problem, db, user)
     if problem:
         raise HTTPException(403, problem)
     if "/api/admin/" in request.url.path and not staff.may(user["role"], request.url.path, request.method):
         raise HTTPException(403, "Your role ({}) can't do this. Ask an admin.".format(staff.label(user["role"])))
     act_for_everyone()
     return user
+
+
+async def counted(method, *args):
+    """A rate limit's or the sign-in throttle's answer: at once when it counts in this process, off the event loop when
+    it counts in Redis (shared.py), which is a network call."""
+    if getattr(method.__self__, "remote", False):
+        return await offload(method, *args)
+    return method(*args)
 
 
 def limited(name, limit, seconds, by="user"):
@@ -81,9 +89,9 @@ def limited(name, limit, seconds, by="user"):
         who = client_address(request) if by == "address" else (await current_user(request))["id"]
         key = "{}|{}".format(name, who)
         limits = request.app.state.limits
-        if not limits.allow(key, limit, seconds):
+        if not await counted(limits.allow, key, limit, seconds):
             raise HTTPException(429, "Too many requests. Wait a little and try again.",
-                                headers={"Retry-After": str(limits.retry_after(key, seconds))})
+                                headers={"Retry-After": str(await counted(limits.retry_after, key, seconds))})
     return Depends(check)
 
 

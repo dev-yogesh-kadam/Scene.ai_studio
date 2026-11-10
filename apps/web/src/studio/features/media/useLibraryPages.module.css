@@ -1,0 +1,5 @@
+/* The marker at the end of a growing list: a whole row of the grid, too thin to see. */
+.more {
+  grid-column: 1 / -1;
+  height: 1px;
+}

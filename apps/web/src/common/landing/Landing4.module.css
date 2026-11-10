@@ -1,0 +1,220 @@
+.la-cut h2 {
+  margin: 0;
+  font: 800 clamp(120px, 22vw, 340px)/0.8 var(--la-sans);
+  font-stretch: 70%;
+  letter-spacing: -0.04em;
+}
+.la-cut p {
+  color: rgba(242, 239, 234, 0.72);
+  font-size: 18px;
+  margin: 34px 0 30px;
+}
+.la-end {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px 32px;
+  border-top: 1px solid var(--la-line);
+  color: var(--la-dim);
+}
+@media (max-width: 900px) {
+  .la-top {
+    padding: 10px 16px;
+  }
+  .la-readout,
+  .la-top .la-btn:global(.quiet) {
+    display: none;
+  }
+  .la-top .la-btn {
+    height: 38px;
+    padding: 0 14px;
+  }
+  .la-lower {
+    left: 40px;
+    right: 40px;
+    bottom: 150px;
+    grid-template-columns: 1fr;
+  }
+  .la-slate,
+  .la-meters {
+    display: none;
+  }
+  .la-sub {
+    font-size: 16px;
+  }
+  .la-scenes {
+    left: 40px;
+    right: 40px;
+  }
+  .la-wrap {
+    padding: 0 16px;
+  }
+  .la-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+  .la-steps,
+  .la-split,
+  .la-price .la-split {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .la-kit .la-model {
+    display: none;
+  }
+  .la-kit th {
+    width: auto;
+    font-size: 18px;
+  }
+}
+html:has(.la) {
+  scroll-behavior: smooth;
+}
+.la-monitor::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(transparent, rgba(10, 10, 10, 0.55) 55%, var(--la-ink));
+}
+.la-grain {
+  will-change: transform;
+}
+.la-anim .la-rv {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.9s ease var(--d, 0ms),
+    transform 1.1s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms);
+}
+.la-ask {
+  display: flex;
+  max-width: 600px;
+  margin-top: 4px;
+  border: 1px solid rgba(242, 239, 234, 0.35);
+  background: rgba(8, 8, 8, 0.55);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition: border-color 0.2s;
+}
+.la-ask:focus-within {
+  border-color: var(--la-hi);
+}
+.la-lower > * {
+  min-width: 0;
+}
+.la-ask input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 56px;
+  padding: 0 18px;
+  border: 0;
+  background: transparent;
+  color: var(--la-paper);
+  font: 400 16px/1 var(--la-sans);
+  outline: none;
+}
+.la-ask input::placeholder {
+  color: rgba(242, 239, 234, 0.5);
+}
+.la-ask .la-btn {
+  height: auto;
+  margin: 6px;
+  padding: 0 22px;
+  border: 0;
+}
+.la-bar-top {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 32px;
+  background: rgba(10, 10, 10, 0.78);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--la-line);
+  transform: translateY(-100%);
+  visibility: hidden;
+  transition:
+    transform 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0s 0.45s;
+}
+.la-bar-top .la-brand img {
+  width: 26px;
+  height: 26px;
+}
+.la-use-sec,
+.la-memory,
+.la-bench,
+.la-faq {
+  padding-bottom: 120px;
+}
+.la-use-sec h2,
+.la-bench h2 {
+  margin-top: 30px;
+}
+.la-uses {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 40px;
+}
+.la-use {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--la-paper);
+  font: inherit;
+  background: #0f0f0f;
+  border: 1px solid var(--la-line);
+  transition:
+    opacity 0.9s ease var(--d, 0ms),
+    transform 1.1s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms),
+    border-color 0.25s,
+    background 0.25s;
+}
+.la-use .la-pic {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+}
+.la-use .la-pic svg {
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.la-use:hover {
+  border-color: rgba(242, 239, 234, 0.4);
+  background: #141414;
+}
+.la-use:hover .la-pic svg {
+  transform: scale(1.06);
+}
+.la-use:focus-visible {
+  outline: 2px solid var(--la-hi);
+  outline-offset: 3px;
+}
+.la-use-body {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  flex: 1;
+  align-content: start;
+}
+.la-use-body b {
+  font: 600 17px/1.2 var(--la-sans);
+}
+.la-use-prompt {
+  color: rgba(242, 239, 234, 0.62);
+  font-size: 14px;
+  line-height: 1.45;
+}

@@ -14,6 +14,7 @@ import io
 import re
 
 from . import fetch, kit
+from .db import offload
 
 ROWS_MOST = 200
 AT_ONCE = 6        # pictures fetched at once
@@ -129,7 +130,7 @@ async def bring_in(db, folder, user_id, project, rows, fetcher=None):
             except fetch.FetchError as error:
                 return row, None, str(error)
 
-    present = kit.entries(db, user_id, project)
+    present = await offload(kit.entries, db, user_id, project)
     before = {e["id"] for e in present}
     named = {(e["tag"], e["name"].lower()): e for e in present}
     # A row whose entry is there already by its name and type is not fetched again: a CDN may send the same picture
@@ -143,14 +144,14 @@ async def bring_in(db, folder, user_id, project, rows, fetcher=None):
             continue
         data, kind, final = got
         tag = "voice" if kind == "audio" else row["type"]
-        asset = kit.add(db, folder, user_id, project, data, fetch.filename_for(final, kind, data), kind, row["name"], tag,
+        asset = await offload(kit.add, db, folder, user_id, project, data, fetch.filename_for(final, kind, data), kind, row["name"], tag,
                         use_note=row["notes"], origin="import")
-        current = kit.entry(db, user_id, asset)
+        current = await offload(kit.entry, db, user_id, asset)
         if asset in before and row["notes"] and not current["use_note"]:
             # the same picture was there already: it keeps its name, and takes the sheet's notes when it had none
-            current = kit.update(db, user_id, asset, {"use_note": row["notes"]})
+            current = await offload(kit.update, db, user_id, asset, {"use_note": row["notes"]})
         added.append({"row": row["row"], "asset": asset, "name": current["name"], "type": current["type"], "new": asset not in before})
-    entries = kit.entries(db, user_id, project)
+    entries = await offload(kit.entries, db, user_id, project)
     row_at, entry_of = {r["row"]: r for r in rows}, {e["id"]: e for e in entries}
     of_row = {row_at[a["row"]]["name"].lower(): entry_of[a["asset"]] for a in added}   # each row's entry, by the row's name
     linked = []
@@ -161,7 +162,7 @@ async def bring_in(db, folder, user_id, project, rows, fetcher=None):
         asset = current["id"]
         scene = SCENE.search(current.get("use_note") or "")   # the scene the notes first put the look in
         try:
-            kit.update(db, user_id, asset, {"look_of": base["id"], "variant": variant,
+            await offload(kit.update, db, user_id, asset, {"look_of": base["id"], "variant": variant,
                                             **({"from_scene": int(scene.group(1))} if scene and int(scene.group(1)) else {})})
         except ValueError:
             continue

@@ -1,0 +1,136 @@
+/* The card of the newest questions, in place of the message box: one question at a time, numbered options with a line
+on what each does, the recommended one marked REC, and "Something else" to write one's own. */
+.agent-dock.asking {
+  border-color: var(--agent);
+}
+.agent-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.agent-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-content: start;
+  overflow-wrap: anywhere;
+}
+/* The conversation follows the panel's width: no part of a message may make it wider than the panel (a picture sized to
+its shape, a row of chips, a long word), so it never scrolls sideways and it reflows as the panel is dragged. */
+.agent-log :is(div, section, article, ul, ol, p) {
+  min-width: 0;
+}
+/* The approval bar of the newest plan, docked on top of the message box: it stays in place while the conversation scrolls. */
+.agent-dock {
+  flex: none;
+  display: grid;
+  margin: 0 12px 8px;
+  overflow: hidden;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-s);
+}
+/* A new conversation: a welcome and a few ways to start. */
+.agent-welcome {
+  display: grid;
+  gap: 10px;
+  align-content: center;
+  min-height: 100%;
+  padding: 24px 6px;
+}
+.agent-welcome h2 {
+  margin: 0;
+  font: 600 24px/1.2 var(--display);
+  letter-spacing: -0.01em;
+}
+.agent-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.agent-starter {
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--hover);
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.agent-starter:hover {
+  background: var(--active);
+  border-color: var(--line-strong);
+}
+/* Global rules of the studio, split by area out of the one stylesheet they were in (app.css, then legacy.css). They
+are global because the markup that uses them names its classes as plain strings (shared controls, the shell, and the
+modules carried over from the classic studio and console). Loaded in their old order: common/styles/global.ts. */
+/* ---------------------------------------------------------------- the agent's conversation */
+/* Each turn: the message, what the agent did and thought (folded), its reply, its plan or what it made, and its cost. */
+.agent-log-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* At the right edge, beside the conversation rather than over the middle of a picture. */
+.agent-to-end {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  z-index: 3;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.agent-to-end :global(.icon) {
+  width: 18px;
+  height: 18px;
+}
+.agent-dock {
+  margin-bottom: 12px;
+}
+/* Global rules of the studio, split by area out of the one stylesheet they were in (app.css, then legacy.css). They
+are global because the markup that uses them names its classes as plain strings (shared controls, the shell, and the
+modules carried over from the classic studio and console). Loaded in their old order: common/styles/global.ts. */
+/* ---------------------------------------------------------------- touch and motion
+After Apple's "Designing Fluid Interfaces". Whatever can be pressed answers the moment the pointer goes down, not when
+it lets go. Things that can be dragged lift while they are held; the springs that move them are in js/spring.js. */
+.agent-starter:active {
+  scale: 0.97;
+}
+[data-full] .agent-log {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+[data-full] .agent-dock {
+  width: calc(100% - 24px);
+  max-width: 736px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+[data-full] .agent-welcome {
+  padding: 24px 0;
+}

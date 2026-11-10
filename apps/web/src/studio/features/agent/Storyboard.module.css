@@ -1,0 +1,43 @@
+.agent-animate {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--raised);
+}
+.animate-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.animate-tile {
+  display: grid;
+  gap: 4px;
+  width: 88px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--field);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.animate-tile img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 7px;
+}
+.animate-tile span {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.animate-tile.out {
+  opacity: 0.4;
+}
+.animate-tile.out img {
+  filter: grayscale(1);
+}

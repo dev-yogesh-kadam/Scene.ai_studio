@@ -1,0 +1,9 @@
+.project-dialog {
+  width: min(92vw, 480px);
+}
+.project-dialog h2 {
+  font-size: 21px;
+}
+.project-dialog textarea {
+  min-height: 0;
+}

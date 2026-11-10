@@ -1,4 +1,5 @@
-"""A real script-to-video run in a throwaway studio: its own SQLite database and storage (nothing of the live studio's),
+"""A real script-to-video run in a throwaway studio: its own PostgreSQL database (scripts/testdb.py, beside
+SCENE_TEST_DATABASE_URL's, kept in state.json for the next run) and storage (nothing of the live studio's),
 real Claude, and the render PC's ComfyUI. It does what the agent panel does under "Allow all" (agent.js): sends the
 message, answers each question as a click would, queues the plan's steps (their references, a shot that starts on an
 earlier one, the cut), waits for them, has each picture and clip checked, and tells the agent what they made in the
@@ -69,9 +70,14 @@ def main():
     def store():
         (HERE / "state.json").write_text(json.dumps(state, indent=1, ensure_ascii=False), encoding="utf-8")
     config = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
-    settings = Settings(database_url="", comfy_url=config["comfy_url"], storage_dir=str(HERE / "storage"),
+    if not state.get("database"):   # a throwaway database of its own, kept for the runs after a stop
+        import subprocess
+        state["database"] = subprocess.run([sys.executable, str(ROOT / "scripts" / "testdb.py"), "create"],
+                                           capture_output=True, text=True, check=True).stdout.strip()
+        store()
+    settings = Settings(database_url=state["database"], comfy_url=config["comfy_url"], storage_dir=str(HERE / "storage"),
                         claude_home=str(HERE / "claude-home"), signup_credits=1_000_000, first_account_local=False,
-                        workflows_dir=str(ROOT / "workflows"), frontend_dir=str(ROOT / "frontend"))
+                        workflows_dir=str(ROOT / "workflows"))
     with TestClient(create_app(settings)) as c:
         if not state.get("project"):
             c.post("/api/auth/register", json=ME)

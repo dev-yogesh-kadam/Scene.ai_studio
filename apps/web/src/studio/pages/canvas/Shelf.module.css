@@ -1,0 +1,79 @@
+.canvas-library {
+  position: absolute;
+  left: 76px;
+  top: 72px;
+  bottom: 18px;
+  z-index: 6;
+  width: min(360px, calc(100vw - 100px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+}
+.library-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.library-head b {
+  font-size: 14px;
+}
+.kinds {
+  display: flex;
+}
+.kinds button {
+  flex: 1;
+}
+.library-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.library-tile {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.library-tile:hover,
+.library-tile:focus-visible {
+  background: var(--hover);
+}
+.library-thumb {
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--media-ground);
+}
+.library-thumb img,
+.library-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.library-name {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-where {
+  font-size: 11px;
+  color: var(--agent);
+}
+.library-tile.here .library-where {
+  color: var(--muted);
+}

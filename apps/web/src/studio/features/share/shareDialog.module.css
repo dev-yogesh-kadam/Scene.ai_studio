@@ -1,0 +1,91 @@
+.share-dialog {
+  width: min(94vw, 560px);
+}
+.share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.share-head h2 {
+  font-size: 21px;
+  margin: 0;
+}
+.share-adder {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.share-adder input {
+  width: 100%;
+}
+.share-pending {
+  display: grid;
+  gap: 6px;
+}
+.share-pending:empty {
+  display: none;
+}
+.share-note {
+  margin: 2px 0 0;
+}
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+.share-row :global(.grow) {
+  min-width: 0;
+}
+.share-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-role {
+  width: auto;
+  min-width: 112px;
+}
+.share-sub {
+  margin: 26px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.share-people {
+  display: grid;
+  gap: 6px;
+  max-height: 300px;
+  overflow: auto;
+}
+.share-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--hover);
+  font-size: 12px;
+  font-weight: 650;
+}
+.share-who {
+  display: grid;
+}
+.share-who > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
