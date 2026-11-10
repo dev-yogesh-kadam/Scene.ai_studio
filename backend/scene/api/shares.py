@@ -9,7 +9,7 @@ import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from .. import audit, storage
 from ..db import as_everyone, offload
@@ -60,6 +60,24 @@ def _shared(request, token):
     return link, row
 
 
+# The page's look, as a file of its own: the studio's Content-Security-Policy allows styles only from the site's files
+# (style-src 'self'), so a <style> in the page would be dropped and the page shown unstyled.
+SHARE_CSS = """html,body{margin:0;height:100%;background:#000;color:#fff;font:15px -apple-system,system-ui,Segoe UI,Roboto,sans-serif}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;box-sizing:border-box}
+video,img{max-width:100%;max-height:78vh;border-radius:14px;background:#111}
+audio{width:min(520px,100%)}
+h1{font-size:20px;font-weight:600;margin:0;text-align:center}
+p{margin:0;color:rgba(235,235,245,.6);font-size:13px}
+a{color:#8b7bff}
+"""
+
+
+@router.get("/s/share.css", include_in_schema=False)
+async def shared_page_style():
+    """Before /s/{token}: a token never has a dot in it (token_urlsafe), so this path is never a link's."""
+    return Response(SHARE_CSS, media_type="text/css")
+
+
 @router.get("/s/{token}", response_class=HTMLResponse, dependencies=[limited("shared", 120, 60, by="address")])
 async def shared_page(token: str, request: Request):
     link, row = await offload(_shared, request, token)
@@ -73,15 +91,7 @@ async def shared_page(token: str, request: Request):
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>{name} · Scene.ai</title>
-<style>
-html,body{{margin:0;height:100%;background:#000;color:#fff;font:15px -apple-system,system-ui,Segoe UI,Roboto,sans-serif}}
-main{{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;box-sizing:border-box}}
-video,img{{max-width:100%;max-height:78vh;border-radius:14px;background:#111}}
-audio{{width:min(520px,100%)}}
-h1{{font-size:20px;font-weight:600;margin:0;text-align:center}}
-p{{margin:0;color:rgba(235,235,245,.6);font-size:13px}}
-a{{color:#8b7bff}}
-</style></head><body><main>{media}<h1>{name}</h1><p>Made with Scene.ai</p></main></body></html>""".format(name=name, media=media),
+<link rel="stylesheet" href="/s/share.css"></head><body><main>{media}<h1>{name}</h1><p>Made with Scene.ai</p></main></body></html>""".format(name=name, media=media),
                         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 

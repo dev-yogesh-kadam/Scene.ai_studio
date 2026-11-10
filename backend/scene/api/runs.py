@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import core, recall, runs, sharing
-from .deps import current_user
+from .deps import current_user, project_ref
 from ..db import offload
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -39,7 +39,7 @@ async def write_state(run: str, body: dict, request: Request, user: dict = Depen
 
 @router.delete("/runs/{run}/state")
 async def delete_state(run: str, request: Request, path: str, user: dict = Depends(current_user)):
-    return {"deleted": _guarded(lambda: runs.delete(request.app.state.db, user["id"], run, path))}
+    return {"deleted": await offload(_guarded, lambda: runs.delete(request.app.state.db, user["id"], run, path))}
 
 
 @router.get("/runs/{run}/coverage")
@@ -51,6 +51,7 @@ async def check_coverage(run: str, request: Request, path: str, against: str, us
 # ---------------------------------------------------------------- NeuralCore's shared memory (core.py), for its Memory view
 
 def _core(request, user, project, run):
+    project = project_ref(project)
     if project:
         sharing.require(request.app.state.db, user, project, "viewer")
     run = run if run and runs.RUN.match(run) else ""

@@ -121,12 +121,12 @@ def test_a_tabs_messages_go_on_in_one_session_that_is_recorded_and_compacted(cli
 
 def test_the_agents_async_code_never_waits_on_the_database_in_the_event_loop():
     """A plain call of runs, sessions or conversations (each queries the database) inside an async function of
-    api/workspace.py would block the event loop: they go through offload. Read from the source, so a path no test
-    reaches (a skill handed on in a long run) is checked too."""
+    api/workspace.py (or the parts of it moved to modules of their own) would block the event loop: they go through
+    offload. Read from the source, so a path no test reaches (a skill handed on in a long run) is checked too."""
     import ast
     from pathlib import Path
-    from scene.api import workspace
-    tree = ast.parse(Path(workspace.__file__).read_text(encoding="utf-8"))
+    from scene.api import agent_threads, film_ops, workspace
+    sources = [Path(m.__file__).read_text(encoding="utf-8") for m in (workspace, agent_threads, film_ops)]
     queries = {"runs": ("kept_thread", "keep_thread", "threads_of", "kept_skill", "keep_skill", "kept_attached", "keep_attached",
                         "read", "write", "delete", "leaves"),
                "sessions": ("open_row", "record", "update", "listing", "one", "events"),
@@ -142,5 +142,6 @@ def test_the_agents_async_code_never_waits_on_the_database_in_the_event_loop():
                     and child.func.attr in queries.get(ast.unparse(child.func.value), ()):
                 found.append("{}: {}".format(child.lineno, ast.unparse(child.func)))
             walk(child, inside)
-    walk(tree, False)
+    for source in sources:
+        walk(ast.parse(source), False)
     assert found == []

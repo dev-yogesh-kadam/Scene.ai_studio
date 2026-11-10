@@ -9,14 +9,16 @@ import time
 from contextlib import asynccontextmanager
 
 import httpx
+import psycopg
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
 from . import aftercare, backup, claude, endpoints, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
 from .agent import Agent, AgentError
-from .api import admin, auth, bulk, client_errors, console as console_api, film, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
+from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
 from .catalog import Catalog
 from .comfy import workflows
 from .comfy.client import ComfyError
@@ -414,7 +416,7 @@ def create_app(settings=None):
     _answer_errors(app)
     _guard(app)   # after the one above, so its answers get the headers too
     # The admin routes are not here: they are the admin console's, a site of its own (create_console).
-    for module in (auth, studio, library, workspace, film, runs, kit_api, bulk, mobile, shares, plans_api, client_errors):
+    for module in (auth, studio, library, workspace, film_ops, film, runs, kit_api, bulk, mobile, shares, plans_api, client_errors):
         app.include_router(module.router)
 
     built = settings.path("web_dist_dir").resolve()   # the web app's build (apps/web)
@@ -456,6 +458,28 @@ def _answer_errors(app):
     @app.exception_handler(httpx.HTTPError)
     async def comfy_unreachable(request, exc):
         return JSONResponse({"detail": "The render server (ComfyUI) can't be reached right now."}, status_code=502)
+
+    @app.exception_handler(RequestValidationError)
+    async def wrong_fields(request, exc):
+        """Fields missing or of the wrong kind: FastAPI's list of them, without the "input" it would echo back. That
+        echo could not be made of a body that is not text (a file sent where JSON goes failed as a crash), and it sent
+        back whatever was sent, however large."""
+        return JSONResponse({"detail": [{k: e[k] for k in ("type", "loc", "msg") if k in e} for e in exc.errors()]},
+                            status_code=422)
+
+    @app.exception_handler(psycopg.errors.DataError)
+    async def wrong_kind_of_value(request, exc):
+        """A value the database can't take for its column (a word where an id goes, a number too large): the request's
+        fault, said as such, not a crash. What the database said is not repeated: it names tables and columns."""
+        return JSONResponse({"detail": "A value in this request is not of the right kind (an id, a number or a text)."},
+                            status_code=400)
+
+    @app.exception_handler(Exception)
+    async def unexpected(request, exc):
+        """Anything else that went wrong, as JSON the pages can show, with no trace of the code: the server's log has
+        that (the error is raised on after this answer, so it is still logged)."""
+        return JSONResponse({"detail": "Something went wrong on the studio's side. Try again; if it keeps happening, "
+                                       "tell an admin."}, status_code=500)
 
 
 def _guard(app):

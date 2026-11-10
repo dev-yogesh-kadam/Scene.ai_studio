@@ -74,6 +74,29 @@ async def admin_user(request: Request):
     return user
 
 
+def project_ref(value):
+    """A project's id as a request gives it (a number, or digits from a form), 0 for none: anything else is refused here,
+    before it reaches a query that can't compare it (a list, an object, a word)."""
+    if value in (None, "", 0, False):
+        return 0
+    if isinstance(value, int) and not isinstance(value, bool) and 0 < value < 2 ** 31:
+        return value
+    if isinstance(value, str) and value.isdigit() and 0 < int(value) < 2 ** 31:
+        return int(value)
+    raise HTTPException(400, "That is not a project's id.")
+
+
+async def json_object(request: Request):
+    """A request's body as a JSON object; anything else (not JSON, a list, a number) is the request's fault."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "The request's body is not JSON.")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "The request's body is not a JSON object.")
+    return body
+
+
 async def counted(method, *args):
     """A rate limit's or the sign-in throttle's answer: at once when it counts in this process, off the event loop when
     it counts in Redis (shared.py), which is a network call."""
