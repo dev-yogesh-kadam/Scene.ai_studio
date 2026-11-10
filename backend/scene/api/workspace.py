@@ -433,7 +433,9 @@ STILL_WORKFLOWS = ("flux2_klein_9b", "krea2_turbo")   # cheap picture workflows,
 
 async def _still_workflow(state, user):
     """The workflow that draws a storyboard still: a cheap picture workflow that is switched on. None when there is none."""
-    found = [w for w in await state.catalog.listing() if w["kind"] == "image" and not w.get("error") and await offload(state.credits.enabled, w["id"], user)]
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)
+    found = [w for w in every if w["kind"] == "image" and not w.get("error") and w["id"] in on]
     for word in STILL_WORKFLOWS:
         for w in found:
             if word in w["id"]:
@@ -551,8 +553,10 @@ async def agent_reroll(body: dict, request: Request, user: dict = Depends(curren
 
 async def _menu(state, user):
     """The workflows an approval card can switch a step to: every readable one that is switched on."""
-    return [{"id": w["id"], "title": w["title"], "kind": w["kind"]} for w in await state.catalog.listing()
-            if w["kind"] in ("video", "image", "audio") and not w.get("error") and await offload(state.credits.enabled, w["id"], user)]
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)
+    return [{"id": w["id"], "title": w["title"], "kind": w["kind"]} for w in every
+            if w["kind"] in ("video", "image", "audio") and not w.get("error") and w["id"] in on]
 
 
 @router.post("/agent/step", dependencies=[costly("agent")])
@@ -869,8 +873,10 @@ async def _planning(request, user, body, instruction, project):
     chat_pins = [w for w in body.get("workflows") or [] if isinstance(w, str)][:12] if isinstance(body.get("workflows"), list) else []
     pinned_kinds = {w.split("/", 1)[0] for w in chat_pins if w.split("/", 1)[0] in PINNABLE}
     named_here = instruction.lower()
-    for listed in await state.catalog.listing():
-        if listed.get("error") or not await offload(state.credits.enabled, listed["id"], user):
+    every_workflow = await state.catalog.listing()
+    usable_ids = await offload(state.credits.enabled_of, [w["id"] for w in every_workflow], user)   # one query, not one a workflow
+    for listed in every_workflow:
+        if listed.get("error") or listed["id"] not in usable_ids:
             continue
         if listed["kind"] in pinned_kinds and listed["id"] not in chat_pins and listed["title"].lower() not in named_here \
                 and listed["id"].lower() not in named_here:
@@ -1657,6 +1663,12 @@ async def _planning(request, user, body, instruction, project):
         noted("bulb", "Asked {} for a second opinion".format(str(found["model"] or "a stronger model").split("/")[-1]))
         return found["critique"]
 
+    async def workflow_info(call):
+        found = agent.workflow_info(offers, call.get("op"))
+        if found.startswith("{"):
+            noted("plan", "Read the workflow {}".format(str(call.get("op")).strip()))
+        return found
+
     async def import_url(call):
         from .. import fetch
         from .library import IMPORTED, _file_in   # library.py files what is brought in
@@ -1678,7 +1690,14 @@ async def _planning(request, user, body, instruction, project):
              "state_read": state_read, "state_write": state_write, "state_check": state_check, "film": film_op,
              "render_html": render_html, "ffmpeg": ffmpeg_job, "import_url": import_url,
              "transcript": read_transcript, "timing": timing, "read_text": read_text, "read_skill": read_skill, "memory": memory_tool,
-             "preset_search": preset_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion}
+             "preset_search": preset_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion,
+             "workflow_info": workflow_info}
+    # Workflows in full only of the kinds the message (or the user's turn before it) is about: the rest go as one line each,
+    # read in full with workflow_info (they were about 28,000 characters of every first message, the video models'
+    # prompt guides most of it). A skill in use names what it needs: then every workflow goes in full, as before.
+    earlier = [t.get("instruction") for t in (body.get("history") or [])[-1:] if isinstance(t, dict)] \
+        if isinstance(body.get("history"), list) else []
+    detailed = agent.likely_kinds([instruction, *earlier]) if with_tools and not picked else None
     drafted = []   # the skills drafted in this message (skill_draft)
     made_now = []  # what the film tool made in this message: work done without a step
     explain = body.get("explain") is True   # the panel's "Explain more": the reply may teach
@@ -1700,20 +1719,26 @@ async def _planning(request, user, body, instruction, project):
                                      "" if first else guides, body.get("direction") or "",
                                      await offload(recall.digest, state.db, user["id"]) if with_tools else None,
                                      skills.catalogue(picked) if with_tools and not long_skill else "", explain if with_tools else None,
-                                     canvas_boards if with_tools and project else None)
+                                     canvas_boards if with_tools and project else None, detailed)
         full = "\n\n".join(text for _, text in parts)
         # A conversation with Claude goes on in one session (a thread): a later message sends only what is new.
         thread = await offload(_thread, state, user, project, body, chosen_model, system)
         threaded[:] = [thread] if thread is not None else []
         traces.SESSION.set(thread["key"] if thread is not None else "")   # the Agent tab, as Langfuse shows it
 
+        # The answer's shape names the workflows a step may use: every readable one switched on for the user, sorted, not
+        # only those offered to this message. Claude's session is opened again (a new Claude Code process) whenever its shape
+        # changes, and the offered ones change as the conversation goes (a picture attached, a workflow named); which
+        # can run is still checked step by step.
+        answer_ids = sorted({w["id"] for w in every_workflow if not w.get("error") and w["id"] in usable_ids} | {o["id"] for o in offers})
+
         async def asked_with(asking):
             going = {"thread": thread} if thread is not None else {}
             if with_tools:   # the model works in a loop of tool calls, and may search the web
-                return await state.agent.ask_with_tools(system, asking, [o["id"] for o in offers], tools, finishing, rounds=rounds,
+                return await state.agent.ask_with_tools(system, asking, answer_ids, tools, finishing, rounds=rounds,
                                                         **going, **_model(body), **({"web": True} if _hosted_claude(state) else {}),
                                                         **({"reply_chars": agent.RUN_REPLY_CHARS} if long_skill else {}))
-            return await state.agent.ask(system, asking, [o["id"] for o in offers], **going, **_model(body))
+            return await state.agent.ask(system, asking, answer_ids, **going, **_model(body))
 
         if thread is None:
             answer = await asked_with(full)

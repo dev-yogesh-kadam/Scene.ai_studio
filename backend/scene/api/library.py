@@ -98,6 +98,19 @@ def _shown(item, user):
     return item
 
 
+def _listing(rows, user, **more):
+    """The library's answer as JSON: {"items": [...], **more}. Its rows hold only plain values (str, int, float, None),
+    and the settings and context read from JSON, so they are written out as they are: FastAPI's jsonable_encoder walked
+    every value of every item first, two thirds of the time of a canvas of 20,000 items."""
+    return json.dumps({"items": [_shown(item, user) for item in rows], **more}, ensure_ascii=False, allow_nan=False,
+                      separators=(",", ":")).encode("utf-8")
+
+
+async def _listed(rows, user, **more):
+    """_listing, made off the event loop (a canvas's whole list is megabytes), as the response."""
+    return Response(await offload(_listing, rows, user, **more), media_type="application/json")
+
+
 @router.get("/library")
 async def list_items(request: Request, kind: str = "", q: str = "", project: str = "", run: str = "", modules: int = 0,
                      all: int = 0, limit: int = 0, cursor: str = "", job: str = "", meaning: int = 0,
@@ -135,8 +148,8 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
                 near = await offload(semantic.nearest, request.app.state.db, embedder, q, "g.id = ANY(?)", [ids],
                                      min(limit, LIBRARY_PAGE_MOST) if limit > 0 else 60)
                 rows = {r["id"]: r for r in await request.app.state.db.aall(sql + " AND g.id = ANY(?)", params + [near])}
-            items = [_shown(rows[i], user) for i in near if i in rows]
-            return {"items": items, "next_cursor": None} if limit > 0 else {"items": items}
+            items = [rows[i] for i in near if i in rows]
+            return await (_listed(items, user, next_cursor=None) if limit > 0 else _listed(items, user))
         except semantic.SemanticError:
             pass   # the embedding API can't be reached: the words are searched instead, below
     found, values = search_sql(q)   # every word in its name, summary, workflow or prompt; or a name typed a little wrong
@@ -150,10 +163,10 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
             rows = await request.app.state.db.aall(sql + " ORDER BY g.created DESC, g.id DESC LIMIT ?", params + [limit + 1])
         page = rows[:limit]
         after = "{!r}:{}".format(page[-1]["created"], page[-1]["id"]) if len(rows) > limit else None
-        return {"items": [_shown(item, user) for item in page], "next_cursor": after}
+        return await _listed(page, user, next_cursor=after)
     with as_everyone() if shared else contextlib.nullcontext():
         items = await request.app.state.db.aall(sql + " ORDER BY g.created DESC" + ("" if all else " LIMIT 500"), params)
-    return {"items": [_shown(item, user) for item in items]}
+    return await _listed(items, user)
 
 
 @router.get("/library/placement")
@@ -294,6 +307,20 @@ async def media_link(ref: str, request: Request, download: bool = False, user: d
     raise HTTPException(404, "No such item.")
 
 
+NOT_READY = {"Retry-After": "1", "Cache-Control": "no-store"}
+
+
+async def _made_poster(path):
+    """The poster, made once (media.poster: a second request waits for the first). One that can't be read is a 404; one
+    that can't be put in place yet (Windows: its older copy still being sent) is a 503 the browser asks again for."""
+    try:
+        return await media.poster(path)
+    except media.MediaError as error:
+        raise HTTPException(404, str(error))
+    except OSError:
+        raise HTTPException(503, "The thumbnail is being made. Ask again in a moment.", headers=NOT_READY)
+
+
 async def poster_response(request, path):
     """A video's poster. The browser keeps it and only asks whether it has changed, which costs no download."""
     state = request.app.state
@@ -303,18 +330,12 @@ async def poster_response(request, path):
             path = await offload(storage.here, path)
             if not path.is_file():
                 raise HTTPException(404, "The file is missing from storage.")
-            try:
-                poster = await media.poster(path)
-            except media.MediaError as error:
-                raise HTTPException(404, str(error))
+            poster = await _made_poster(path)
             await offload(storage.keep_path, state, poster)
         return storage.signed(state, None, poster)
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
-    try:
-        poster = await media.poster(path)
-    except media.MediaError as error:
-        raise HTTPException(404, str(error))
+    poster = await _made_poster(path)
     webp = media.webp_of(poster)   # the smaller copy, to a browser that takes WebP, once it was made (new results)
     if "image/webp" in request.headers.get("accept", "") and webp.is_file() and webp.stat().st_mtime >= poster.stat().st_mtime:
         poster = webp
@@ -344,11 +365,17 @@ async def get_frame(item_id: int, request: Request, at: float = 0.0, user: dict 
         raise HTTPException(404, "The file is missing from storage.")
     tenth = max(0, min(int(round(at * 10)), 36000))
     target = media.poster_path(path).with_name("{}.{}.jpg".format(path.name, tenth))
-    if not (target.is_file() and target.stat().st_mtime >= path.stat().st_mtime):
-        target.parent.mkdir(exist_ok=True)
-        if not await media.frame_at(path, tenth / 10, target):
-            raise HTTPException(404, "The video has no frame there.")
-        await offload(request.app.state.outputs.keep, target)
+    if not media.fresh(target, path):
+        async with media.making(target):   # made once: the keyframes under a result are asked for together
+            if not media.fresh(target, path):
+                target.parent.mkdir(exist_ok=True)
+                try:
+                    made = await media.frame_at(path, tenth / 10, target)
+                except OSError:
+                    raise HTTPException(503, "The frame is being made. Ask again in a moment.", headers=NOT_READY)
+                if not made:
+                    raise HTTPException(404, "The video has no frame there.")
+                await offload(request.app.state.outputs.keep, target)
     elsewhere = storage.signed(request.app.state, "posters", target)
     if elsewhere:
         return elsewhere

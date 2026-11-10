@@ -75,17 +75,33 @@ async def billed_seconds(state, wf, schema, settings, user_id=None):
     return None
 
 
+def _history(state):
+    """The earlier runs time estimates are made from (jobs.history: the last 500 of anyone's), read again only once
+    something new was made: a plan of eight steps read all 500 eight times."""
+    with as_everyone():
+        last = (state.db.one("SELECT MAX(id) AS last FROM generations") or {}).get("last")
+    kept = getattr(state, "estimate_history", None)
+    if kept and kept[0] == last:
+        return kept[1]
+    found = state.jobs.history()
+    state.estimate_history = (last, found)
+    return found
+
+
 async def price(state, wf, settings, user_id=None):
     """Time estimate and credit cost of a job with these settings. The cost follows what was asked for, not the time."""
     schema = workflows.describe(wf)
-    estimate = workflows.estimate(wf, settings, await offload(state.jobs.history))
+    estimate = workflows.estimate(wf, settings, await offload(_history, state))
     estimate["seconds"] = await billed_seconds(state, wf, schema, settings, user_id)
     chosen = workflows.context(schema, settings)
-    estimate["credits"] = await offload(state.credits.cost, wf["id"], estimate["seconds"], chosen)
-    # What each other resolution and quality would cost, for the page to show beside them ("1080p · 200 cr").
+    # What each other resolution and quality would cost, for the page to show beside them ("1080p · 200 cr"): priced
+    # together, with the workflow's rates and factors read once.
     others = {"quality": [c["id"] for o in schema["options"] if o["id"] == "quality" for c in o["choices"]],
               "resolution": list(schema["resolutions"]) if "resolution" in chosen else []}
-    estimate["choices"] = {group: {str(v): await offload(state.credits.cost, wf["id"], estimate["seconds"], dict(chosen, **{group: v})) for v in values}
+    asked = [(group, v) for group, values in others.items() for v in values]
+    priced = await offload(state.credits.costs, wf["id"], estimate["seconds"], [chosen] + [dict(chosen, **{g: v}) for g, v in asked])
+    estimate["credits"] = priced[0]
+    estimate["choices"] = {group: {str(v): cost for (g, v), cost in zip(asked, priced[1:]) if g == group}
                            for group, values in others.items() if values}
     return await offload(guardrails.check_quote, state.db, estimate)   # a length or price that makes no sense is refused
 
@@ -152,7 +168,9 @@ async def announcement(request: Request, user: dict = Depends(current_user)):
 @router.get("/workflows")
 async def list_workflows(request: Request, user: dict = Depends(current_user)):
     state = request.app.state
-    listed = [w for w in await state.catalog.listing() if await offload(state.credits.enabled, w["id"], user)]
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)
+    listed = [w for w in every if w["id"] in on]
     return {"workflows": listed, "kinds": KINDS, "default": state.catalog.current(state.settings.default_workflow)}
 
 

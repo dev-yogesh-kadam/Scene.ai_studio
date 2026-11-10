@@ -152,14 +152,21 @@ def delete(db, user_id, run, path, trusted=False):
     return db.change("DELETE FROM run_state WHERE user_id = ? AND run = ? AND (path = ? OR " + where + ")", (user_id, run, path, *params))
 
 
-def listing(db, user_id):
-    """The user's runs, newest first: {"run", "paths", "updated", "status"} (status: the leaf "/<x>/status", if any)."""
-    rows = db.all("SELECT run, COUNT(*) AS paths, MAX(updated) AS updated FROM run_state WHERE user_id = ? GROUP BY run ORDER BY MAX(updated) DESC",
-                  (user_id,))
+LISTED = 100   # runs listed at most (the newest): one per agent conversation, so a user of a year has thousands
+
+
+def listing(db, user_id, limit=LISTED):
+    """The user's newest runs, newest first: {"run", "paths", "updated", "status"} (status: the newest leaf
+    "/<x>/status", if any). One query, its statuses with it (it was one more query per run, for every run)."""
+    rows = db.all(
+        "WITH listed AS (SELECT run, COUNT(*) AS paths, MAX(updated) AS updated FROM run_state WHERE user_id = ? "
+        "GROUP BY run ORDER BY MAX(updated) DESC, run LIMIT ?) "
+        "SELECT listed.run, listed.paths, listed.updated, status.value AS status FROM listed LEFT JOIN LATERAL "
+        "(SELECT value FROM run_state s WHERE s.user_id = ? AND s.run = listed.run AND s.path LIKE '%/status' "
+        "ORDER BY s.updated DESC LIMIT 1) status ON TRUE ORDER BY listed.updated DESC, listed.run",
+        (user_id, max(1, min(int(limit), 500)), user_id))
     for row in rows:
-        status = db.one("SELECT value FROM run_state WHERE user_id = ? AND run = ? AND path LIKE '%/status' ORDER BY updated DESC LIMIT 1",
-                        (user_id, row["run"]))
-        row["status"] = json.loads(status["value"]) if status else None
+        row["status"] = json.loads(row["status"]) if row["status"] else None   # a run without one: NULL, read as ""
     return rows
 
 

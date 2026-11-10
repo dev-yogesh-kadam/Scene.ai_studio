@@ -1,6 +1,6 @@
 """The state of the user's long runs (runs.py): read, write, list and check, for the agent and for the Agent tab."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .. import core, recall, runs, sharing
 from .deps import current_user, project_ref
@@ -17,8 +17,9 @@ def _guarded(work):
 
 
 @router.get("/runs")
-async def list_runs(request: Request, user: dict = Depends(current_user)):
-    return {"runs": await offload(runs.listing, request.app.state.db, user["id"])}
+async def list_runs(request: Request, limit: int = Query(runs.LISTED, ge=1, le=500), user: dict = Depends(current_user)):
+    """The newest runs (`limit`, 100 unless asked, at most 500)."""
+    return {"runs": await offload(runs.listing, request.app.state.db, user["id"], limit)}
 
 
 @router.get("/runs/{run}/state")

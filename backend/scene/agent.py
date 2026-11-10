@@ -583,7 +583,7 @@ class AgentError(Exception):
 
 TOOLS = ("find_assets", "look", "check_shots", "review", "save_note", "book_save", "book_import", "page_build", "page_write", "page_read", "state_read", "state_write", "state_check",
          "film", "render_html", "ffmpeg", "import_url", "transcript", "timing", "read_text", "read_skill", "memory", "preset_search", "web_fetch",
-         "skill_draft", "second_opinion")
+         "skill_draft", "second_opinion", "workflow_info")
 TOOL_ROUNDS = 6   # a message is answered in at most this many calls to the model
 RUN_ROUNDS = 40   # ...or this many while a long skill runs: it reads and writes its state and cuts its media as it goes
 TOOL_RESULT = 8000   # characters of a tool's result the model is given back
@@ -1637,23 +1637,26 @@ def question(instruction, offers, selection, default="", history=(), project_cas
 
 
 def question_parts(instruction, offers, selection, default="", history=(), project_cast=None, recent=(), book=(), guides="", direction="",
-                   remembered=None, catalogue="", explain=None, boards=None):
+                   remembered=None, catalogue="", explain=None, boards=None, detailed=None):
     """question() as its parts, [(name, text)] in order, for follow_up(). remembered: the user's memory as recall.digest()
     gives it, or None when the memory tool is not offered. explain: True when the user asked for the reply to teach
     (the panel's "Explain more"), False when not, None to say nothing of it (a conversation without tools). boards: the
-    canvas's boards in words (placement.boards), or None in no project."""
+    canvas's boards in words (placement.boards), or None in no project. detailed: the kinds of workflow ("video",
+    "image", "audio") told in full, from likely_kinds(); the others go as one line each, which the model reads in full
+    with workflow_info. None: every workflow in full (a model without tools has no workflow_info)."""
     offers = sorted(offers, key=lambda o: o["id"] != default)   # the default first; the rest keep their order
     if offers[0]["id"] == default:
         offers[0] = dict(offers[0], default=True)
     said = ["{}: {}".format("User" if turn["role"] == "user" else "You", turn["content"]) for turn in history]
-    guides_of_models = prompters.part([o["id"] for o in offers if o.get("prompt_guide")])
+    full = [o for o in offers if detailed is None or o["makes"] in detailed]
+    guides_of_models = prompters.part([o["id"] for o in full if o.get("prompt_guide")])
     parts = [("always", "Always on:\n" + (kit.described(project_cast or []) or "(none)")),
              ("book", "NeuralCore, the project's memory (its characters, locations, props, voices and scripts by name, and its items):\n" + ("\n".join(json.dumps(entry, ensure_ascii=False) for entry in book)
                                                        or "(empty: nothing is saved for reuse yet)")),
              *([("skills", skills_part(guides))] if guides else []),
              *([("catalogue", "Other skills (load one with read_skill, \"op\" its id and \"query\" 0, only when the user names it "
                  "or the skill in use calls for it; never because the message fits it):\n" + catalogue)] if catalogue else []),
-             ("workflows", "Workflows:\n" + "\n".join(json.dumps(o) for o in offers)),
+             ("workflows", workflows_part(offers, full)),
              *([("prompting", PROMPT_GUIDES + guides_of_models)] if guides_of_models else []),
              ("direction", "Direction, the notes of this conversation that you keep (they stand in for turns no longer shown; when "
              "something durable changes, answer with the whole updated direction in \"direction\", else repeat it as it is):\n"
@@ -1671,6 +1674,66 @@ def question_parts(instruction, offers, selection, default="", history=(), proje
              *([("explain", EXPLAIN if explain else EXPLAIN_OFF)] if explain is not None else []),
              ("message", "The user's new message:\n" + instruction)]
     return parts
+
+
+# Words that show which kinds of workflow a message is about. A workflow is told in full (its settings, references and
+# prompt tips, and its model's prompt guide: 2,000 to 12,000 characters for a video one) only when its kind is one the
+# message is about; the others go as one line each, and the model reads one in full with workflow_info when it needs it.
+KIND_WORDS = {
+    "video": re.compile(r"\b(videos?|clips?|animat\w*|motion|films?|movies?|trailers?|reels?|shots?|scenes?|footage|seconds?|"
+                        r"secs?|lip ?sync\w*|talking|danc\w*|moving|camera|ads?|commercials?|promos?|story|episodes?|cut|edit\w*|"
+                        r"extend|continue)\b", re.IGNORECASE),
+    "image": re.compile(r"\b(images?|pictures?|photo\w*|pics?|posters?|portraits?|stills?|illustrat\w*|draw\w*|paint\w*|logos?|"
+                        r"thumbnails?|wallpapers?|sheets?|artwork|art|renders?|frames?|characters?|looks?|styles?|designs?|"
+                        r"covers?|mood ?boards?|storyboards?)\b", re.IGNORECASE),
+    "audio": re.compile(r"\b(songs?|music\w*|sounds?|audio|voices?|voiceovers?|narrat\w*|speech|speak\w*|sing\w*|lyrics|"
+                        r"soundtracks?|bgm|jingles?|podcasts?|tts|dialog\w*|dialogue|transcri\w*|beats?|tunes?|melod\w*)\b",
+                        re.IGNORECASE),
+}
+WORKFLOW_KINDS = tuple(KIND_WORDS)
+
+
+def likely_kinds(texts):
+    """The kinds of workflow these words (the new message, the user's turns before it) are about; every kind when they
+    don't say (a message such as "go ahead" or "make it brighter") or are in another language (the words are English)."""
+    found = set()
+    for text in texts:
+        text = str(text or "")
+        if not text.isascii():
+            return set(WORKFLOW_KINDS)
+        found |= {kind for kind, words in KIND_WORDS.items() if words.search(text)}
+    return found or set(WORKFLOW_KINDS)
+
+
+def workflow_line(offer):
+    """A workflow in one line, for the kinds a message is not about: enough to know it is there and what it is for."""
+    line = {"id": offer["id"], "title": offer["title"], "makes": offer["makes"], "about": offer["about"][:120]}
+    if offer.get("pick_when"):
+        line["pick_when"] = offer["pick_when"][:160]
+    if offer.get("default"):
+        line["default"] = True
+    return line
+
+
+def workflows_part(offers, full):
+    """The "workflows" part of the message: every workflow the agent may use, those in `full` in full and the rest in one
+    line each (workflow_info gives one of those in full)."""
+    shown = {o["id"] for o in full}
+    if len(shown) == len(offers):
+        return "Workflows:\n" + "\n".join(json.dumps(o) for o in offers)
+    return ("Workflows (every one you may use: those of the kinds this message is about in full, the others in one line; "
+            "before you plan a step with one of those, call workflow_info with its id for its settings, references and "
+            "prompt guide):\n" + "\n".join(json.dumps(o if o["id"] in shown else workflow_line(o)) for o in offers))
+
+
+def workflow_info(offers, wanted):
+    """workflow_info's answer: one workflow the agent may use, in full, with its model's prompt guide."""
+    wanted = str(wanted or "").strip()
+    offer = next((o for o in offers if o["id"] == wanted), None)
+    if offer is None:
+        return "There is no workflow \"{}\" you can use here. The ones you can: {}.".format(wanted[:80], ", ".join(o["id"] for o in offers))
+    guide = prompters.part([offer["id"]]) if offer.get("prompt_guide") else ""
+    return json.dumps(offer) + ("\n\n" + PROMPT_GUIDES + guide if guide else "")
 
 
 ALWAYS_SENT = ("history", "attached", "message")   # parts follow_up() does not compare: history is left out, the rest always goes

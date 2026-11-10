@@ -74,3 +74,32 @@ def test_someone_elses_item_is_not_found(client):
     client.post("/api/auth/logout")
     register(client, email="other@local.test", name="Other")
     assert client.get("/api/library/{}".format(item)).status_code == 404
+
+
+def test_the_whole_list_is_written_out_as_it_was_without_walking_every_value(client, monkeypatch):
+    """GET /api/library (and all=1, the canvas) is written as JSON directly, off the event loop: FastAPI's
+    jsonable_encoder took two thirds of the time of a list of 20,000 items. What is sent is the same."""
+    import json as _json
+    from fastapi import encoders, routing
+    from scene.api import library
+
+    me = register(client)
+    client.app.state.db.run(
+        "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, seconds, created) "
+        "VALUES (?, 'image/x', 'image', 'Café ☕', 'c.png', ?, ?, 2.5, ?)",
+        (me["id"], _json.dumps({"values": {"100:value": "naïve", "n": [1, 2.5, None, True]}}), _json.dumps({"width": 64}), time.time()))
+    walked = []
+    real = routing.jsonable_encoder
+    monkeypatch.setattr(routing, "jsonable_encoder", lambda value, *a, **k: walked.append(1) or real(value, *a, **k))
+    for query in ("", "?all=1", "?limit=5"):
+        response = client.get("/api/library" + query)
+        assert response.headers["content-type"] == "application/json" and "Café ☕".encode() in response.content
+        item = response.json()["items"][0]
+        assert item["settings"] == {"values": {"100:value": "naïve", "n": [1, 2.5, None, True]}} and item["context"] == {"width": 64}
+        assert item["mine"] is True and "made_by" not in item and "user_id" not in item and item["seconds"] == 2.5
+        expected = encoders.jsonable_encoder({"items": [library._shown(dict(row), me) for row in client.app.state.db.all(
+            "SELECT g.*, j.cost, p.name AS project_name, u.name AS made_by FROM generations g LEFT JOIN jobs j ON j.id = g.job_id "
+            "LEFT JOIN projects p ON p.id = g.project_id LEFT JOIN users u ON u.id = g.user_id WHERE g.user_id = ?", (me["id"],))]})
+        assert response.json()["items"] == expected["items"]
+    assert response.json()["next_cursor"] is None
+    assert walked == []   # no item went through jsonable_encoder

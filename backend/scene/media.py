@@ -5,7 +5,9 @@ or from the system if that package is missing.
 """
 
 import asyncio
+import contextlib
 import glob
+import os
 import weakref
 import re
 import time
@@ -89,15 +91,67 @@ def _poster_gate():
     return _poster_gates[loop]
 
 
+def fresh(target, source):
+    """Whether a poster or frame made from `source` is there, whole, and newer than it."""
+    try:
+        made = target.stat()
+    except FileNotFoundError:
+        return False
+    return made.st_size > 0 and made.st_mtime >= source.stat().st_mtime
+
+
+# One maker per poster or frame (its path), per event loop: a new result's poster is asked for at once by the studio
+# (make_poster_soon) and by the canvas loading it, and two ffmpegs writing one file gave the page an empty or half-made
+# picture (a 500 under load). The others wait for it and are given the one made.
+_making = weakref.WeakKeyDictionary()
+
+
+@contextlib.asynccontextmanager
+async def making(target):
+    locks = _making.setdefault(asyncio.get_running_loop(), {})
+    key = str(target)
+    lock, users = locks.get(key) or (asyncio.Lock(), 0)
+    locks[key] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        lock, users = locks[key]
+        if users <= 1:
+            del locks[key]
+        else:
+            locks[key] = (lock, users - 1)
+
+
+def _partial(target):
+    """Where a poster or frame is written before it is put in place whole: "shot.mp4.jpg" -> "shot.mp4.partial.jpg"
+    (ffmpeg picks its format from the last suffix)."""
+    return target.with_name(target.name[:-len(target.suffix)] + ".partial" + target.suffix)
+
+
+def _put_in_place(partial, target, tries=20):
+    """Move a finished file over the one the page is given. On Windows a file still being sent (an older poster) can't
+    be replaced: tried again for two seconds. Call it off the event loop."""
+    for attempt in range(tries):
+        try:
+            return os.replace(partial, target)
+        except PermissionError:
+            if attempt == tries - 1:
+                partial.unlink(missing_ok=True)
+                raise
+            time.sleep(0.1)
+
+
 async def poster(video):
     """A small still from the start of a video, or a small copy of a picture, for its thumbnail. Made once and kept."""
     target = poster_path(video)
-    if target.is_file() and target.stat().st_mtime >= video.stat().st_mtime:
+    if fresh(target, video):
         return target
-    async with _poster_gate():
-        if target.is_file() and target.stat().st_mtime >= video.stat().st_mtime:   # made while this one waited
+    async with making(target):
+        if fresh(target, video):   # made while this one waited
             return target
-        return await _make_poster(video, target)
+        async with _poster_gate():
+            return await _make_poster(video, target)
 
 
 on_removed = None   # told each file remove_result deletes (main.py sets it: the storage deletes its copy too)
@@ -166,26 +220,34 @@ async def make_poster_soon(path):
 
 async def _make_poster(video, target):
     target.parent.mkdir(exist_ok=True)
-    target.unlink(missing_ok=True)
+    partial = _partial(target)
+    partial.unlink(missing_ok=True)
     scale = "scale='min({},iw)':-2".format(POSTER_WIDTH)
     # A clip shorter than 0.1 s has no frame there. A still picture (a JPEG) gives nothing after any -ss, even 0, so the
     # last try reads it without one.
     for start in ("0.1", "0", None):
         seek = ("-ss", start) if start else ()
         await _ffmpeg("-loglevel", "error", *seek, "-i", video, "-frames:v", "1", "-vf", scale, "-q:v", "3",
-                      "-update", "1", target, check=False)
-        if target.is_file() and target.stat().st_size:
+                      "-update", "1", partial, check=False)
+        if partial.is_file() and partial.stat().st_size:
+            await asyncio.to_thread(_put_in_place, partial, target)
             return target
+    partial.unlink(missing_ok=True)
     raise MediaError("That video can't be read.")
 
 
 async def frame_at(video, seconds, target, width=POSTER_WIDTH):
     """Save the frame of a video at `seconds` as a JPEG no wider than `width`. Returns the target, or None when the
-    video has no frame there."""
-    target.unlink(missing_ok=True)
+    video has no frame there. Written beside it and put in place whole, so a page never reads half of one."""
+    partial = _partial(target)
+    partial.unlink(missing_ok=True)
     await _ffmpeg("-loglevel", "error", "-ss", "{:.3f}".format(max(0.0, seconds)), "-i", video, "-frames:v", "1",
-                  "-vf", "scale='min({},iw)':-2".format(width), "-q:v", "3", "-update", "1", target, check=False)
-    return target if target.is_file() and target.stat().st_size else None
+                  "-vf", "scale='min({},iw)':-2".format(width), "-q:v", "3", "-update", "1", partial, check=False)
+    if not (partial.is_file() and partial.stat().st_size):
+        partial.unlink(missing_ok=True)
+        return None
+    await asyncio.to_thread(_put_in_place, partial, target)
+    return target
 
 
 async def changes(video):

@@ -198,3 +198,28 @@ def test_a_long_skill_goes_first_and_the_tokens_are_counted(client, monkeypatch,
     assert "A rule of the run." in system and "A rule of the run." not in message
     assert plan["tokens"] == {"prompt": 18000, "cached": 8000, "written": 0, "answer": 100}
     assert any(e.get("text") == "Read 18,000 tokens (8,000 from the cache) and wrote 100" for e in plan["activity"])
+
+
+def test_the_runs_listed_are_the_newest_with_their_statuses_in_one_query(client, monkeypatch):
+    """GET /api/runs was every run the user ever had, with one more query per run for its status."""
+    me = register(client)
+    db = client.app.state.db
+    for number in range(120):
+        run = "pm-{}".format(number)
+        runs.write(db, me["id"], run, "/a/one", number)
+        if number % 3 == 0:
+            runs.write(db, me["id"], run, "/scene/status", "scene {}".format(number))
+        db.change("UPDATE run_state SET updated = ? WHERE user_id = ? AND run = ?", (1000.0 + number, me["id"], run))
+    db.change("UPDATE run_state SET updated = 1119.5 WHERE user_id = ? AND run = 'pm-117' AND path = '/scene/status'", (me["id"],))
+    asked = []
+    for name in ("one", "all"):
+        real = getattr(db, name)
+        monkeypatch.setattr(db, name, lambda *a, real=real, **k: asked.append(a[0]) or real(*a, **k))
+    listed = runs.listing(db, me["id"])
+    assert len(asked) == 1 and len(listed) == runs.LISTED == 100
+    assert [r["run"] for r in listed[:3]] == ["pm-117", "pm-119", "pm-118"] and listed[-1]["run"] == "pm-20"
+    assert [(r["paths"], r["status"]) for r in listed[:3]] == [(2, "scene 117"), (1, None), (1, None)]
+    assert next(r for r in listed if r["run"] == "pm-111")["status"] == "scene 111"
+    monkeypatch.undo()
+    assert len(client.get("/api/runs", params={"limit": 5}).json()["runs"]) == 5
+    assert client.get("/api/runs", params={"limit": 0}).status_code == 422
