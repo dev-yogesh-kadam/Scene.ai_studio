@@ -4,10 +4,23 @@ workflows) and one row per turn in `conversation_messages`. The pages still read
 from the rows and keeps it in them. Sync (it queries): called through db.offload from async code."""
 
 import json
+import threading
 import time
 
 # The same tab as its board was found: by the user, the project (0 or None for all work, in no project) and the tab id.
 WHERE = "user_id = ? AND project_id IS NOT DISTINCT FROM NULLIF(?, 0) AND tab = ?"
+
+# One write of a conversation at a time in this process. write() is one statement, and its DELETE sees the turns as
+# they were when it began: a second save of the same tab that waited for the first (two windows, the phone and the
+# studio) would not see the first one's turns and keep both, the conversation twice over. Several processes (Azure's
+# replicas) would need it in the database too: the conversation's row locked first, in a transaction of its own.
+_writing, _locks = {}, threading.Lock()
+
+
+def _one_at_a_time(user_id, project_id, tab):
+    key = (int(user_id), int(project_id or 0), str(tab))
+    with _locks:
+        return _writing.setdefault(key, threading.Lock())
 
 
 def read(db, user_id, project_id, tab):
@@ -25,6 +38,11 @@ def read(db, user_id, project_id, tab):
 def write(db, user_id, project_id, tab, data):
     """Keep the conversation the page sent (its whole JSON), in one statement: its own keys, and its turns in place of
     the ones before. A page reading at the same moment sees the one before or this one, never half of each."""
+    with _one_at_a_time(user_id, project_id, tab):
+        _write(db, user_id, project_id, tab, data)
+
+
+def _write(db, user_id, project_id, tab, data):
     runs = data.get("runs")
     has_runs = isinstance(runs, list)
     meta = {k: v for k, v in data.items() if k != "runs"} if has_runs else data
@@ -45,7 +63,8 @@ def write(db, user_id, project_id, tab, data):
 
 def delete(db, user_id, project_id, tab):
     """Forget a tab's conversation (its turns go with it)."""
-    db.run("DELETE FROM conversations WHERE " + WHERE, (user_id, project_id or 0, tab))
+    with _one_at_a_time(user_id, project_id, tab):
+        db.run("DELETE FROM conversations WHERE " + WHERE, (user_id, project_id or 0, tab))
 
 
 def waiting(db, user_id, most=30):

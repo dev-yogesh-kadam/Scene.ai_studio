@@ -92,3 +92,35 @@ def test_boards_become_conversations_and_go_back_with_what_was_said_since(scratc
         conn.execute("SELECT set_config('app.user_id', 'all', false)")
         data = conn.execute("SELECT data FROM boards WHERE kind = %s", (TAB,)).fetchone()[0]
     assert data == dict(CONVERSATION, folded=2)
+
+
+def test_two_saves_of_one_tab_at_once_keep_one_of_them_never_both(client):
+    """write() is one statement whose DELETE sees the turns as they were when it began: a save that waited for another
+    (here both wait for a lock a third connection holds on the conversation) kept its turns and the other's too."""
+    import threading
+    import time
+    from scene import conversations
+    me = register(client)
+    db = client.app.state.db
+    conversations.write(db, me["id"], 0, "race", {"runs": [{"n": 0}]})
+    found = db.one("SELECT id FROM conversations WHERE tab = 'race'")["id"]
+    holder = psycopg.connect(POSTGRES)
+    holder.execute("SELECT set_config('app.user_id', %s, false)", (str(me["id"]),))
+    assert holder.execute("SELECT id FROM conversations WHERE id = %s FOR UPDATE", (found,)).fetchall()
+    failed = []
+
+    def save(n):
+        try:
+            conversations.write(db, me["id"], 0, "race", {"runs": [{"n": n}, {"n": n}]})
+        except Exception as error:
+            failed.append(error)
+    savers = [threading.Thread(target=save, args=(n,)) for n in (1, 2)]
+    for saver in savers:
+        saver.start()
+    time.sleep(0.5)
+    holder.commit()
+    holder.close()
+    for saver in savers:
+        saver.join(10)
+    turns = conversations.read(db, me["id"], 0, "race")["runs"]
+    assert not failed and turns in ([{"n": 1}, {"n": 1}], [{"n": 2}, {"n": 2}])
