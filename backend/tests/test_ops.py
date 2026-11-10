@@ -261,3 +261,33 @@ def test_the_files_copied_with_the_backups_include_the_kits_uploads(client):
     assert state.backup_files["outputs"] == state.output_dir
 
 
+# ---------------------------------------------------------------- Docker
+
+def test_the_compose_stack_is_its_own_project_on_ports_that_can_move_and_its_logs_rotate():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert re.search(r"(?m)^name: scene-docker$", compose)                 # never mixed with the langfuse project
+    block = compose.split("\nservices:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+    services = re.findall(r"(?m)^  ([a-z]+):$", block)
+    assert services == ["db", "blob", "redis", "migrate", "app"]
+    assert compose.count("logging: *logging") == len(services)
+    assert 'max-size: "10m"' in compose and 'max-file: "5"' in compose
+    for port in ("SCENE_DOCKER_PORT:-8080", "SCENE_DOCKER_CONSOLE_PORT:-8090", "SCENE_DOCKER_BLOB_PORT:-10000"):
+        assert "127.0.0.1:${%s}:${%s}" % (port, port) in compose
+    assert "SCENE_PORT: ${SCENE_DOCKER_PORT:-8080}" in compose
+    assert "BlobEndpoint=http://127.0.0.1:${SCENE_DOCKER_BLOB_PORT:-10000}/" in compose
+    assert not re.search(r'"(127\.0\.0\.1:)?\d+:\d+"', compose)            # no port fixed in place
+
+
+def test_the_image_has_hyperframes_with_its_chrome_and_node():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert re.search(r"(?m)^FROM node:\S+ AS motion$", dockerfile)
+    assert "npm ci" in dockerfile.split("AS motion", 1)[1].split("FROM ", 1)[0]
+    assert "hyperframes.mjs browser ensure" in dockerfile
+    assert "HYPERFRAMES_BROWSER_PATH=/opt/hyperframes/chrome-headless-shell" in dockerfile
+    for copied in ("COPY --from=motion /usr/local/bin/node", "COPY --from=motion /app/motion motion",
+                   "COPY --from=motion /opt/hyperframes /opt/hyperframes", "COPY apps/web/public/fonts"):
+        assert copied in dockerfile, copied
+    assert "chown scene /data /app/motion/.fonts" in dockerfile              # the one folder HyperFrames writes in
+    assert str(motion.FONT.relative_to(ROOT)).replace(os.sep, "/").startswith("apps/web/public/fonts")
+
+
