@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { readLines } from './stream';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setOnUnauthorized } from './client';
+import { readLines, requestLines } from './stream';
 
 function streamOf(...chunks: string[]) {
   const encoder = new TextEncoder();
@@ -46,5 +47,23 @@ describe('readLines', () => {
     const seen: unknown[] = [];
     await readLines(stream, (line) => seen.push(line));
     expect(seen).toEqual([{ say: 'café' }]);
+  });
+});
+
+describe('requestLines', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setOnUnauthorized(null);
+  });
+
+  it('a 401 (the session ended) is said to the studio, as request() says it, and thrown', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ detail: 'Not signed in.' }), { status: 401 })),
+    );
+    const refused: string[] = [];
+    setOnUnauthorized((path) => refused.push(path));
+    await expect(requestLines('/api/agent/plan', { json: {} })).rejects.toMatchObject({ status: 401 });
+    expect(refused).toEqual(['/api/agent/plan']);
   });
 });

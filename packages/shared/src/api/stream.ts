@@ -2,7 +2,7 @@
 // for each object as it arrives; the server's pings (sent while it is quiet, so the connection stays open) are skipped.
 // Errors before the answer starts are thrown like request() throws them. Cancel it with an AbortSignal.
 
-import { ApiError, reasonOf } from './client';
+import { ApiError, reasonOf, unauthorized } from './client';
 
 export type Line = { type?: string; [key: string]: unknown };
 
@@ -10,7 +10,8 @@ export async function requestLines(
   path: string,
   { json, signal }: { json?: unknown; signal?: AbortSignal } = {},
   onLine: (line: Line) => void = () => {},
-  onUnauthorized: (() => void) | null = null,
+  // a 401 means the session ended: the studio's handler (setOnUnauthorized) takes the user back to sign in, as for request()
+  onUnauthorized: (() => void) | null = () => unauthorized(path),
 ) {
   const response = await fetch(path, {
     method: 'POST',
