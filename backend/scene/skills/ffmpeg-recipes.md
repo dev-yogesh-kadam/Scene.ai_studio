@@ -1,6 +1,6 @@
 id: ffmpeg-recipes
 title: ffmpeg recipes — your own commands with the ffmpeg tool
-version: 1
+version: 2
 desc: Load before writing a command for the ffmpeg tool, and again when one fails: the rules of its folder, quoting, and tested commands for cutting, joining, fitting, grading, effects, sound, captions and measuring.
 words: (?!)
 guide: true
@@ -12,12 +12,12 @@ the picture: look at a clip first, then cut it. It is free and quick (most comma
 
 Use the film tool's own ops when one does exactly the job (they are tested and keep their findings in the run):
 subtitles for captions from lines, film for shots on the master audio, beat_cut, multicam, composite, keyframes,
-board, gif, audio_check. Use this op for everything else, and for a look those ops can't give. Words that need design
+board, gif, audio_check. Use this tool for everything else, and for a look those ops can't give. Words that need design
 (a title, a lower third, a card) are an html page (the html-scenes skill), not drawtext.
 
 ## The job
 
-film, op "ffmpeg", settings:
+The ffmpeg tool's fields:
 ```
 {"argv": ["-i", "a.mp4", "-vf", "scale=1080:-2", "-c:v", "libx264", "-crf", "18", "out.mp4"],
  "inputs": [{"name": "a.mp4", "item": 4211}],

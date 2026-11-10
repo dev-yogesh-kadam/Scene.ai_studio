@@ -3,8 +3,11 @@ This is the one place a tool is described. Claude's live session offers them as 
 the in-process MCP server "studio"); agent.native_tools() reads them from here. What each tool does is in
 api/workspace.py (the functions in `tools` of the planning endpoint).
 
-A field that carries structured data is a real JSON type here (an object, an array). The tool functions still take
-the same data as JSON text, as sessions begun before typed schemas send it.
+A field that carries structured data is a real JSON type here (an object, an array). The Agent SDK checks every call
+against these schemas before the tool runs, and answers a call that does not fit with what is wrong ("... is not of
+type 'object'"), which the model then puts right; the tool functions also take the data as JSON text, as sessions
+begun before typed schemas sent it. Keep an enum off a field an older session may fill with a value it no longer has
+(film's "op"): the tool itself answers that one better.
 """
 
 from . import edits
@@ -188,7 +191,10 @@ TOOLS = {
         "transparent, the colour taken away, or \"kept\" when it was not flat) and, for an SVG, \"shapes\". Use it before any "
         "page shows the logo.",
         {"type": "object", "required": ["op", "settings"], "properties": {
-            "op": _field(S, "The operation.", enum=list(FILM_OPS)),
+            # No enum: Claude Code checks a call against this schema before the studio sees it, and a session begun
+            # when html and ffmpeg were ops of film still names them; the tool answers those (and any op it has not)
+            # with what to call instead (agent.film_op_unknown, agent.FILM_MOVED).
+            "op": _field(S, "The operation, one of: " + ", ".join(FILM_OPS) + "."),
             "settings": _field({"type": "object"}, "The operation's fields, as listed for its op. \"$state:/path\" stands for "
                                                   "the id kept at that path, and \"$state:/folder/*\" for every leaf of a folder.")}}),
     "render_html": (

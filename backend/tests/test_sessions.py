@@ -112,3 +112,35 @@ def test_a_tabs_messages_go_on_in_one_session_that_is_recorded_and_compacted(cli
     kinds = [e["kind"] for e in desk.get("/api/admin/sessions/" + row["ref"]).json()["events"]]
     assert kinds[:4] == ["user", "prompt", "text", "answer"]
     assert "model" in kinds and "note" in kinds and "compact" in kinds and kinds.count("user") == 3
+
+    # "Compact now" from the panel: the tab's session, compacted, and its row told how full it is now (read and kept on
+    # the database's threads: they were read on the event loop, which the tests' loop guard refuses)
+    done = client.post("/api/agent/session/compact", json={"run": "tab1", "project_id": film["id"]})
+    assert done.status_code == 200 and done.json()["context"]["tokens"] == 30_000 and compacted == ["s-1", "s-1"]
+
+
+def test_the_agents_async_code_never_waits_on_the_database_in_the_event_loop():
+    """A plain call of runs, sessions or conversations (each queries the database) inside an async function of
+    api/workspace.py would block the event loop: they go through offload. Read from the source, so a path no test
+    reaches (a skill handed on in a long run) is checked too."""
+    import ast
+    from pathlib import Path
+    from scene.api import workspace
+    tree = ast.parse(Path(workspace.__file__).read_text(encoding="utf-8"))
+    queries = {"runs": ("kept_thread", "keep_thread", "threads_of", "kept_skill", "keep_skill", "kept_attached", "keep_attached",
+                        "read", "write", "delete", "leaves"),
+               "sessions": ("open_row", "record", "update", "listing", "one", "events"),
+               "conversations": ("read", "write", "delete", "waiting"),
+               "state.db": ("one", "all", "run", "change", "setting", "set_setting"),
+               "request.app.state.db": ("one", "all", "run", "change", "setting", "set_setting")}
+    found = []
+
+    def walk(node, in_async):
+        for child in ast.iter_child_nodes(node):
+            inside = isinstance(child, ast.AsyncFunctionDef) or (in_async and not isinstance(child, (ast.FunctionDef, ast.Lambda)))
+            if inside and isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) \
+                    and child.func.attr in queries.get(ast.unparse(child.func.value), ()):
+                found.append("{}: {}".format(child.lineno, ast.unparse(child.func)))
+            walk(child, inside)
+    walk(tree, False)
+    assert found == []

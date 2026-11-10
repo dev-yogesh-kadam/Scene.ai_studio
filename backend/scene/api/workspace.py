@@ -154,7 +154,7 @@ async def _compact_session(body, request, user):
     state = request.app.state
     project = await offload(_project_id, request, user, body.get("project_id"))
     run, hosted = _thread_run(body), _hosted_claude(state)
-    thread = runs.kept_thread(state.db, user["id"], run, project) if run else None
+    thread = await offload(runs.kept_thread, state.db, user["id"], run, project) if run else None
     if not hosted or not thread or not thread.get("id"):
         raise HTTPException(400, "This conversation has no Claude session to compact yet.")
     thread["key"] = "{}:{}:{}".format(user["id"], run, project or 0)
@@ -170,8 +170,8 @@ async def _compact_session(body, request, user):
     except claude.Failed as error:
         thread["record"]("error", str(error))
         raise HTTPException(502, str(error))
-    runs.keep_thread(state.db, user["id"], run, project, {k: v for k, v in thread.items() if k not in THREAD_NOT_KEPT})
-    sessions.update(state.db, row["id"], context_tokens=thread.get("size") or 0)
+    await offload(runs.keep_thread, state.db, user["id"], run, project, {k: v for k, v in thread.items() if k not in THREAD_NOT_KEPT})
+    await offload(sessions.update, state.db, row["id"], context_tokens=thread.get("size") or 0)
     return {"context": sessions.context(thread.get("size") or 0, hosted["window"])}
 
 
@@ -1675,7 +1675,7 @@ async def _planning(request, user, body, instruction, project):
                         "for it: finish its steps first, or ask the user whether to switch to “{}”.".format(in_use["title"], skill["title"]))
             # the run carries on with the skill it was handed to; a craft skill is a part of the one in use, which stays the run's
             if handed and run and len(skill["text"]) > CHECKED_SKILL and not skill["craft"]:
-                runs.keep_skill(state.db, user["id"], run, skill["id"])
+                await offload(runs.keep_skill, state.db, user["id"], run, skill["id"])
                 noted("skill", "Handed on from “{}” to “{}”".format(under_way["title"], skill["title"]))
             picked.append(skill)
             turn["tags"].append(skill["id"])   # Langfuse's trace says it too, from the next call on
@@ -1941,18 +1941,21 @@ async def _planning(request, user, body, instruction, project):
 
     async def film_op(call):
         """One film operation, queued and waited for (they are quick, free and made on this machine). html and ffmpeg
-        are tools of their own now (render_html, ffmpeg); a session begun before still names them here."""
-        if call.get("op") not in edits.FILM:
-            return "op must be one of: {}.".format(", ".join(edits.FILM))
+        are tools of their own now (render_html, ffmpeg); a session begun before still names them here: they still run,
+        and the answer says which tool to call next time. An op there is not gets the list, and those two tools named."""
+        op = call.get("op")
+        if op not in edits.FILM:
+            return agent.film_op_unknown(op)
         try:
             settings = _structured(call.get("settings"))
             if not isinstance(settings, dict):
                 raise ValueError
         except ValueError:
             return "settings must be an object of the operation's fields."
-        if call["op"] == "html" and not settings.get("html"):   # the page came as it is in "value", not inside the JSON
+        if op == "html" and not settings.get("html"):   # the page came as it is in "value", not inside the JSON
             settings["html"] = call.get("value") or ""
-        return await film_done(call["op"], settings)
+        done = await film_done(op, settings)
+        return done + agent.FILM_MOVED_NOTE.format(op=op, tool=agent.FILM_MOVED[op]) if op in agent.FILM_MOVED else done
 
     async def render_html(call):
         """A page or a motion project drawn by HyperFrames: the film tool's html op."""

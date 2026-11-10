@@ -9,7 +9,6 @@ import json
 import math
 import re
 import time
-import uuid
 
 from . import agent_tools, camera, claude, kit, prompters, sequence
 from .db import offload
@@ -708,6 +707,17 @@ def native_rules():
             "A state_write and a call that names that path by $state: may go together: the write is done first.\n\n" + TOOL_RULES)
 
 
+FILM_MOVED = {"html": "render_html", "ffmpeg": "ffmpeg"}   # the film tool's ops that are tools of their own now
+FILM_MOVED_NOTE = "\n(film's {op} op is the {tool} tool now: call {tool} next time, with the same fields.)"
+
+
+def film_op_unknown(op):
+    """The film tool's answer to an op it does not have: what to call instead (a session from before render_html and
+    ffmpeg were tools of their own may still name them in other words)."""
+    return ("film has no op {}. A page or a motion project is drawn with the render_html tool, and your own ffmpeg command "
+            "runs with the ffmpeg tool. film's ops are: {}.").format(json.dumps(op, ensure_ascii=False)[:80], ", ".join(agent_tools.FILM_OPS))
+
+
 def native_tools(names):
     """{name: (what it does, its input schema)} of the studio's tools named, for claude.converse (agent_tools.TOOLS)."""
     return {name: agent_tools.TOOLS[name] for name in TOOLS if name in names and name in agent_tools.TOOLS}
@@ -1158,17 +1168,15 @@ class Agent:
         s, name = self._service_of(model)
         if s is None:
             raise AgentError("The agent has no Claude to work with: Claude Code is not installed and signed in on the studio's PC.")
-        # A message with no conversation (no agent tab) gets a session of its own, closed and forgotten once answered.
-        oneoff = thread is None
-        if oneoff:
-            thread = {"key": "oneoff:" + uuid.uuid4().hex, "id": None}
-        try:
+        # A message with no conversation (no agent tab) gets a session of its own, closed and forgotten once it ends,
+        # answered or not (claude.oneoff). A tab's session is held for the whole message: never closed to make room.
+        if thread is None:
+            async with claude.oneoff(s) as thread:
+                return await self._ask_claude_live(s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread,
+                                                   web, reply_chars)
+        with claude.holding(claude.key_of(thread)):
             return await self._ask_claude_live(s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web,
                                                reply_chars)
-        finally:
-            if oneoff:
-                await claude._close(thread["key"])
-                claude.forget(s, thread.get("id"))
 
     async def _ask_claude_live(self, s, name, model, system, message, workflow_ids, tools, finishing, rounds, thread, web=False,
                                reply_chars=REPLY_CHARS):
@@ -1188,8 +1196,9 @@ class Agent:
             except claude.Lost as error:
                 raise ContextLost(str(error))
             except claude.Failed as error:
-                self._record("plan", None, model, started, [{"role": "system", "content": system}, {"role": "user", "content": text}],
-                             shape, (), error=str(error))
+                # written on the database's threads, as chat() does: the record is a row and a file of the whole call
+                await offload(self._record, "plan", None, model, started, [{"role": "system", "content": system},
+                                                                           {"role": "user", "content": text}], shape, (), error=str(error))
                 raise AgentError(str(error))
             self.claude_limits = limits or self.claude_limits
             used += [*called, "finish"]
@@ -1201,8 +1210,9 @@ class Agent:
             if not isinstance(answer, dict):
                 raise AgentError("The agent's model gave an answer that can't be read. Try again.")
             answer.update(_model=model, _usage=usage)
-            self._record("plan", model, model, started, [{"role": "system", "content": system}, {"role": "user", "content": text}],
-                         shape, (), content=answer, usage=usage, tool=",".join(called) or None)
+            await offload(self._record, "plan", model, model, started, [{"role": "system", "content": system},
+                                                                        {"role": "user", "content": text}],
+                          shape, (), content=answer, usage=usage, tool=",".join(called) or None)
             empty = not str(answer.get("reply") or "").strip() and not answer.get("steps") and not clean_question(answer.get("question")) \
                     and not clean_questions(answer.get("questions"))
             if fixes == FIX_ROUNDS:

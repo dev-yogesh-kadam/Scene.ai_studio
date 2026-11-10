@@ -26,8 +26,11 @@ def test_structured_fields_are_real_json_types():
     # the fixed sets are enums
     assert tools["memory"][1]["properties"]["op"]["enum"] == ["remember", "recall", "forget"]
     assert "character" in tools["book_save"][1]["properties"]["op"]["enum"]
-    film_ops = tools["film"][1]["properties"]["op"]["enum"]
-    assert set(film_ops) == set(edits.FILM) - {"html", "ffmpeg"} and "trim" in film_ops and "logo" in film_ops
+    # ...but not film's op: a session from before render_html and ffmpeg were tools still sends op "html" or "ffmpeg",
+    # which the SDK would refuse with a bare "not one of [...]" before film could say what to call instead
+    film_op = tools["film"][1]["properties"]["op"]
+    assert "enum" not in film_op and set(agent_tools.FILM_OPS) == set(edits.FILM) - {"html", "ffmpeg"}
+    assert all(op in film_op["description"] for op in agent_tools.FILM_OPS) and "trim" in agent_tools.FILM_OPS
 
 
 def test_the_written_ops_are_tools_of_their_own():
