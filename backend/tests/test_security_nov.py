@@ -53,3 +53,31 @@ def test_a_new_account_starts_with_the_credits_the_studio_gives(client):
     assert account(client).json()["credits"] == 500      # the tests' signup_credits
     client.app.state.settings.signup_credits = 0
     assert account(client, "eve@example.com").json()["credits"] == 0
+
+
+# ---------------------------------------------------------------- rate limits
+
+def test_the_expensive_paths_are_limited_per_user(client):
+    account(client)
+    limit = security.LIMITS
+    for path, name in (("/api/library/import", "import"), ("/api/agent/plans", "plan"), ("/api/edit/film", "render")):
+        answers = [client.post(path, json={}).status_code for _ in range(limit[name][0] + 1)]
+        assert 429 not in answers[:-1] and answers[-1] == 429, (path, answers[-3:])
+    over = client.post("/api/edit/film", json={})
+    assert over.status_code == 429 and int(over.headers["retry-after"]) >= 1
+    # Another user has counts of their own.
+    account(client, "eve@example.com")
+    assert client.post("/api/edit/film", json={}).status_code != 429
+
+
+def test_an_agent_tool_can_ask_whether_its_user_is_over_the_limit(client):
+    import asyncio
+    from scene.api.deps import allowed
+    state = client.app.state
+    most = security.LIMITS["page_build"][0]
+
+    async def ask(user_id, times):
+        return [await allowed(state, "page_build", user_id) for _ in range(times)]
+    answers = asyncio.run(ask(1, most + 1))
+    assert all(answers[:-1]) and answers[-1] is False
+    assert asyncio.run(ask(2, 1)) == [True]

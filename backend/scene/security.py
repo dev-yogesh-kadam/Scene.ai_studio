@@ -162,6 +162,19 @@ class RateLimit:
         return max(1, int(recent[0] + seconds - time.time()) + 1)
 
 
+# The limits of the paths that cost real money or real machine time, per signed-in user: (requests, seconds). Routes
+# that share a name share the count (every agent route counts as "agent"; every film, motion or timeline render as
+# "render"). Generous for one person at work, tight for a script or a stolen session run in a loop.
+LIMITS = {
+    "agent": (40, 300),        # a turn of the agent, a review, a storyboard, a reroll, a compaction: Claude's usage
+    "motion": (10, 300),       # writing motion scenes: a Claude call each
+    "page_build": (20, 3600),  # the agent's page writer: a Claude call of its own each
+    "render": (30, 600),       # a film, motion or timeline render, an edit put together: ffmpeg or Chrome on the studio PC
+    "plan": (30, 600),         # an agent plan made, approved, resumed or answered: its steps queue renders
+    "import": (30, 600),       # a file fetched from a link (fetch.py): up to 200 MB each
+}
+
+
 # ---------------------------------------------------------------- two-step sign-in (TOTP, RFC 6238)
 
 TOTP_STEP = 30

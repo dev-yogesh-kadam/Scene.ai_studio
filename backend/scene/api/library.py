@@ -19,7 +19,7 @@ from ..outputs import MAIN_CANVAS
 
 FIRST_MODULE = "Module 1"
 from ..references import media_kind, read_text_upload, read_upload, safe_name, text_kind, upload_reference
-from .deps import current_user, limited, uploading
+from .deps import costly, current_user, limited, uploading
 
 router = APIRouter(prefix="/api", tags=["library"])
 
@@ -192,7 +192,7 @@ async def upload_item(request: Request, user: dict = Depends(current_user)):
 IMPORTED = "upload/link"   # an item brought in from a link on another site
 
 
-@router.post("/library/import")
+@router.post("/library/import", dependencies=[costly("import"), uploading])
 async def import_link(body: dict, request: Request, user: dict = Depends(current_user)):
     """{"url", "project_id"?, "name"?}: the picture, clip or sound at a link on another site, brought into the library
     (see fetch.py for what is fetched and what is refused). Nothing is charged."""

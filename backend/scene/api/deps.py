@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request
 
 from .. import staff
 from ..db import act_for, act_for_everyone, offload
-from ..security import client_address, token_hash
+from ..security import LIMITS, client_address, token_hash
 
 COOKIE = "scene_session"
 # The admin console's sign-in. A browser sends both cookies to both sites (a cookie is kept per host, not per port), so
@@ -93,6 +93,17 @@ def limited(name, limit, seconds, by="user"):
             raise HTTPException(429, "Too many requests. Wait a little and try again.",
                                 headers={"Retry-After": str(await counted(limits.retry_after, key, seconds))})
     return Depends(check)
+
+
+def costly(name):
+    """The limit of one of the expensive paths (security.LIMITS), per signed-in user, as a route's dependency."""
+    return limited(name, *LIMITS[name])
+
+
+async def allowed(state, name, user_id):
+    """Whether this user may use an expensive path once more now (counted when they may), for the work that does not
+    arrive as a route of its own: an agent tool such as page_build."""
+    return await counted(state.limits.allow, "{}|{}".format(name, user_id), *LIMITS[name])
 
 
 # Requests that carry files (uploads, a generation with references) are handled a few at a time: each may hold a file of
