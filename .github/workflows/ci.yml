@@ -1,6 +1,8 @@
 # The checks every push and pull request must pass (T4): the code (types, lint, design tokens, unit tests of the web
 # app, the shared package and the phone site), the backend (pytest on PostgreSQL), the web app built (with its bundle
-# budget) and driven end to end by Playwright against the fake ComfyUI, the smoke test, and scripts/check_models.py.
+# budget) and driven end to end by Playwright against the fake ComfyUI, the phone site built for the smoke test's /m/,
+# the smoke test, the agent's evals in replay (recorded answers: free, never the real Claude), the order check of two test
+# files, and the audits (pip-audit, npm audit, a secret scan). scripts/gate.ps1 and gate.sh run the same on a PC.
 # Nothing here reaches the real render server or anyone's data: every studio is started on a database of its own.
 
 name: CI
@@ -18,6 +20,8 @@ env:
   PYTHON_VERSION: '3.14'
   # The tests' own account (docs/database.md): CREATEDB, so each test studio makes a throwaway database beside it.
   SCENE_TEST_DATABASE_URL: postgresql://scene_test:ci-only@localhost:5432/scene_test
+  # The test studios' ports (docs/ports.md): smoke base+81/+90/+99, Playwright base+181/+190/+199.
+  SCENE_TEST_PORT_BASE: '8100'
 
 jobs:
   code:
@@ -42,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: ci-superuser
         ports: ['5432:5432']
@@ -63,9 +67,32 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -r backend/requirements-dev.txt
-      - name: pytest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: motion/package-lock.json
+      - name: HyperFrames and ffmpeg (the motion graphics tests render; without them they are skipped)
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          npm ci --prefix motion
+      - name: pytest, with coverage
         working-directory: backend
-        run: ../.venv/bin/python -m pytest -q
+        run: ../.venv/bin/python -m pytest -q -p no:cacheprovider --cov=scene --cov=evals --cov-report=term:skip-covered
+      - name: Two test files in the order that once failed (one file's tests never depend on another's)
+        working-directory: backend
+        run: ../.venv/bin/python -m pytest -q -p no:cacheprovider tests/test_claude_sdk.py tests/test_claude.py
+      - name: The agent's evals, replayed (recorded answers through the studio's real checks and pricing; never live here)
+        working-directory: backend
+        run: ../.venv/bin/python -m evals.run --json evals-results.json
+      - name: What the evals found
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-results
+          path: backend/evals-results.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: scripts/check_models.py (here it can only show that it runs; there is no Claude Code on the runner)
         run: .venv/bin/python scripts/check_models.py
 
@@ -74,7 +101,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_PASSWORD: ci-superuser
         ports: ['5432:5432']
@@ -108,6 +135,8 @@ jobs:
       - name: Playwright, against the fake ComfyUI
         working-directory: apps/web
         run: npx playwright test
+      - name: The phone site, built (the smoke test opens /m/)
+        run: npm run build -w apps/mobile
       - name: Smoke test, against the fake ComfyUI
         run: node apps/web/tests/smoke/smoke.mjs --fake-comfy
       - name: What Playwright saw when a test failed
@@ -117,3 +146,34 @@ jobs:
           name: playwright-results
           path: apps/web/test-results/
           retention-days: 7
+
+  audit:
+    name: Audits (report)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the secret scan reads the history too
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: pip-audit of the backend's packages (a report; a known vulnerability is listed in the summary)
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet pip-audit
+          pip-audit -r backend/requirements.txt --progress-spinner off --desc | tee pip-audit.txt
+          { echo '### pip-audit'; echo '```'; cat pip-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: npm audit of what the apps ship (fails on high or critical; moderate and low are reported)
+        run: |
+          npm ci --ignore-scripts
+          npm audit --omit=dev --audit-level=high | tee npm-audit.txt
+          { echo '### npm audit --omit=dev'; echo '```'; tail -40 npm-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Secret scan of the tree and its history (gitleaks; what it finds is shown redacted)
+        # a report until its first run is clean (allow-list the tests' made-up keys in .gitleaks.toml), then blocking
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.18.4 detect --source /repo --redact --no-banner --verbose
