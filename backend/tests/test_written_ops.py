@@ -74,6 +74,25 @@ def test_a_command_a_page_could_have_planted_reaches_nothing_either():
             ffjob.check(["-i", "a.mp4", "o.mp4"], [CLIP], [{"name": name, "content": "x"}], OUT)
 
 
+def test_a_path_relative_to_another_drive_is_refused_too():
+    # E:SceneBackups/x is E:\SceneBackups\x when the job's folder is on C: (a drive's own folder, no slash after it)
+    refused(["-f", "data", "-i", "E:SceneBackups/scene.dump", "-map", "0", "-c", "copy", "-f", "data", "o.txt"],
+            "outside the folder", outputs=[{"name": "o.txt"}])
+    refused(["-i", "D:secret", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vstats_file", "C:Users/LUFI/x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-passlogfile", "E:x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vf", "subtitles=E\\:SceneBackups/x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vf", "drawtext=textfile=C\\:Scene/Data/secrets/x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vf", "drawtext=textfile='E:x'", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-filter_complex_script", "g.txt", "o.mp4"], "outside the folder",
+            sidecars=[{"name": "g.txt", "content": "movie='E:x' [m]; [0][m] overlay"}])
+    # ...while a filter's own w:h, stream options and a caption's "B\: go" are not paths
+    for argv in (["-i", "a.mp4", "-vf", "crop=w:h:0:0,pad=w:h,scale=w=1280:h=720", "-c:v", "libx264", "-b:a", "128k", "o.mp4"],
+                 ["-i", "a.mp4", "-vf", "drawtext=fontfile=Anton-Regular.ttf:text='Plan B\\: go':x=w-tw", "o.mp4"],
+                 ["-i", "a.mp4", "-map", "0:v", "-metadata:s:a:0", "language=eng", "o.mp4"]):
+        ffjob.check(argv, [CLIP], None, OUT)
+
+
 def test_ordinary_commands_pass_the_check():
     ok = lambda argv, sidecars=None, outputs=OUT: ffjob.check(argv, [CLIP], sidecars, outputs)
     argv, _, timeout = ok(["ffmpeg", "-i", "a.mp4", "-vf", "drawtext=fontfile=Anton-Regular.ttf:text='Scene 4\\: Rooftop':"

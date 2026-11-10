@@ -53,6 +53,11 @@ ROOTED = re.compile(r"(?:^|[\s='\"\[,;:|(])[\\/](?![\\/:,;'\"\[\]=\s)]|$)")
 DRIVE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|(?<![\w-])[A-Za-z]:(?![\\/])[\w-]+\.[A-Za-z0-9]{2,5}(?!\w)")
 SHARE = re.compile(r"\\\\[A-Za-z0-9.?]")
 UP = re.compile(r"(?:^|[\\/=:'\"\s,;|\[])\.\.(?:[\\/]|$)")
+# A path relative to another drive's own folder (E:SceneBackups/x is E:\SceneBackups\x when the job's folder is on
+# C:): a word that starts with one, or in a filter's text one with its colon escaped (E\:x) or in quotes ('E:x'). A
+# filter's own w:h is neither, and words such as "Plan B\: go" keep a space after the colon.
+DRIVE_WORD = re.compile(r"^[A-Za-z]:")
+DRIVE_IN_TEXT = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]\\+:(?=[\w.~%$-])|['\"][A-Za-z]:(?=[\w.~%$-])")
 
 
 class JobError(MediaError):
@@ -113,7 +118,7 @@ def _paths_in(text, subtitles=False):
     for form in dict.fromkeys((text, _unescaped(text))):
         if UP.search(form):
             found.append("a path up out of the folder (..)")
-        if DRIVE.search(form) or ROOTED.search(form) or SHARE.search(text):
+        if DRIVE.search(form) or ROOTED.search(form) or SHARE.search(text) or (not subtitles and DRIVE_IN_TEXT.search(form)):
             found.append("a path outside the folder")
         if not subtitles and PROTOCOL.search(form):
             found.append("a URL or protocol ({})".format(PROTOCOL.search(form).group(0)))
@@ -175,6 +180,8 @@ def check(argv, inputs, sidecars, outputs, timeout=None):
         if word in SHELL:
             problems.append("\"{}\" (argv is run as it is, with no shell)".format(word))
         problems += ["{} in \"{}\"".format(p, word[:80]) for p in _paths_in(word)]
+        if DRIVE_WORD.match(word) and not _paths_in(word):
+            problems.append("a path outside the folder in \"{}\" (a drive's own folder)".format(word[:80]))
         if before == "-f" and word.lower() in DEVICES:
             problems.append("-f {} (no devices, screens or tee outputs)".format(word))
         if word in ("-protocol_whitelist", "-protocol_blacklist"):
