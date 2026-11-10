@@ -291,13 +291,23 @@ class Database:
 
     def backup(self, target):
         """A whole copy of the database in pg_dump's format. The password goes in the environment, not the command.
-        It reads as EVERYONE, so row-level security lets it see every row; without that, pg_dump refuses to run."""
+        It reads as EVERYONE, so row-level security lets it see every row; without that, pg_dump refuses to run.
+        Returns {table: rows}, counted in the very snapshot pg_dump copies (exported from a transaction held open while
+        it runs): what the restore test checks the copy against, exact even while the studio goes on writing."""
         parts = urlsplit(self.url)
         env = dict(os.environ, PGPASSWORD=unquote(parts.password or ""), PGOPTIONS="-c app.user_id=" + EVERYONE)
         address = urlunsplit((parts.scheme, "{}@{}:{}".format(parts.username, parts.hostname, parts.port or 5432),
                               parts.path, parts.query, ""))
-        subprocess.run([pg_tool("pg_dump"), "--format=custom", "--enable-row-security", "--file", str(target), "--dbname", address],
-                       env=env, check=True, capture_output=True, timeout=600)
+        with self.psycopg.connect(self.url) as conn:   # its own connection: it stays in one transaction for the dump
+            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            conn.execute("SELECT set_config('app.user_id', %s, true)", (EVERYONE,))
+            snapshot = conn.execute("SELECT pg_export_snapshot()").fetchone()[0]
+            tables = [r[0] for r in conn.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY 1")]
+            counts = {t: conn.execute('SELECT COUNT(*) FROM "{}"'.format(t)).fetchone()[0] for t in tables}
+            subprocess.run([pg_tool("pg_dump"), "--format=custom", "--enable-row-security", "--snapshot", snapshot,
+                            "--file", str(target), "--dbname", address], env=env, check=True, capture_output=True, timeout=600)
+            conn.rollback()
+        return counts
 
     def run(self, sql, params=()):
         """Run a statement and return the new row id (for INSERT into a numbered table)."""

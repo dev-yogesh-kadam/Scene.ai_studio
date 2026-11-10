@@ -24,8 +24,7 @@ def make(db, folder, config_file="", keep=14):
     target = folder / "scene_{}{}".format(day, db.suffix)
     partial = folder / "scene.partial"   # a copy that was cut short never stands in for a whole one
     partial.unlink(missing_ok=True)
-    counts = row_counts(db)   # what the restore test checks the copy against (taken a moment before it)
-    db.backup(partial)
+    counts = db.backup(partial)   # what the restore test checks the copy against: counted in the copy's own snapshot
     partial.replace(target)
     target.with_name(target.stem + ".counts.json").write_text(json.dumps(counts), encoding="utf-8")
     if config_file and Path(config_file).is_file():   # it holds keys and passwords: its copy is encrypted (vault.py)
