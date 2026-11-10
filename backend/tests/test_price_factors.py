@@ -64,3 +64,27 @@ def test_a_job_is_charged_at_its_chosen_price_and_factors_are_suggested_from_ren
     assert found["suggested"]["resolution"]["1080"] == round(360 / ((100 + 140 + 72) / 3), 2)
     assert found["suggested"]["quality"]["low"] == round(72 / ((100 + 140 + 360) / 3), 2)
     assert found["samples"]["resolution"]["720"] == 3
+
+
+def test_an_estimate_prices_every_choice_with_its_rates_read_once(client, monkeypatch):
+    """An estimate priced each other resolution and quality beside the one picked, each reading the six rates, the
+    studio's factors and the workflow's pricing again (9 queries a price, about 70 a step), and read the last 500 runs
+    every time: a plan of eight steps sent ~700 queries. The prices are the same."""
+    register(client)
+    db, credits = client.app.state.db, client.app.state.credits
+    first = quote(client)
+    assert credits.costs("video/x", 5, [None, {"resolution": 1080, "quality": "final"}, {"resolution": 480, "quality": "draft"}]) == [100, 200, 30]
+    asked = []
+    real = db._execute
+    monkeypatch.setattr(db, "_execute", lambda sql, params=(), *a, **k: asked.append(sql) or real(sql, params, *a, **k))
+    again = quote(client)
+    assert again["credits"] == first["credits"] and again["choices"] == first["choices"] and len(first["choices"]["resolution"]) > 1
+    settings = [q for q in asked if "FROM settings" in q]
+    assert len(settings) <= 6 and not any("FROM generations ORDER BY created DESC LIMIT 500" in q for q in asked)   # it was 50+, and the 500 runs
+    assert len(asked) < 25
+    post_job(client)   # something new is made (or queued): the runs are read again for the next estimate
+    a_run = client.app.state.db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, seconds, created) "
+                                    "VALUES ((SELECT MIN(id) FROM users), 'video/h3_all_in_one', 'video', 'r', 'r.mp4', '{}', '{}', 30, ?)", (time.time(),))
+    asked.clear()
+    quote(client)
+    assert a_run and any("FROM generations ORDER BY created DESC LIMIT 500" in q for q in asked)

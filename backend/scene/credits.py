@@ -166,7 +166,7 @@ class Credits:
     def rate_for(self, workflow_id):
         """(base credits, credits per second, multiplier) for one workflow."""
         kind = kind_of(workflow_id)
-        rate = self.rates().get(kind, 0)
+        rate = float(self.db.setting("rate_" + kind, RATES[kind])) if kind in RATES else 0   # its kind's rate alone, not all six
         base, per_second = (rate, 0) if kind in PER_JOB else (0, rate)
         row = self.pricing(workflow_id) or {}
         if row.get("base_credits") is not None:
@@ -178,9 +178,16 @@ class Credits:
     def cost(self, workflow_id, seconds=None, chosen=None):
         """Credits for one job. `seconds` is the length of the result that was asked for, when it has one; `chosen`, what
         was picked (the job's context: its resolution and quality), which multiplies the price (factors)."""
+        return self.costs(workflow_id, seconds, [chosen])[0]
+
+    def costs(self, workflow_id, seconds, choices):
+        """cost() of one workflow for each of several choices (an estimate prices every resolution and quality beside
+        the one picked), its rates and factors read once: they were read again for each, nine queries a price."""
         base, per_second, multiplier = self.rate_for(workflow_id)
         seconds = ASSUMED_SECONDS if seconds is None else seconds
-        return math.ceil(round((base + per_second * seconds) * multiplier * self.choice_factor(workflow_id, chosen), 6))
+        found = self.factors(workflow_id) if any(choices) else None
+        return [math.ceil(round((base + per_second * seconds) * multiplier * self.choice_factor(workflow_id, chosen, found), 6))
+                for chosen in choices]
 
     def factors(self, workflow_id=None):
         """The resolution and quality factors in force: the studio's (setting price_factors, over FACTORS), and over them
@@ -192,11 +199,12 @@ class Credits:
                 found[group].update({str(k): float(v) for k, v in (layer.get(group) or {}).items() if _number(v)})
         return found
 
-    def choice_factor(self, workflow_id, chosen):
-        """What the chosen resolution and quality multiply a workflow's price by (1 for what has no factor)."""
+    def choice_factor(self, workflow_id, chosen, found=None):
+        """What the chosen resolution and quality multiply a workflow's price by (1 for what has no factor). found: the
+        workflow's factors() when they were read already."""
         if not chosen:
             return 1.0
-        found, factor = self.factors(workflow_id), 1.0
+        found, factor = found or self.factors(workflow_id), 1.0
         tier = RESOLUTION_TIER.get(_int(chosen.get("resolution")))
         if tier and kind_of(workflow_id) not in PER_JOB:   # a picture is priced by its quality, not its size
             factor *= found["resolution"].get(tier, 1.0)
