@@ -1,0 +1,32 @@
+{
+ "id": "drama-kitchen-letter",
+ "status": "draft",
+ "brief": "a short drama scene: a mother finds a letter her son left before moving away",
+ "context": {
+  "platform": "short film scene, 16:9, about 40 s",
+  "audience": "festival and YouTube audiences"
+ },
+ "concept": "A morning like every other until the second cup she pours has no one to drink it.",
+ "plan_outline": [
+  "1. WS · eye · static · small kitchen, early morning window light · a woman in her fifties in a cotton sari makes tea for two (6 s)",
+  "2. CU · eye · static · same kitchen · two cups filled; she pauses at the second (4 s)",
+  "3. MS · eye · static · son's empty room, same light · a made bed, an envelope on the pillow (5 s)",
+  "4. CU · top · static · same room · her hand picks up the envelope (handwriting soft and unreadable) (4 s)",
+  "5. CU · eye · push in · same room · she reads; her face holds, then breaks into a small smile and tears (8 s)",
+  "6. WS · eye · static · kitchen · she sits at the table and drinks from the second cup (6 s)"
+ ],
+ "why": [
+  "The idea lives in one gesture (the second cup) set up in shot 2 and paid off in shot 6 — a motif, not dialogue.",
+  "Coverage moves from wide to close for the turn, then back to wide for the release.",
+  "Static frames and one slow push-in: drama earns the move at the emotional peak.",
+  "The letter's words are never shown (the model can't write them); her face reads them for us."
+ ],
+ "tags": [
+  "drama",
+  "short film",
+  "scene",
+  "emotion",
+  "landscape",
+  "family"
+ ]
+}

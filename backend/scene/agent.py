@@ -700,7 +700,7 @@ class AgentError(Exception):
 
 TOOLS = ("find_assets", "look", "check_shots", "review", "save_note", "book_save", "book_import", "page_build", "page_write", "page_read", "state_read", "state_write", "state_check",
          "film", "render_html", "ffmpeg", "import_url", "transcript", "timing", "read_text", "read_skill", "memory", "preset_search", "web_fetch",
-         "skill_draft", "second_opinion", "workflow_info")
+         "skill_draft", "second_opinion", "workflow_info", "craft_search")
 TOOL_ROUNDS = 6   # a message is answered in at most this many calls to the model
 RUN_ROUNDS = 40   # ...or this many while a long skill runs: it reads and writes its state and cuts its media as it goes
 TOOL_RESULT = 8000   # characters of a tool's result the model is given back
@@ -1765,13 +1765,15 @@ def question(instruction, offers, selection, default="", history=(), project_cas
 
 
 def question_parts(instruction, offers, selection, default="", history=(), project_cast=None, recent=(), book=(), guides="", direction="",
-                   remembered=None, catalogue="", explain=None, boards=None, detailed=None):
+                   remembered=None, catalogue="", explain=None, boards=None, detailed=None, craft=""):
     """question() as its parts, [(name, text)] in order, for follow_up(). remembered: the user's memory as recall.digest()
     gives it, or None when the memory tool is not offered. explain: True when the user asked for the reply to teach
     (the panel's "Explain more"), False when not, None to say nothing of it (a conversation without tools). boards: the
     canvas's boards in words (placement.boards), or None in no project. detailed: the kinds of workflow ("video",
     "image", "audio") told in full, from likely_kinds(); the others go as one line each, which the model reads in full
-    with workflow_info. None: every workflow in full (a model without tools has no workflow_info)."""
+    with workflow_info. None: every workflow in full (a model without tools has no workflow_info). craft: what a message
+    that looks like a big job comes with (looks_big): the craft note that fits it and the closest gold examples
+    (craft_library); in the message, never the system prompt, so the system prompt stays the same all conversation."""
     offers = sorted(offers, key=lambda o: o["id"] != default)   # the default first; the rest keep their order
     if offers[0]["id"] == default:
         offers[0] = dict(offers[0], default=True)
@@ -1800,6 +1802,7 @@ def question_parts(instruction, offers, selection, default="", history=(), proje
              *([("boards", "Boards on the canvas (where results are placed; the usual ones are made on first use):\n"
                  + (boards or "(none yet)"))] if boards is not None else []),
              *([("explain", EXPLAIN if explain else EXPLAIN_OFF)] if explain is not None else []),
+             *([("craft", craft)] if craft else []),
              ("message", "The user's new message:\n" + instruction)]
     return parts
 
@@ -1928,6 +1931,22 @@ BIG_JOB_STEPS = 4   # a plan of more than this many generate steps is a big job 
 # "a 20-shot ad", "6 scenes", "10 clips": a message that asks for a big job before any plan says so
 SHOTS_ASKED = re.compile(r"\b(\d{1,3})[- ]?(shots?|scenes?|clips?|cuts?)\b", re.IGNORECASE)
 AUTO_OPINION = "second_opinion (auto)"   # the purpose a second opinion the studio asks for itself is written down as
+
+
+# The words of work that is usually a big job before any plan says so: an ad, a campaign, a film, a music video...
+BIG_WORDS = re.compile(r"\b(ads?|advert\w*|commercials?|campaigns?|promos?|brand (film|video|story)|music video|trailers?|"
+                       r"short films?|films?|movies?|episodes?|series|reels?|explainers?|launch|teasers?)\b", re.IGNORECASE)
+
+
+def looks_big(instruction, history=()):
+    """Whether a message looks like a big job before it is planned (big_job reads the plan itself): it asks for more
+    shots than BIG_JOB_STEPS, or for an ad, a film, a reel, a campaign (BIG_WORDS). Such a message comes with the craft
+    note that fits it and the closest gold examples. A short follow-up is read with the message before it."""
+    said = str(instruction or "")
+    last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
+    if len(said) < 60 and last.get("instruction"):
+        said += "\n" + str(last["instruction"])
+    return big_job([], said) or bool(BIG_WORDS.search(said))
 
 
 def generated(steps):

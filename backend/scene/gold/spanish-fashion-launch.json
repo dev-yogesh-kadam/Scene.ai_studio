@@ -1,0 +1,33 @@
+{
+ "id": "spanish-fashion-launch",
+ "status": "draft",
+ "brief": "lanzamiento de mi marca de ropa sostenible, un video de 30 segundos",
+ "context": {
+  "platform": "Instagram and TikTok, 9:16, 30 s",
+  "audience": "women 20-35 in Latin America who care where clothes come from"
+ },
+ "concept": "Every garment starts as a field: we follow one shirt back from the street to the cotton.",
+ "plan_outline": [
+  "1. MS · eye · track · busy city street, morning · a young woman in a natural linen shirt walks toward camera (3 s, the hook)",
+  "2. CU · eye · static · sewing workshop, window light · hands guiding fabric through a sewing machine (3 s)",
+  "3. ECU · eye · static · dye vats · fabric lifted out of an indigo bath, dripping (3 s)",
+  "4. WS · eye · crane · cotton field at golden hour · a woman farmer walks the rows (5 s)",
+  "5. MCU · eye · push in · same field · the farmer smiles at camera, sun behind her (4 s)",
+  "6. Match cut · MS · same framing as shot 1 · the woman on the street touches her shirt's collar and smiles (3 s)",
+  "7. End card (page) · logo and the user's Spanish line (3 s)"
+ ],
+ "why": [
+  "The journey backwards gives the brand's claim a story without stating it.",
+  "A match cut back to shot 1 closes the loop the hook opened.",
+  "Real makers are invented people unless the brand provides its own; no claims beyond what the user says."
+ ],
+ "tags": [
+  "spanish",
+  "fashion",
+  "brand",
+  "sustainable",
+  "tiktok",
+  "reels",
+  "brand film"
+ ]
+}

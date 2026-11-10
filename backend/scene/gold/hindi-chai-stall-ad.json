@@ -1,0 +1,32 @@
+{
+ "id": "hindi-chai-stall-ad",
+ "status": "draft",
+ "brief": "मेरी चाय की दुकान के लिए एक रील बनाओ, सुबह के ग्राहकों के लिए",
+ "context": {
+  "platform": "Instagram Reels, 9:16, 15 s",
+  "audience": "office-goers and students who pass the stall in the morning (Hindi-speaking)"
+ },
+ "concept": "The city's first warm conversation of the day happens over a ten-rupee chai.",
+ "plan_outline": [
+  "1. ECU · eye · static · roadside chai stall at dawn · chai poured from a height into a kulhad, steam and froth (2 s, the hook)",
+  "2. MCU · eye · handheld · same stall · the chaiwala, a man in his forties with a checked gamchha, laughs with a customer (3 s)",
+  "3. MS · eye · static · same stall · two students share a bench, kulhads in hand, talking (3 s)",
+  "4. CU · eye · push in · same stall · an old man takes the first sip and closes his eyes (3 s)",
+  "5. WS · eye · static · street at sunrise · the stall's warm lamp against the waking city (2 s)",
+  "6. End card (page, Devanagari) · 'सुबह की पहली चाय' + location (2 s)"
+ ],
+ "why": [
+  "The reply and the card are in Hindi; the prompts are in English, which the models follow best.",
+  "The product's best second (the high pour) is the hook; the people make it a place, not a product.",
+  "The card's words are set in a Devanagari face as a page, exactly as the user gave them."
+ ],
+ "tags": [
+  "hindi",
+  "cafe",
+  "chai",
+  "local",
+  "reels",
+  "social",
+  "india"
+ ]
+}

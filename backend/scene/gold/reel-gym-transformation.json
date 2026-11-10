@@ -1,0 +1,30 @@
+{
+ "id": "reel-gym-transformation",
+ "status": "draft",
+ "brief": "tiktok for my gym, something that hooks",
+ "context": {
+  "platform": "TikTok, 9:16, 12 s",
+  "audience": "people who keep promising to start in January"
+ },
+ "concept": "Day 1 vs Day 90, told only through the sound and speed of one person's breath on the same treadmill.",
+ "plan_outline": [
+  "1. CU · eye · static · gym at night, fluorescent light · a man in his twenties, red-faced, gasping on a treadmill (2 s, the hook: a face in distress)",
+  "2. ECU · eye · static · same treadmill · the treadmill's speed dial turned up; the screen a soft glow, no readable numbers (1.5 s)",
+  "3. CU · eye · static · same treadmill, same framing · the same man, leaner, breathing steady, a slight smile (2 s, the match cut)",
+  "4. MS · low · track · gym floor · he walks off the treadmill toward camera, towel over his shoulder (3 s)",
+  "5. End card (page) · '90 days. Start Monday.' + logo (2 s)"
+ ],
+ "why": [
+  "A jump cut on identical framing is the transformation; social viewers read it instantly.",
+  "Sound design (gasping → steady breath) carries the story for viewers with sound on; the faces carry it muted.",
+  "Numbers on the machine would come out garbled, so the screen stays a glow and the numbers go on the card."
+ ],
+ "tags": [
+  "social",
+  "tiktok",
+  "gym",
+  "fitness",
+  "before-after",
+  "hook"
+ ]
+}

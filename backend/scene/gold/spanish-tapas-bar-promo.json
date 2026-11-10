@@ -1,0 +1,32 @@
+{
+ "id": "spanish-tapas-bar-promo",
+ "status": "draft",
+ "brief": "un video para mi bar de tapas en Madrid, para Instagram",
+ "context": {
+  "platform": "Instagram Reels, 9:16, 20 s",
+  "audience": "locals and visitors looking for a place for the evening (Spanish-speaking)"
+ },
+ "concept": "In Madrid the night starts at the bar: one tapa, one toast, and nobody goes home early.",
+ "plan_outline": [
+  "1. ECU · top · static · bar counter, warm tungsten light · a hand drops a plate of patatas bravas, sauce gleaming (2 s, the hook)",
+  "2. MCU · eye · handheld · same bar · a bartender pours vermut from height, a smile (3 s)",
+  "3. MS · eye · static · same bar · four friends clink glasses, laughing (3 s)",
+  "4. CU · eye · push in · same bar · jamón being sliced, translucent (3 s)",
+  "5. WS · eye · static · the street outside at night · the bar's light spilling onto the cobbles, people at the door (4 s)",
+  "6. End card (page) · 'Calle de la Cava Baja · Hasta tarde' as the user gives it (3 s)"
+ ],
+ "why": [
+  "The reply is in Spanish; prompts in English; the card uses the user's Spanish words with their accents.",
+  "Warm tungsten practicals and dark wood: the look of a Madrid night without neon.",
+  "Groups are four people at a counter at most, in a medium shot."
+ ],
+ "tags": [
+  "spanish",
+  "bar",
+  "restaurant",
+  "local",
+  "reels",
+  "social",
+  "spain"
+ ]
+}

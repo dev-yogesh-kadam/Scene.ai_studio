@@ -1,0 +1,36 @@
+{
+ "id": "product-ad-running-shoe",
+ "status": "draft",
+ "brief": "launch ad for our new running shoe, 30 seconds, YouTube",
+ "context": {
+  "platform": "YouTube pre-roll, 16:9, 30 s",
+  "audience": "amateur runners 25-45 who run before work"
+ },
+ "concept": "Every morning run starts as a negotiation with the alarm; the shoe is the reason you win it.",
+ "plan_outline": [
+  "1. CU · top · static · dark bedroom, phone glow · a phone alarm lights up at 5:30, a hand hovers over snooze (3 s, the hook; screen blank and glowing, no readable UI)",
+  "2. MS · eye · static · same bedroom · a woman in her thirties sits up, looks at the shoes by the door (3 s)",
+  "3. ECU · low · push in · hallway floor · laces pulled tight on the new shoe, the sole's texture (2 s)",
+  "4. WS · eye · track · empty city street at blue hour · she runs, the street lamps still on (5 s)",
+  "5. CU · low · track · same street · the shoe striking wet tarmac in slow motion, spray lit by a lamp (3 s)",
+  "6. MCU · eye · handheld · riverside at sunrise · she slows, breathing, smiling at the light (4 s)",
+  "7. WS · high · crane · riverside at sunrise · she runs on, small against the river and the rising sun (5 s)",
+  "8. Hero · eye · orbit · dark ground, rim light · the shoe alone (3 s)",
+  "9. End card (page) · logo, 'Win the morning.' (2 s)"
+ ],
+ "why": [
+  "The first 5 s carry the brand promise before 'Skip': the alarm is a universal hook and the shoes are seen at once.",
+  "Size and light progress with the story: dark interior close-ups → blue-hour wides → golden sunrise; the grade is the arc.",
+  "One runner throughout, described the same way in every shot (a character reference kept first).",
+  "The product's hero moment is a slow-motion strike: the model handles one clear motion well; no complex footwork."
+ ],
+ "tags": [
+  "product",
+  "ad",
+  "sport",
+  "youtube",
+  "landscape",
+  "brand",
+  "emotion"
+ ]
+}

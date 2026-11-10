@@ -1,0 +1,31 @@
+{
+ "id": "product-ad-skincare-before-after",
+ "status": "draft",
+ "brief": "make an ad for my vitamin C serum, before and after style",
+ "context": {
+  "platform": "Instagram feed, 4:5, 12 s",
+  "audience": "women 25-40 who care about skincare and dislike hype"
+ },
+ "concept": "Same morning light, same mirror-free angle, two weeks apart: the glow does the talking.",
+ "plan_outline": [
+  "1. MCU · eye · static · bathroom window light · a woman's face, natural skin, slightly dull, soft morning light from the left (3 s, before)",
+  "2. ECU · eye · static · white marble · one drop falls from the dropper onto the back of a hand (2 s)",
+  "3. MCU · eye · static · identical framing and light · the same face, clearer and brighter, a small smile (3 s, after; a match cut)",
+  "4. CU · eye · orbit · white marble, soft side light · the bottle with an orange glow through the glass (2 s)",
+  "5. End card (page) · logo, 'Two weeks. Your light.' (2 s)"
+ ],
+ "why": [
+  "Before/after only works with identical framing and light: the change is the only variable, so the viewer believes it.",
+  "No mirror (models get reflections wrong) and no exaggerated transformation — honest results build trust.",
+  "The drop is the single product moment; the label stays soft so no garbled lettering appears.",
+  "Never invent clinical claims; the line is a feeling, not a percentage."
+ ],
+ "tags": [
+  "product",
+  "ad",
+  "beauty",
+  "before-after",
+  "feed",
+  "square"
+ ]
+}

@@ -1,0 +1,31 @@
+{
+ "id": "character-intro-mascot",
+ "status": "draft",
+ "brief": "intro video for our brand mascot, a cheeky robot dog, for kids",
+ "context": {
+  "platform": "YouTube Kids and Reels, 16:9 and 9:16, 15 s",
+  "audience": "children 5-9 and their parents"
+ },
+ "concept": "A robot dog that can do anything except sit still.",
+ "plan_outline": [
+  "0. Mascot reference first: a character sheet of the robot dog (round head, one floppy antenna ear, orange and white, flat 3D toy look), kept in NeuralCore",
+  "1. MS · low · static · bright playroom · the robot dog pops up from a toy box (3 s, the hook)",
+  "2. WS · eye · track · same playroom · it zooms across the floor, skids, spins (4 s)",
+  "3. CU · eye · static · same playroom · it tilts its head at camera, the antenna ear flops (3 s)",
+  "4. MS · eye · static · same playroom · a child laughs and it jumps into her lap (3 s)",
+  "5. End card (page) · the mascot's name in a round friendly face (2 s)"
+ ],
+ "why": [
+  "Simple, bold shapes and three colours keep a stylised mascot consistent across shots.",
+  "Bright high-key light and wide framing: comedy and kids' content live in the whole body and the space.",
+  "One child, one interaction; no crowd of kids for the model to merge."
+ ],
+ "tags": [
+  "character",
+  "mascot",
+  "kids",
+  "animation",
+  "brand",
+  "character intro"
+ ]
+}

@@ -1,0 +1,30 @@
+{
+ "id": "real-estate-home-tour",
+ "status": "draft",
+ "brief": "video for a 2BHK apartment listing",
+ "context": {
+  "platform": "YouTube and WhatsApp, 16:9, 30 s",
+  "audience": "young couples looking for their first home"
+ },
+ "concept": "Not rooms, a day: morning light in the kitchen, evening on the balcony — a life you can picture.",
+ "plan_outline": [
+  "1. WS · eye · push in · living room at morning · sun through sheer curtains across a wooden floor (5 s)",
+  "2. MS · eye · pan · open kitchen · a kettle steaming, light on the counter (4 s)",
+  "3. WS · eye · static · bedroom · a made bed, plants by the window, a soft breeze in the curtain (4 s)",
+  "4. MS · eye · track · balcony at golden hour · two cups of tea on a small table, the city beyond (5 s)",
+  "5. WS · eye · pull back · living room at night · warm lamps on, the room cosy (5 s)",
+  "6. End card (page) · the listing's facts exactly as the user gives them (4 s)"
+ ],
+ "why": [
+  "A tour told as one day turns square metres into a feeling; the light tells the time.",
+  "Slow, steady moves suit interiors and the models render them cleanly; no people needed.",
+  "The listing's facts go on a page; nothing about the property is invented."
+ ],
+ "tags": [
+  "real estate",
+  "property",
+  "tour",
+  "landscape",
+  "interiors"
+ ]
+}

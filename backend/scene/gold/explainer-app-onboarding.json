@@ -1,0 +1,28 @@
+{
+ "id": "explainer-app-onboarding",
+ "status": "draft",
+ "brief": "a 30 second explainer for our recipe app's new feature that plans meals for the week",
+ "context": {
+  "platform": "app store and Instagram, 9:16, 30 s",
+  "audience": "busy parents"
+ },
+ "concept": "Sunday night's 'what's for dinner all week' becomes a single tap.",
+ "plan_outline": [
+  "1. Generated MCU · eye · static · kitchen at night · a tired mother staring into an open fridge (3 s, the hook)",
+  "2. Page · 'Every Sunday, the same question.' (3 s)",
+  "3. Page · a phone outline with the feature's three steps animating in (8 s; the real UI composited by the brand)",
+  "4. Generated MS · eye · track · same kitchen, daytime · the family cooking together, laughing (4 s)",
+  "5. Page · logo and 'Plan the week in one tap' (3 s)"
+ ],
+ "why": [
+  "The human problem first, the feature second; type pages explain, generated shots make you feel it.",
+  "The app's interface is never generated (garbled UI); an outline with animated steps stands in."
+ ],
+ "tags": [
+  "explainer",
+  "app",
+  "motion graphics",
+  "social",
+  "portrait"
+ ]
+}

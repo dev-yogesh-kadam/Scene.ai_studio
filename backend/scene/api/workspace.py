@@ -12,7 +12,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import aftercare, agent, camera, guardrails, claude, conversations, core, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
+from .. import aftercare, agent, camera, guardrails, claude, conversations, core, craft_library, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
     pages, runs, placement, sessions, sharing, skills, traces, web
 from ..db import as_everyone, offload
 from ..comfy import workflows
@@ -1296,6 +1296,13 @@ async def _planning(request, user, body, instruction, project):
         noted("book", "Wrote {} of the {}".format(written["path"], written.get("scope") or "run"))
         return "Written: {}".format(written["path"])
 
+    async def craft_search(call):
+        query = " ".join(str(call.get("query") or "").split())
+        tags = [str(t) for t in call.get("tags") or [] if isinstance(t, str)][:8] if isinstance(call.get("tags"), list) else []
+        found = craft_library.search(query, tags)
+        noted("bulb", "Read the craft notes for “{}”: {}".format(query[:60], ", ".join(n["title"] for n in found) or "none fits"))
+        return agent.fit_result(craft_library.for_tool(query, tags), agent.TOOL_RESULT, "craft_search")
+
     async def preset_search(call):
         query = " ".join(str(call.get("query") or "").split())
         noted("bulb", "Looked up presets for “{}”".format(query))
@@ -1768,7 +1775,7 @@ async def _planning(request, user, body, instruction, project):
              "state_read": state_read, "state_write": state_write, "state_check": state_check, "film": film_op,
              "render_html": render_html, "ffmpeg": ffmpeg_job, "import_url": import_url,
              "transcript": read_transcript, "timing": timing, "read_text": read_text, "read_skill": read_skill, "memory": memory_tool,
-             "preset_search": preset_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion,
+             "preset_search": preset_search, "craft_search": craft_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion,
              "workflow_info": workflow_info}
     # Workflows in full only of the kinds the message (or the user's turn before it) is about: the rest go as one line each,
     # read in full with workflow_info (they were about 28,000 characters of every first message, the video models'
@@ -1781,11 +1788,21 @@ async def _planning(request, user, body, instruction, project):
     explain = body.get("explain") is True   # the panel's "Explain more": the reply may teach
 
     canvas_boards = await offload(boards_text, state, user["id"], project) if project else ""
+    # A message that looks like a big job comes with the craft note that fits it and the closest examples of strong
+    # work (craft_library): in the message, so the system prompt stays the same for the whole conversation.
+    craft_given = ""
+    if with_tools and not long_skill and agent.looks_big(instruction, body.get("history")):
+        earlier_said = " ".join(str(t.get("instruction") or "") for t in (body.get("history") or [])[-1:] if isinstance(t, dict))
+        about_job = "{} {}".format(instruction, earlier_said if len(instruction) < 60 else "").strip()
+        craft_given = "\n\n".join(p for p in (await offload(craft_library.pointer, about_job),
+                                              await offload(craft_library.examples_part, about_job)) if p)
+        if craft_given:
+            noted("bulb", "Found the craft note and the examples of strong work that fit this job")
 
     async def plan(message):
         """One answer of the model, timed, and the steps of it that can run. Returns (answer, steps, dropped, seconds)."""
         asked = time.monotonic()
-        system = agent.system() + ("\n\n" + "\n\n".join([recall.RULES, presets.RULES, agent.RESEARCH_RULES, agent.SKILL_RULES, phonetic.RULES])
+        system = agent.system() + ("\n\n" + "\n\n".join([recall.RULES, presets.RULES, craft_library.RULES, agent.RESEARCH_RULES, agent.SKILL_RULES, phonetic.RULES])
                                    if with_tools else "")
         # A long skill goes first, in the system prompt: every call of a run then opens the same way, and a hosted
         # service can read that opening from its cache instead of anew (the rest of the message changes as the run goes).
@@ -1797,7 +1814,7 @@ async def _planning(request, user, body, instruction, project):
                                      "" if first else guides, body.get("direction") or "",
                                      await offload(recall.digest, state.db, user["id"]) if with_tools else None,
                                      skills.catalogue(picked) if with_tools and not long_skill else "", explain if with_tools else None,
-                                     canvas_boards if with_tools and project else None, detailed)
+                                     canvas_boards if with_tools and project else None, detailed, craft_given)
         full = "\n\n".join(text for _, text in parts)
         # A conversation with Claude goes on in one session (a thread): a later message sends only what is new.
         thread = await offload(_thread, state, user, project, body, chosen_model, system)

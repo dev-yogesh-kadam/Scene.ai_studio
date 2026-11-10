@@ -1,0 +1,29 @@
+{
+ "id": "character-intro-fisherwoman",
+ "status": "draft",
+ "brief": "introduce the main character of my short film: an old fisherwoman who knows the sea",
+ "context": {
+  "platform": "short film, 16:9, 20 s",
+  "audience": "festival audience"
+ },
+ "concept": "We meet her hands before her face, and the sea before her hands.",
+ "plan_outline": [
+  "0. Character reference first: a neutral portrait of the woman (about seventy, silver hair in a knot, a faded blue sari, a scar on her chin), kept in NeuralCore",
+  "1. EWS · eye · static · rocky shore at dawn, grey sea · a tiny figure walking along the waterline (5 s)",
+  "2. ECU · eye · static · same shore · weathered hands untangling a net, simple slow movement (4 s)",
+  "3. MCU · eye · push in · same shore · her face as she looks at the horizon and reads the sky (6 s)",
+  "4. WS · low · static · same shore · she pushes the boat into the surf alone (5 s)"
+ ],
+ "why": [
+  "A character intro reveals in layers: world → work → face → action; the face is earned.",
+  "Three fixed anchors (silver knot, faded blue sari, chin scar) and a reference picture keep her the same in every shot.",
+  "The hands shot keeps one slow, simple action so the model does not break the fingers."
+ ],
+ "tags": [
+  "character",
+  "character intro",
+  "short film",
+  "drama",
+  "continuity"
+ ]
+}

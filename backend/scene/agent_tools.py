@@ -311,6 +311,14 @@ TOOLS = {
         "Presets).",
         {"type": "object", "required": ["query"], "properties": {
             "query": _field(S, "Words to look for."), "op": _field(S, "A category, or \"\".")}}),
+    "craft_search": (
+        "Finds the studio's craft notes that fit a job (see Craft library): you get the best one to three, whole, each with "
+        "when it applies. Notes cover hooks, ad structures, coverage, continuity, camera moves, light, colour, pacing to "
+        "music, genres, product hero shots, character consistency, type and motion, platform specs, and what the models do "
+        "badly.",
+        {"type": "object", "required": ["query"], "properties": {
+            "query": _field(S, "The job in a few words (\"cafe ad for reels, hook\", \"hands keep breaking\")."),
+            "tags": _field({"type": "array", "items": S}, "Tags to weigh as well (\"hook\", \"horror\", \"product\"); [] for none.")}}),
     "workflow_info": (
         "Gives you one workflow you may use in full: its settings, references, prompt tips and its model's prompt guide. "
         "Call it before you plan a step with a workflow the message lists in one line only.",

@@ -1,0 +1,28 @@
+{
+ "id": "music-video-lyric-kinetic",
+ "status": "draft",
+ "brief": "a lyric video for my Hindi song",
+ "context": {
+  "platform": "YouTube and Reels, 16:9 and 9:16, length of the song",
+  "audience": "the artist's listeners"
+ },
+ "concept": "The words fall like the monsoon the song is about: each line a drop that lands on the beat.",
+ "plan_outline": [
+  "1. Kinetic type (pages, HyperFrames) · each lyric line in a Devanagari face, falling and settling on the beat",
+  "2. Background · slow abstract footage of rain on glass (generated, no words in it), darkened under the type",
+  "3. Chorus · the key word of each line enlarged, in the accent colour, with a ripple on the downbeat",
+  "4. End card · the song's title and the artist's handle"
+ ],
+ "why": [
+  "A lyric video is motion graphics, not generated text: type is set as pages, never drawn by a video model.",
+  "Devanagari needs a face that has its glyphs (Noto Sans Devanagari, Mukta); the user's exact lyrics only.",
+  "The motion language (fall, settle, ripple) comes from the song's own image, kept consistent."
+ ],
+ "tags": [
+  "music video",
+  "lyric",
+  "hindi",
+  "motion graphics",
+  "kinetic type"
+ ]
+}

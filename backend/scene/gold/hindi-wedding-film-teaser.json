@@ -1,0 +1,32 @@
+{
+ "id": "hindi-wedding-film-teaser",
+ "status": "draft",
+ "brief": "शादी की फिल्म का 30 सेकंड का टीज़र चाहिए, बहुत इमोशनल",
+ "context": {
+  "platform": "Instagram and WhatsApp, 9:16, 30 s",
+  "audience": "the couple's family and friends"
+ },
+ "concept": "Not the wedding: the five seconds before each of them walks in, when nobody is watching.",
+ "plan_outline": [
+  "1. CU · eye · static · bride's room, window light · the bride's hands, mehndi, holding her mother's hand (3 s)",
+  "2. MCU · eye · push in · same room · her mother adjusts her dupatta, eyes wet (4 s)",
+  "3. MCU · eye · static · groom's room, warm lamp · the groom's father ties his safa, both silent (4 s)",
+  "4. ECU · eye · static · corridor · marigold petals on the floor, feet in juttis stepping through (3 s)",
+  "5. WS · eye · track · the mandap, evening, fairy lights · the bride walks in, soft focus crowd (5 s)",
+  "6. CU · eye · static · the groom · he sees her; a held breath (4 s)",
+  "7. End card (page, Devanagari) · the couple's names and date as the user gives them (3 s)"
+ ],
+ "why": [
+  "The emotional angle (the private moments before) makes a teaser feel like a story, not a highlight reel.",
+  "Close, intimate sizes with parents; the crowd stays soft so no faces merge.",
+  "Real people's faces need the couple's own photos as references; without them, keep faces soft or from behind."
+ ],
+ "tags": [
+  "hindi",
+  "wedding",
+  "emotional",
+  "teaser",
+  "family",
+  "india"
+ ]
+}

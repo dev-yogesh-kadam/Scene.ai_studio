@@ -53,7 +53,7 @@ RANGES = {
 # Seconds a tool may run before the agent is told it was stopped: the film operations wait up to FILM_WAIT (900 s) for
 # their job, and a tool that asks a model (page_build, second_opinion) waits up to claude_timeout (600 s).
 TOOL_SECONDS = {"web_fetch": 90, "import_url": 300, "find_assets": 120, "look": 300, "check_shots": 300, "state_read": 60,
-                "state_write": 60, "state_check": 60, "memory": 60, "preset_search": 60, "read_skill": 60, "read_text": 60,
+                "state_write": 60, "state_check": 60, "memory": 60, "preset_search": 60, "craft_search": 60, "read_skill": 60, "read_text": 60,
                 "page_read": 60, "page_write": 60, "save_note": 60, "skill_draft": 60}
 TOOL_SECONDS_DEFAULT = 960
 # How often an answer that can't be read (not JSON, not an object, not the answer's shape) is sent back to the model

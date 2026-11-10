@@ -1,0 +1,28 @@
+{
+ "id": "brand-motion-logo-reveal",
+ "status": "draft",
+ "brief": "logo reveal for our architecture studio",
+ "context": {
+  "platform": "website and social, 16:9 and 1:1, 6 s",
+  "audience": "clients and architects"
+ },
+ "concept": "The logo is built the way a building is: a grid, then lines, then light.",
+ "plan_outline": [
+  "1. Page · a fine blueprint grid draws itself across a dark ground (1.5 s)",
+  "2. Page · the logo's own lines trace along the grid, ease-out (2 s)",
+  "3. Page · a sweep of light crosses the mark; it settles (1.5 s)",
+  "4. Page · the studio's name in its typeface fades up beneath (1 s)"
+ ],
+ "why": [
+  "A reveal built from the brand's own shapes and craft (the grid), not a generic particle burst.",
+  "One motion language: precise, linear, ease-out; nothing bounces in an architect's identity.",
+  "The logo is prepared with the film tool's logo op first; it is never redrawn or invented."
+ ],
+ "tags": [
+  "brand motion",
+  "motion graphics",
+  "logo",
+  "hyperframes",
+  "brand"
+ ]
+}

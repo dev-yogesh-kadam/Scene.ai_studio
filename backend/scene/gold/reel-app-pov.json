@@ -1,0 +1,29 @@
+{
+ "id": "reel-app-pov",
+ "status": "draft",
+ "brief": "a reel for our budgeting app, keep it short",
+ "context": {
+  "platform": "Instagram Reels, 9:16, 10 s",
+  "audience": "first-jobbers who are broke by the 20th"
+ },
+ "concept": "POV: it's the 20th and for once you're not scared to check your balance.",
+ "plan_outline": [
+  "1. CU · POV · static · bus seat, evening · your own hand holding a phone, thumb hovering, the screen a blank glow (2 s, the hook; on-screen line 'POV: it's the 20th' as a page)",
+  "2. MCU · eye · push in · same bus · a young woman looks at the phone and exhales, relieved, a small grin (3 s)",
+  "3. MS · eye · track · city street at night · she walks past a food stall and stops to buy something (3 s)",
+  "4. End card (page) · logo, 'Know before the 20th.' (2 s)"
+ ],
+ "why": [
+  "POV is a native social hook and puts the viewer inside the problem.",
+  "The app's UI is never rendered by the model; the screen glows and real screens would be composited later.",
+  "One emotional beat (relief) instead of feature lists; 10 seconds holds one idea."
+ ],
+ "tags": [
+  "social",
+  "reels",
+  "app",
+  "pov",
+  "fintech",
+  "short"
+ ]
+}

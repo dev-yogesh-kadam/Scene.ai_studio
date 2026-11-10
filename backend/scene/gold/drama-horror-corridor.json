@@ -1,0 +1,30 @@
+{
+ "id": "drama-horror-corridor",
+ "status": "draft",
+ "brief": "short horror scene in a school corridor at night",
+ "context": {
+  "platform": "short film scene, 16:9, about 30 s",
+  "audience": "horror fans on YouTube"
+ },
+ "concept": "An ordinary school corridor where one classroom light keeps switching on by itself.",
+ "plan_outline": [
+  "1. EWS · eye · static · long school corridor at night, one flickering tube light · a cleaner with a mop at the far end (6 s)",
+  "2. MS · eye · static · same corridor · behind him, a classroom light switches on; he doesn't notice (4 s)",
+  "3. CU · eye · static · same corridor · he stops mopping and listens (3 s)",
+  "4. MS · eye · push in · the lit classroom doorway · empty desks; one chair slowly turned to face the door (6 s)",
+  "5. CU · eye · static · the cleaner · he backs away, breath visible in the cold light (4 s)",
+  "6. WS · eye · static · corridor · every light goes out at once; black (3 s)"
+ ],
+ "why": [
+  "Horror in an ordinary place; the threat is never shown (models make monsters look fake).",
+  "Static wides let the eye search; the only move is a slow push into the doorway.",
+  "Cold sickly light from practical tubes only; darkness does the work."
+ ],
+ "tags": [
+  "horror",
+  "scene",
+  "genre",
+  "suspense",
+  "school"
+ ]
+}

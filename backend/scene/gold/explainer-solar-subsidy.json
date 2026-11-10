@@ -1,0 +1,31 @@
+{
+ "id": "explainer-solar-subsidy",
+ "status": "draft",
+ "brief": "explainer video on how the rooftop solar subsidy works, 45 seconds",
+ "context": {
+  "platform": "YouTube and WhatsApp, 16:9, 45 s",
+  "audience": "homeowners who think solar is complicated"
+ },
+ "concept": "Three steps, one rooftop: from the electricity bill you hate to the one you don't get.",
+ "plan_outline": [
+  "1. Page · the hook: an electricity bill shape with the amount blurred, a red stamp 'Too high?' (3 s)",
+  "2. Generated WS · eye · static · a family's flat roof in sunlight, panels installed (4 s)",
+  "3. Page · Step 1: 'Apply' with an icon, one line from the user's facts (5 s)",
+  "4. Page · Step 2: 'Install' with an icon, one line (5 s)",
+  "5. Page · Step 3: 'Get the subsidy' with the figure the user gave (5 s)",
+  "6. Generated MCU · eye · push in · a living room in the evening · a father switches on the lights and smiles (4 s)",
+  "7. Page · where to apply, the user's link (4 s)"
+ ],
+ "why": [
+  "An explainer is one idea per scene and a consistent grid; type pages carry the facts so they are exact.",
+  "Two generated shots give it human warmth; the facts never come from a video model.",
+  "Every number and step comes from the user's own material or a source cited; nothing invented."
+ ],
+ "tags": [
+  "explainer",
+  "motion graphics",
+  "education",
+  "government",
+  "landscape"
+ ]
+}

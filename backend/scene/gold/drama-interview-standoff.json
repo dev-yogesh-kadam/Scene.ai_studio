@@ -1,0 +1,32 @@
+{
+ "id": "drama-interview-standoff",
+ "status": "draft",
+ "brief": "a tense job interview scene where the candidate realises the interviewer is her ex",
+ "context": {
+  "platform": "short film scene, 16:9, about 35 s",
+  "audience": "web series audience"
+ },
+ "concept": "Two people pretending to be strangers, and the camera that refuses to let them.",
+ "plan_outline": [
+  "1. WS · eye · static · glass meeting room, cool office light · a candidate sits; the interviewer's chair is empty (5 s)",
+  "2. MS · eye · static · same room · a man in his thirties enters, sits, opens a folder, then looks up (4 s)",
+  "3. CU · eye · push in · same room · the candidate's face as she recognises him (4 s)",
+  "4. OTS · eye · static · same room, over her shoulder · he holds the look a beat too long, then smiles politely (4 s)",
+  "5. OTS · eye · static · reverse, over his shoulder · she smiles back, too brightly (4 s)",
+  "6. ECU · eye · static · the table · his pen stops writing (3 s)",
+  "7. WS · high · static · same room · the two of them, small, the city behind the glass (5 s)"
+ ],
+ "why": [
+  "OTS pairs keep the 180° rule and make the power exchange readable.",
+  "The push-in is reserved for the moment of recognition; everything else is still — tension through restraint.",
+  "The insert (the pen stopping) tells us he is shaken without a line of dialogue.",
+  "A high wide at the end makes them small inside the cold glass room: the subtext in one frame."
+ ],
+ "tags": [
+  "drama",
+  "scene",
+  "tension",
+  "conversation",
+  "web series"
+ ]
+}

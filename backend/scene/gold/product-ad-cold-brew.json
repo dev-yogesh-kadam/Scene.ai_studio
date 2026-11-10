@@ -1,0 +1,34 @@
+{
+ "id": "product-ad-cold-brew",
+ "status": "draft",
+ "brief": "a 15 second ad for our cold brew coffee can, for Instagram",
+ "context": {
+  "platform": "Instagram Reels, 9:16, 15 s",
+  "audience": "urban 22-35 year olds who need a lift at 3 pm"
+ },
+ "concept": "The 3 pm slump breaks the moment the can cracks open: one sound, one sip, the afternoon switches back on.",
+ "plan_outline": [
+  "1. ECU · eye · static · office desk, grey afternoon light · a finger pulls the can's tab, condensation beads on the metal (2 s, the hook: sound and texture)",
+  "2. MCU · eye · push in · same desk · a tired young man in a grey hoodie takes the first sip, eyes closed (3 s)",
+  "3. CU · low · static · same desk · the can set down hard; light through the window turns warm and bright (2 s, the turn)",
+  "4. MS · eye · track · open-plan office · he walks fast between desks, the can in hand, colleagues glance up (4 s)",
+  "5. Hero · eye · orbit · dark ground, rim light · the can alone, drops running down, slow orbit (3 s)",
+  "6. End card (page) · logo, 'Cold brew. 3 pm fixed.' (2 s)"
+ ],
+ "why": [
+  "Problem → solution in 15 s: the slump is a feeling everyone knows, shown in two seconds, not explained.",
+  "The hook is sound and texture (the tab crack, condensation) in a macro: it stops the scroll with the sound off too.",
+  "Light carries the turn: grey and flat before the sip, warm after — the change is the product's promise without a claim.",
+  "Hands stay simple (one finger on a tab, a hand around a can); no fiddly hand work for the model.",
+  "The line goes on a designed end card, never as words the video model draws."
+ ],
+ "tags": [
+  "product",
+  "ad",
+  "drink",
+  "reels",
+  "social",
+  "problem-solution",
+  "hook"
+ ]
+}
