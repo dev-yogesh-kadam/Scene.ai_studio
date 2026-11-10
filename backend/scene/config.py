@@ -91,7 +91,12 @@ class Settings:
     web_dist_dir: str = "apps/web/dist"
     node_path: str = ""           # the Node.js program that renders motion graphics; empty = the one that is installed
     default_workflow: str = ""
-    allow_signup: bool = True
+    # Who may make an account, after the first (the admin, made on this machine). Closed until an admin opens it, here or
+    # in the admin console's Settings (which then wins): a fresh installation on the internet never lets strangers in
+    # by accident. signup_invite: when set, an open sign-up also asks for this code, so only people given it get in.
+    # signup_credits: what a new account starts with; 0 until an admin decides to give credits away.
+    allow_signup: bool = False
+    signup_invite: str = ""
     first_account_local: bool = True   # the first account (the admin) can only be made from the machine the app runs on
     session_days: int = 30
     # While the render server does not answer, renders wait in the queue instead of failing one after another, and a
@@ -99,7 +104,7 @@ class Settings:
     # is no render server at all (the tests).
     hold_queue_offline: bool = True
     secure_cookies: bool = False  # set true when the app is served over https
-    signup_credits: int = 1000    # credits a new account starts with
+    signup_credits: int = 0       # credits a new account starts with (the console's Settings may set another number)
     signups_per_day: int = 3      # new accounts one visitor address may make in a day; 0 = no limit
 
     def path(self, name):
