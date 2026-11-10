@@ -254,17 +254,24 @@ USER_ROWS = (
     "FROM users u ").format(SPEND)
 
 
+USERS_PAGE = 500   # people one page of the Users list holds at most (`limit`): each row counts their work
+
+
 @router.get("/users")
-async def list_users(request: Request, q: str = "", show: str = "", user: dict = Depends(admin_user)):
-    """`show` narrows the list: "admins", "disabled" or "no_credits"."""
+async def list_users(request: Request, q: str = "", show: str = "", limit: int = USERS_PAGE, offset: int = 0,
+                     user: dict = Depends(admin_user)):
+    """`show` narrows the list: "admins", "disabled" or "no_credits". A page of `limit` people (at most USERS_PAGE) from
+    `offset`, the oldest accounts first; "next_offset" is where the next page starts (null after the last)."""
     where, params = [], []
     if q.strip():
         where.append("(u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')")
         params += [_like(q)] * 2
     if show in ("admins", "disabled", "no_credits"):
         where.append({"admins": "u.role != 'user'", "disabled": "u.disabled = 1", "no_credits": "u.credits <= 0"}[show])
-    sql = USER_ROWS + ("WHERE " + " AND ".join(where) if where else "") + " ORDER BY u.created"
-    return {"users": await request.app.state.db.aall(sql, params)}
+    limit, offset = max(1, min(limit, USERS_PAGE)), max(0, offset)
+    sql = USER_ROWS + ("WHERE " + " AND ".join(where) if where else "") + " ORDER BY u.created, u.id LIMIT ? OFFSET ?"
+    rows = await request.app.state.db.aall(sql, params + [limit + 1, offset])
+    return {"users": rows[:limit], "next_offset": offset + limit if len(rows) > limit else None}
 
 
 @router.get("/users/{user_id}")

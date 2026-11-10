@@ -251,6 +251,24 @@ def test_the_consoles_home_page_files_and_backup_check_answer_cleanly(client):
     assert "Checked the newest backup" in [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]]
 
 
+def test_the_consoles_people_come_a_page_at_a_time(client, monkeypatch):
+    from test_api import ADMIN, console
+    client.app.state.settings.signups_per_day = 0   # five sign-ups from one address
+    client.post("/api/auth/register", json=ADMIN)
+    for n in range(4):
+        made = client.post("/api/auth/register", json={"email": "p{}@example.com".format(n), "password": "correct horse"})
+        assert made.status_code == 200, made.text
+    desk = console(client)
+    everyone = desk.get("/api/admin/users").json()
+    assert len(everyone["users"]) == 5 and everyone["next_offset"] is None
+    first = desk.get("/api/admin/users", params={"limit": 2}).json()
+    second = desk.get("/api/admin/users", params={"limit": 2, "offset": first["next_offset"]}).json()
+    last = desk.get("/api/admin/users", params={"limit": 2, "offset": second["next_offset"]}).json()
+    assert [u["id"] for u in first["users"] + second["users"] + last["users"]] == [u["id"] for u in everyone["users"]]
+    assert last["next_offset"] is None
+    assert len(desk.get("/api/admin/users", params={"limit": 10_000}).json()["users"]) == 5   # held to the most a page holds
+
+
 def test_the_cast_of_a_project_is_its_always_on_entries(client):
     signed_in(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
