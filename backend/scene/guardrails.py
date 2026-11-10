@@ -240,10 +240,10 @@ def user_of(key):
     return head if head.isdigit() else None
 
 
-def sessions_to_close(live, key, per_user, busy=lambda entry: entry.lock.locked()):
+def sessions_to_close(live, key, per_user, busy=lambda key, entry: entry.lock.locked()):
     """Before a new live session opens for `key`: (the keys of that user's sessions to close first, the oldest idle
     ones, so they hold at most per_user with the new one; and the words to refuse it with when every one of theirs
-    is answering, else ""). live: claude.live, {key: entry with .used and .lock}."""
+    is answering, else ""). live: claude.live, {key: entry with .used and .lock}. busy(key, entry): in use (claude._busy)."""
     owner = user_of(key)
     if owner is None or key in live:
         return [], ""
@@ -251,7 +251,7 @@ def sessions_to_close(live, key, per_user, busy=lambda entry: entry.lock.locked(
     over = len(mine) + 1 - max(1, int(per_user))
     if over <= 0:
         return [], ""
-    idle = sorted((used, k) for used, k in mine if not busy(live[k]))
+    idle = sorted((used, k) for used, k in mine if not busy(k, live[k]))
     if len(idle) < over:
         return [k for _, k in idle], ("You have {} conversations with the agent answering at once, the most one person may. "
                                       "Wait for one to finish.".format(len(mine)))

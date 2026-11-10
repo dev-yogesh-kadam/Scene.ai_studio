@@ -298,7 +298,7 @@ class Entry:
 
 
 def test_one_user_holds_at_most_their_share_of_the_live_sessions():
-    busy = lambda entry: entry.busy
+    busy = lambda key, entry: entry.busy
     live = {"7:a:0": Entry(1), "7:b:0": Entry(2), "7:c:0": Entry(3), "8:a:0": Entry(0), "oneoff:x": Entry(0)}
     assert guardrails.sessions_to_close(live, "7:d:0", 3, busy) == (["7:a:0"], "")   # the oldest idle one of theirs
     assert guardrails.sessions_to_close(live, "8:b:0", 3, busy) == ([], "")            # another user's sessions are not theirs

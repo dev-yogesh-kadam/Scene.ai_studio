@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from scene import agent, agent_tools, claude
+from scene import agent, agent_tools, claude, guardrails
 from scene.agent import Agent, AgentBusy, AgentError, ContextLost
 
 sdk = pytest.importorskip("claude_agent_sdk")
@@ -332,7 +332,9 @@ def test_a_one_off_session_stopped_by_the_user_is_removed(fake_sdk, forgotten):
     assert made[0].closed and not claude.live and forgotten == ["s-10"]
 
 
-def test_a_burst_of_one_off_messages_waits_its_turn_and_never_closes_a_tabs_session(fake_sdk, forgotten):
+def test_a_burst_of_one_off_messages_waits_its_turn_and_never_closes_a_tabs_session(fake_sdk, monkeypatch, forgotten):
+    # every tab is one user's here, to fill the studio's LIVE: their own limit (guardrails, 3 by default) raised to all of it
+    monkeypatch.setitem(guardrails._seen, "guard_sessions_per_user", claude.LIVE)
     made, scripts = fake_sdk
     b = brain()
     tabs = ["1:tab{}:0".format(n) for n in range(claude.LIVE)]
@@ -363,7 +365,9 @@ def test_a_burst_of_one_off_messages_waits_its_turn_and_never_closes_a_tabs_sess
     assert sorted(forgotten) == ["one-{}".format(n) for n in range(5)]
 
 
-def test_a_tab_in_the_middle_of_a_message_is_never_closed_to_make_room(fake_sdk):
+def test_a_tab_in_the_middle_of_a_message_is_never_closed_to_make_room(fake_sdk, monkeypatch):
+    # every tab is one user's here, to fill the studio's LIVE: their own limit (guardrails, 3 by default) raised to all of it
+    monkeypatch.setitem(guardrails._seen, "guard_sessions_per_user", claude.LIVE)
     made, scripts = fake_sdk
     b = brain()
     tabs = ["1:tab{}:0".format(n) for n in range(claude.LIVE)]

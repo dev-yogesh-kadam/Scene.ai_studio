@@ -574,7 +574,7 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
         entry = live.get(key)
         if entry is None:
             closing, refused = guardrails.sessions_to_close(live, key, guardrails.known("guard_sessions_per_user"),
-                                                            busy=lambda e: e.users > 0 or e.lock.locked())
+                                                            busy=_busy)   # in use as _tidy() sees it: held between rounds too
             for old in closing:   # one person holds at most their share of the live sessions
                 await _close(old)
             if refused:
