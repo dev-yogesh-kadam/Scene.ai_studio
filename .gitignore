@@ -39,3 +39,6 @@ apps/web/tests/look/shots/
 
 # Secrets of this machine (database passwords, keys): read at start (config.py), never committed
 scene.env
+
+# Coverage data (pytest-cov), made by scripts/gate.* -Coverage
+.coverage
