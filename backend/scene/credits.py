@@ -15,6 +15,8 @@ import math
 import json
 import time
 
+from fastapi import HTTPException
+
 # The rates a new installation starts with. Per generation for the kinds in PER_JOB, per second for the rest.
 RATES = {"image": 40, "video": 20, "audio": 5, "motion": 30, "overlay": 10, "upscaler": 20}
 PER_JOB = ("image",)
@@ -64,6 +66,13 @@ def kind_of(workflow_id):
 
 # The plan whose reservation pays for what is charged now: set by the plan runner while it queues a step (plans.py).
 PREPAID = contextvars.ContextVar("prepaid", default=None)
+
+
+class OverCap(HTTPException):
+    """A charge that would take the user past their daily limit (Credits.charge): a 429, its detail cap_problem's words."""
+
+    def __init__(self, detail):
+        super().__init__(429, detail)
 
 
 class Credits:
@@ -263,10 +272,16 @@ class Credits:
         return max(0, -(row["n"] or 0))
 
     def cap_problem(self, user_id, amount):
-        """Why a charge of `amount` would go over the user's daily limit, or None. Admins have no limit."""
+        """Why a charge of `amount` would go over the user's daily limit, or None. Admins have no limit. An early no,
+        before the work starts: charge() checks it again, with the user's row locked, as it takes the credits."""
+        return self._cap_problem(user_id, amount)
+
+    def _cap_problem(self, user_id, amount, lock=False):
+        """cap_problem; with `lock` (inside a transaction), the user's row stays locked until it ends, so a charge made
+        at the same moment waits for this one and counts it in what was spent."""
         if PREPAID.get() is not None:   # a plan's step: its plan's whole price was checked at approval, and reserved
             return None
-        user = self.db.one("SELECT role, daily_cap FROM users WHERE id = ?", (user_id,))
+        user = self.db.one("SELECT role, daily_cap FROM users WHERE id = ?" + (" FOR UPDATE" if lock else ""), (user_id,))
         if not user or user["role"] == "admin" or amount <= 0:
             return None
         cap = self.cap_for(user)
@@ -280,16 +295,21 @@ class Credits:
         row = self.db.one("SELECT credits FROM users WHERE id = ?", (user_id,))
         return row["credits"] if row else 0
 
-    def charge(self, user_id, amount, reason, job_id=None, note="", project_id=None):
+    def charge(self, user_id, amount, reason, job_id=None, note="", project_id=None, cap=True):
         """Take credits if the user has enough. Returns False when they don't. `project_id`: the project it was spent in,
         when no job says so (a message to the agent). While a plan's step is queued (PREPAID), a generation's price is
-        taken from what was reserved for the plan at its approval, and only what the reservation lacks from the balance."""
+        taken from what was reserved for the plan at its approval, and only what the reservation lacks from the balance.
+
+        `cap` (the default): the user's daily limit holds. It is checked and the credits taken in one transaction with
+        the user's row locked, so two charges at the same moment can't both pass a limit only one of them fits under
+        (cap_problem(), asked first by the callers, is only an early no). Over it: OverCap (a 429 with cap_problem's
+        words), and nothing is taken. cap=False for what was already used (charge_up_to) or what an admin decides."""
         if amount <= 0:
             return True
         plan = PREPAID.get()
         if plan is not None and reason == "generation":
             return self._charge_plan(user_id, plan, amount, reason, job_id, note, project_id)
-        return self._charge(user_id, amount, reason, job_id, note, project_id)
+        return self._charge(user_id, amount, reason, job_id, note, project_id, cap)
 
     def _charge_plan(self, user_id, plan, amount, reason, job_id, note, project_id):
         row = self.db.one("SELECT reserved_left FROM agent_plans WHERE id = ? AND user_id = ?", (plan, user_id))
@@ -304,17 +324,24 @@ class Credits:
             return False
         return True
 
-    def _charge(self, user_id, amount, reason, job_id=None, note="", project_id=None):
-        if not self.db.change("UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?",
-                              (amount, user_id, amount)):
-            return False
-        self._log(user_id, -amount, reason, job_id, note, project_id)
+    def _charge(self, user_id, amount, reason, job_id=None, note="", project_id=None, cap=False):
+        """The balance taken and its event logged in one transaction; with `cap`, the daily limit checked first under
+        the user's row lock, which the UPDATE keeps until both are written."""
+        with self.db.transaction():
+            if cap:
+                problem = self._cap_problem(user_id, amount, lock=True)
+                if problem:
+                    raise OverCap(problem)
+            if not self.db.change("UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?",
+                                  (amount, user_id, amount)):
+                return False
+            self._log(user_id, -amount, reason, job_id, note, project_id)
         return True
 
     def charge_up_to(self, user_id, amount, reason, note="", project_id=None):
         """charge(), for what was already used (an answer's tokens): when the user has less, all they have is taken.
         Returns what was taken."""
-        while amount > 0 and not self.charge(user_id, amount, reason, note=note, project_id=project_id):
+        while amount > 0 and not self.charge(user_id, amount, reason, note=note, project_id=project_id, cap=False):
             amount = min(amount, self.balance(user_id))   # the balance changed between the two: try again with what is there
         return max(amount, 0)
 
