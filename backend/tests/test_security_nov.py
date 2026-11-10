@@ -128,3 +128,38 @@ def test_the_admin_console_is_never_on_the_studios_port(client):
     same = SimpleNamespace(state=SimpleNamespace(settings=Settings(port=8080, console_port=8080)))
     with pytest.raises(ValueError):
         create_console(same)
+
+
+# ---------------------------------------------------------------- the audit log and sign-in settings
+
+def test_audit_entries_written_together_keep_the_chain_whole(client):
+    request = SimpleNamespace(app=client.app, client=SimpleNamespace(host="127.0.0.1"), headers={})
+    errors = []
+
+    def write(n):
+        try:
+            for i in range(8):
+                audit.record(request, None, "Test", "thread {}".format(n), str(i))
+        except Exception as error:   # pragma: no cover - shown by the assert
+            errors.append(error)
+    threads = [threading.Thread(target=write, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    checked = audit.verify(client.app.state.db)
+    assert checked["ok"] is True and checked["sealed"] >= 64, checked
+
+
+def test_changing_the_password_and_turning_off_two_step_sign_in_are_logged(client):
+    import time
+    account(client)
+    assert client.put("/api/auth/password", json={"current": "correct horse", "new": "a better one"}).status_code == 200
+    secret = client.post("/api/auth/mfa/setup", json={"password": "a better one"}).json()["secret"]
+    now = int(time.time() // security.TOTP_STEP)
+    assert client.post("/api/auth/mfa/enable", json={"code": security.totp_code(secret, now)}).status_code == 200
+    off = client.post("/api/auth/mfa/disable", json={"password": "a better one", "code": security.totp_code(secret, now + 1)})
+    assert off.status_code == 200
+    actions = [r["action"] for r in client.app.state.db.all("SELECT action FROM audit_log ORDER BY id")]
+    assert "Changed password" in actions and "Turned off two-step sign-in" in actions

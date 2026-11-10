@@ -288,7 +288,7 @@ async def change_password(body: dict, request: Request, user: dict = Depends(cur
         raise HTTPException(400, password_problem(new))
     await request.app.state.db.arun("UPDATE users SET password_hash = ? WHERE id = ?", (await new_hash(new), user["id"]))
     await offload(_sign_out_others, request, user)
-    audit.record(request, user, "Changed password", user["email"])
+    await offload(audit.record, request, user, "Changed password", user["email"])
     return {"ok": True}
 
 
@@ -346,5 +346,5 @@ async def mfa_disable(body: dict, request: Request, user: dict = Depends(current
     if not await offload(_second_step, db, dict(row, id=user["id"]), str(body.get("code") or "").strip()):
         raise HTTPException(400, "That code is not right. Use the newest code from the app, or a recovery code.")
     await db.arun("UPDATE users SET mfa_enabled = 0, mfa_secret = '', mfa_step = 0, mfa_recovery = '[]' WHERE id = ?", (user["id"],))
-    audit.record(request, user, "Turned off two-step sign-in", user["email"])
+    await offload(audit.record, request, user, "Turned off two-step sign-in", user["email"])
     return {"ok": True}
