@@ -79,6 +79,27 @@ export default tseslint.config(
     plugins: { 'no-unsanitized': noUnsanitized },
     rules: { 'no-unsanitized/method': 'error', 'no-unsanitized/property': 'error' },
   },
+  // Every client app: no HTML from text through React either (dangerouslySetInnerHTML), and the phone site under the same
+  // rules for the DOM as the web studio (it runs in a browser: React Native Web).
+  {
+    files: ['apps/**/*.{ts,tsx,js,jsx}', 'packages/**/*.{ts,tsx,js}'],
+    plugins: { 'no-unsanitized': noUnsanitized },
+    rules: {
+      'no-unsanitized/method': 'error',
+      'no-unsanitized/property': 'error',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: 'No HTML from text (X1): build the elements, or use a component that does (Markdown).',
+        },
+        {
+          selector: "Property[key.name='dangerouslySetInnerHTML']",
+          message: 'No HTML from text (X1): build the elements, or use a component that does (Markdown).',
+        },
+      ],
+    },
+  },
   // The phone site, linted for the first time when it moved here. React Native's ways stay allowed: images are
   // require()d, Reanimated's shared values are assigned (`offset.value = ...`, which the React Compiler rules read as
   // mutating a prop), and list callbacks name arguments they don't use. Its effects that set state on mount are
