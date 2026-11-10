@@ -478,7 +478,7 @@ async def retry_job(job_id: str, body: dict, request: Request, user: dict = Depe
         raise HTTPException(400, "This user's account is disabled.")
     free = body.get("free") is True
     cost = 0 if free else job["cost"]
-    if cost and not await offload(state.credits.charge, job["user_id"], cost, "generation", note="Run again by an admin"):
+    if cost and not await offload(state.credits.charge, job["user_id"], cost, "generation", note="Run again by an admin", cap=False):
         raise HTTPException(402, "This needs {} credits and the user has {}. Give them credits, or run it again for free.".format(
             cost, await offload(state.credits.balance, job["user_id"])))
     new_id = await offload(state.jobs.add, job["user_id"], job["name"], job["workflow"], json.loads(job["settings"]), job["summary"],
