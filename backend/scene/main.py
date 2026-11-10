@@ -18,7 +18,7 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddle
 
 from . import aftercare, backup, claude, endpoints, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
 from .agent import Agent, AgentError
-from .api import admin, auth, bulk, client_errors, console as console_api, film, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
+from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
 from .catalog import Catalog
 from .comfy import workflows
 from .comfy.client import ComfyError
@@ -416,7 +416,7 @@ def create_app(settings=None):
     _answer_errors(app)
     _guard(app)   # after the one above, so its answers get the headers too
     # The admin routes are not here: they are the admin console's, a site of its own (create_console).
-    for module in (auth, studio, library, workspace, film, runs, kit_api, bulk, mobile, shares, plans_api, client_errors):
+    for module in (auth, studio, library, workspace, film_ops, film, runs, kit_api, bulk, mobile, shares, plans_api, client_errors):
         app.include_router(module.router)
 
     built = settings.path("web_dist_dir").resolve()   # the web app's build (apps/web)

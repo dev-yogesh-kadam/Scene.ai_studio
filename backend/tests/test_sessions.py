@@ -125,8 +125,8 @@ def test_the_agents_async_code_never_waits_on_the_database_in_the_event_loop():
     offload. Read from the source, so a path no test reaches (a skill handed on in a long run) is checked too."""
     import ast
     from pathlib import Path
-    from scene.api import agent_threads, workspace
-    sources = [Path(m.__file__).read_text(encoding="utf-8") for m in (workspace, agent_threads)]
+    from scene.api import agent_threads, film_ops, workspace
+    sources = [Path(m.__file__).read_text(encoding="utf-8") for m in (workspace, agent_threads, film_ops)]
     queries = {"runs": ("kept_thread", "keep_thread", "threads_of", "kept_skill", "keep_skill", "kept_attached", "keep_attached",
                         "read", "write", "delete", "leaves"),
                "sessions": ("open_row", "record", "update", "listing", "one", "events"),
