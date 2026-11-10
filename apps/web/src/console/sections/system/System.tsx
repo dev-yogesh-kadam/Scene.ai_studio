@@ -7,6 +7,7 @@ import { Meter } from '../../../common/components/Charts';
 import { useConsole, useSection } from '../shared/context';
 import { Facts, Loaded, bytes, failed, number, span, stamp } from '../shared/ui';
 import { BackupsCard, type Backups } from './Backups';
+import { ChecksCard, type Checks } from './Checks';
 import { GuardrailsCard, type Guardrails } from './Guardrails';
 import {
   AlertsCard,
@@ -66,6 +67,7 @@ type State = {
   tables?: { name: string; rows: number; bytes: number }[];
   restore_test?: { when: number; copy: string; ok: boolean; detail: string } | null;
   retention_days?: number;
+  checks?: Checks; // newer studios: every check in one place (health.checks)
 };
 
 const gb = (v: number) => (v / 1024 ** 3).toFixed(1) + ' GB';
@@ -110,6 +112,7 @@ export default function System() {
         return (
           <div className={css('grid-2')}>
             <AlertsCard a={alerts} />
+            {s.checks && <ChecksCard c={s.checks} />}
             <MaintenanceCard key={String(s.maintenance.on)} m={s.maintenance} />
             {guard && <GuardrailsCard key={JSON.stringify(guard)} g={guard} />}
             <div className={css('card')}>

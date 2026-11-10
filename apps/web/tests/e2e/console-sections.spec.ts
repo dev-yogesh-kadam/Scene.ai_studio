@@ -4,6 +4,7 @@
 import { expect, test, type Cookie, type Locator, type Page } from '@playwright/test';
 import { CONSOLE } from '../../playwright.config';
 import { ACCOUNTS } from './accounts';
+import { axe } from './axe';
 import { done, makeImage, signIn } from './signin';
 
 let kept: Cookie[] | null = null; // one sign-in for the file: the console allows only so many
@@ -178,6 +179,45 @@ test('System: its cards, and Check now', async ({ page }) => {
   await expect(main(page).getByText(/SQLite|scene\.db/)).toHaveCount(0);
   await main(page).getByRole('button', { name: 'Check now' }).click();
   await expect(main(page).getByRole('button', { name: 'Check now' })).toBeEnabled();
+});
+
+test('System, Checks: each check a row, ok or its problem (the checks added to the answer here), and no axe problem', async ({
+  page,
+}) => {
+  await page.route('**/api/admin/system', async (route) => {
+    const real = await route.fetch();
+    const now = Date.now() / 1000;
+    const json = {
+      ...((await real.json()) as Record<string, unknown>),
+      checks: {
+        database: { online: true, seconds: 0.002, detail: '' },
+        render: { online: false, url: 'http://render:8188', since: now - 600, detail: '' },
+        model: { online: true, detail: '', signed_in: true, plan: 'Max' },
+        programs: {
+          ffmpeg: { ready: true, detail: '' },
+          motion: { ready: false, detail: 'Run npm install in motion/' },
+        },
+        disk: { folder: 'C:/Scene/Outputs', free: 50e9, total: 100e9 },
+        backup: {
+          folder: 'E:/b',
+          last: now - 3600,
+          check: { ok: true, detail: 'restored', when: now },
+          restore_test: null,
+        },
+        langfuse: { in_use: false },
+      },
+    };
+    await route.fulfill({ response: real, json });
+  });
+  await open(page, 'system');
+  const checks = card(page, 'Checks');
+  await expect(checks.getByText('2 problems')).toBeVisible();
+  await expect(checks.getByRole('row', { name: /Render server.*Problem.*http:\/\/render:8188/ })).toBeVisible();
+  await expect(checks.getByRole('row', { name: /Motion pages.*Run npm install in motion/ })).toBeVisible();
+  await expect(checks.getByRole('row', { name: /Agent model.*OK.*signed in · Max/ })).toBeVisible();
+  await expect(checks.getByRole('row', { name: /Restore test.*Not run yet/ })).toBeVisible();
+  await page.waitForLoadState('networkidle');
+  expect(await axe(page, 'console system, checks')).toEqual([]);
 });
 
 test('System, Guardrails: the stop asks first, stops and starts again; a limit out of range is not saved', async ({
