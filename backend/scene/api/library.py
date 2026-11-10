@@ -129,13 +129,16 @@ async def list_items(request: Request, kind: str = "", q: str = "", project: str
         sql, params = sql + " AND g.project_id = ?", params + [int(project)]
     embedder = request.app.state.embedder
     if meaning and q.strip() and embedder is not None:   # by meaning: the items in view, closest first (semantic.py)
-        with as_everyone() if shared else contextlib.nullcontext():
-            ids = [r["id"] for r in await request.app.state.db.aall(sql.replace("SELECT g.*, j.cost", "SELECT g.id, j.cost", 1), params)]
-            near = await offload(semantic.nearest, request.app.state.db, embedder, q, "g.id = ANY(?)", [ids],
-                                 min(limit, LIBRARY_PAGE_MOST) if limit > 0 else 60)
-            rows = {r["id"]: r for r in await request.app.state.db.aall(sql + " AND g.id = ANY(?)", params + [near])}
-        items = [_shown(rows[i], user) for i in near if i in rows]
-        return {"items": items, "next_cursor": None} if limit > 0 else {"items": items}
+        try:
+            with as_everyone() if shared else contextlib.nullcontext():
+                ids = [r["id"] for r in await request.app.state.db.aall(sql.replace("SELECT g.*, j.cost", "SELECT g.id, j.cost", 1), params)]
+                near = await offload(semantic.nearest, request.app.state.db, embedder, q, "g.id = ANY(?)", [ids],
+                                     min(limit, LIBRARY_PAGE_MOST) if limit > 0 else 60)
+                rows = {r["id"]: r for r in await request.app.state.db.aall(sql + " AND g.id = ANY(?)", params + [near])}
+            items = [_shown(rows[i], user) for i in near if i in rows]
+            return {"items": items, "next_cursor": None} if limit > 0 else {"items": items}
+        except semantic.SemanticError:
+            pass   # the embedding API can't be reached: the words are searched instead, below
     found, values = search_sql(q)   # every word in its name, summary, workflow or prompt; or a name typed a little wrong
     sql, params = sql + found, params + values
     if limit > 0:   # a page: newest first, the same created time ordered by id, so no item is skipped or shown twice

@@ -275,3 +275,16 @@ def test_the_cast_of_a_project_is_its_always_on_entries(client):
     client.post("/api/kit", json={"project_id": project, "text": "Fade in.", "name": "Script", "always": True})
     assert [e["name"] for e in client.get("/api/cast", params={"project": project}).json()["always"]] == ["Script"]
     assert client.get("/api/cast", params={"project": 0}).json() == {"always": [], "fills": []}
+
+
+def test_search_by_meaning_falls_back_to_words_when_the_embedding_api_is_down(client, monkeypatch):
+    from scene import semantic
+    from test_api import register
+    register(client)
+    monkeypatch.setattr(client.app.state, "embedder", object())   # search by meaning is on
+
+    def down(*args, **kwargs):
+        raise semantic.SemanticError("The embedding API can't be reached.")
+    monkeypatch.setattr(semantic, "nearest", down)
+    answer = client.get("/api/library?q=kite&meaning=1")
+    assert answer.status_code == 200 and answer.json()["items"] == []   # the word search's answer, not a 500
