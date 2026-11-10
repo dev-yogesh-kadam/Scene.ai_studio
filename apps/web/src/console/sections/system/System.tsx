@@ -1,4 +1,4 @@
-// The console's System section: alerts, maintenance, the render server, the agent's model, the app, the disk, backups,
+// The console's System section: alerts, maintenance, the guardrails (the studio's stop and limits), the render server, the agent's model, the app, the disk, backups,
 // who uses the space, and how many of everything there is.
 
 import { useState } from 'react';
@@ -7,6 +7,7 @@ import { Meter } from '../../../common/components/Charts';
 import { useConsole, useSection } from '../shared/context';
 import { Facts, Loaded, bytes, failed, number, span, stamp } from '../shared/ui';
 import { BackupsCard, type Backups } from './Backups';
+import { GuardrailsCard, type Guardrails } from './Guardrails';
 import {
   AlertsCard,
   MaintenanceCard,
@@ -90,24 +91,27 @@ function CheckNow() {
 
 export default function System() {
   const query = useSection('system', [], async () => {
-    const [s, b, st, alerts, browsers] = await Promise.all([
+    const [s, b, st, alerts, browsers, guard] = await Promise.all([
       api<State>('/api/admin/system'),
       api<Backups>('/api/admin/backups'),
       api<Storage>('/api/admin/storage'),
       api<Alerts>('/api/admin/alerts'),
       api<ClientErrors>('/api/admin/client-errors'),
+      // shown to those whose role may read it
+      api<Guardrails>('/api/admin/guardrails').catch(() => null),
     ]);
-    return { s, b, st, alerts, browsers };
+    return { s, b, st, alerts, browsers, guard };
   });
   return (
     <Loaded query={query}>
-      {({ s, b, st, alerts, browsers }) => {
+      {({ s, b, st, alerts, browsers, guard }) => {
         const sys = s.server.system || {};
         const disk = s.storage;
         return (
           <div className={css('grid-2')}>
             <AlertsCard a={alerts} />
             <MaintenanceCard key={String(s.maintenance.on)} m={s.maintenance} />
+            {guard && <GuardrailsCard key={JSON.stringify(guard)} g={guard} />}
             <div className={css('card')}>
               <div className={css('card-head')}>
                 <h2>Render server</h2>
@@ -180,7 +184,7 @@ export default function System() {
                   ['Asset files', bytes(disk.assets)],
                   [
                     'Database',
-                    `${bytes(disk.database)} · ${disk.database_kind === 'postgres' ? 'PostgreSQL' : 'SQLite'}`,
+                    `${bytes(disk.database)} · ${disk.database_kind === 'postgres' ? 'PostgreSQL' : disk.database_kind}`,
                   ],
                   ['Free space', gb(disk.disk_free)],
                   ['Folder', disk.folder],
