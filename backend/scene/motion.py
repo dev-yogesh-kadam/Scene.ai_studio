@@ -26,6 +26,11 @@ FONT = ROOT / "apps" / "web" / "public" / "fonts" / "Archivo-latin.woff2"
 SHAPES = {"landscape": (1920, 1080), "portrait": (1080, 1920), "square": (1080, 1080)}
 CARD_FPS = 30
 RENDER_TIMEOUT = 900            # seconds
+# The studio's variables HyperFrames is not given: the studio's own (its database, keys, settings), and every key or
+# token, among them those HyperFrames would use itself (GEMINI_API_KEY, OPENROUTER_API_KEY... for paid model calls).
+PRIVATE_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|COOKIE|DATABASE|^SCENE|^AWS_|^AZURE|^ANTHROPIC|^CLAUDE|"
+                         r"^GEMINI|^GOOGLE|^OPENROUTER|^OPENAI|^FIGMA|^HEYGEN|^LANGFUSE|^PG|^REDIS|^HYPERFRAMES_VERTEX",
+                         re.IGNORECASE)
 MAX_SOURCE_SECONDS = 120        # a longer video is better titled on the timeline
 _one_at_a_time = asyncio.Lock()   # every render starts its own Chrome
 
@@ -235,7 +240,8 @@ async def _run(command, folder, check=True, timeout=RENDER_TIMEOUT, scratch=None
     render's own temporary folder, where Chrome's profile and HyperFrames' other temporary files go (TEMP), so they
     go with it; Chrome left them in the system's temporary folder, one profile for every render.
     A render stopped (its time up, its job cancelled) is stopped with everything it started: Chrome and ffmpeg too."""
-    env = dict(os.environ, HYPERFRAMES_FFMPEG_PATH=media.ffmpeg_path(), HYPERFRAMES_FFPROBE_PATH=str(_ffprobe()),
+    env = dict({k: v for k, v in os.environ.items() if not PRIVATE_ENV.search(k)},
+               HYPERFRAMES_FFMPEG_PATH=media.ffmpeg_path(), HYPERFRAMES_FFPROBE_PATH=str(_ffprobe()),
                # Nothing is sent anywhere and nothing is installed while rendering. The one thing looked up is a Google
                # Font a page names, fetched once and kept in FONT_CACHE.
                HYPERFRAMES_NO_TELEMETRY="1", DO_NOT_TRACK="1", HYPERFRAMES_NO_UPDATE_CHECK="1", HYPERFRAMES_NO_FEEDBACK="1",

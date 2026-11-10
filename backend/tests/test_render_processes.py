@@ -136,3 +136,14 @@ def test_a_failed_project_render_takes_back_the_files_it_had_written(tmp_path, m
     with pytest.raises(motion.MotionError, match="took longer"):
         asyncio.run(motion.render_project(source, target, work_dir=work))
     assert not target.exists() and list(work.iterdir()) == []
+
+
+def test_hyperframes_is_not_given_the_studios_keys_or_settings(tmp_path, monkeypatch):
+    for name in ("SCENE_SECRET_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "PGPASSWORD", "AWS_PROFILE"):
+        monkeypatch.setenv(name, "do-not-pass")
+    said = tmp_path / "env.txt"
+    asyncio.run(motion._run([sys.executable, "-c", "import os, sys; open(sys.argv[1], 'w').write(chr(10).join(os.environ))",
+                             str(said)], tmp_path, scratch=tmp_path / "render"))
+    names = {n.upper() for n in said.read_text().split("\n")}
+    assert not names & {"SCENE_SECRET_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "PGPASSWORD", "AWS_PROFILE"}
+    assert {"PATH", "SYSTEMROOT", "HYPERFRAMES_NO_TELEMETRY", "HYPERFRAMES_FONT_CACHE_DIR"} <= names or sys.platform != "win32"
