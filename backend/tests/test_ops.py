@@ -180,3 +180,84 @@ def test_every_check_in_one_answer(client):
     assert found["disk"]["free"] > 0 and "last" in found["backup"]
 
 
+# ---------------------------------------------------------------- backups by the calendar
+
+class _Db:
+    suffix = ".dump"
+
+    def __init__(self):
+        self.settings = {}
+
+    def setting(self, key, default=None):
+        return self.settings.get(key, default)
+
+
+def _schedule(tmp_path, monkeypatch, **options):
+    done = []
+
+    def attempt(db, folder, config_file="", keep=14):
+        if failing.get("database"):
+            return None
+        target = folder / "scene_{}.dump".format(today["day"])
+        target.write_text("copy")
+        done.append(("database", today["day"]))
+        return target
+
+    def attempt_files(db, folder, sources, keep=14):
+        if failing.get("files"):
+            return None
+        done.append(("files", today["day"]))
+        return 3
+    today, failing = {"day": "2026-11-10"}, {}
+    monkeypatch.setattr(backup, "attempt", attempt)
+    monkeypatch.setattr(backup, "attempt_files", attempt_files)
+    tmp_path.mkdir(exist_ok=True)
+    schedule = backup.Schedule(_Db(), tmp_path, sources={"assets": tmp_path / "kit"}, **options)
+    return schedule, done, today, failing
+
+
+def test_the_daily_copies_follow_the_calendar_not_the_time_since_the_start(tmp_path, monkeypatch):
+    schedule, done, today, failing = _schedule(tmp_path, monkeypatch)
+    (tmp_path / "scene_2026-11-10.dump").write_text("made as the app started")
+
+    def tick():
+        return asyncio.run(schedule.tick(today["day"]))
+    assert tick() == ["files"]                         # the start made today's copy; the files follow
+    assert tick() == [] and tick() == []                # looked at every hour: nothing more that day
+    today["day"] = "2026-11-11"                         # after midnight, the studio still running
+    assert tick() == ["database", "files"]
+    assert tick() == []
+    today["day"] = "2026-11-12"
+    failing.update(database=True, files=True)           # the backup disk unplugged
+    assert tick() == [] and tick() == []
+    failing.clear()                                     # plugged in again: made at the next look, not a day later
+    assert tick() == ["database", "files"]
+    assert done == [("files", "2026-11-10"), ("database", "2026-11-11"), ("files", "2026-11-11"),
+                    ("database", "2026-11-12"), ("files", "2026-11-12")]
+
+
+def test_a_part_of_the_schedule_that_fails_stops_neither_the_others_nor_the_schedule(tmp_path, monkeypatch, capsys):
+    schedule, done, today, failing = _schedule(tmp_path, monkeypatch, restore_url="postgresql://x@localhost/postgres")
+
+    def broken_restore(db, folder, url):
+        raise ValueError("a counts file that is not JSON")
+    monkeypatch.setattr(backup, "restore_test", broken_restore)
+    assert asyncio.run(schedule.tick(today["day"])) == ["database", "files"]
+    assert "The restore test of the backups could not run: a counts file that is not JSON" in capsys.readouterr().out
+    today["day"] = "2026-11-11"
+    assert asyncio.run(schedule.tick(today["day"])) == ["database", "files"]   # the next day goes on as usual
+
+
+def test_the_schedule_looks_every_hour_and_the_studio_starts_it(tmp_path):
+    assert backup.CHECK_EVERY <= 3600
+    main = (ROOT / "backend" / "scene" / "main.py").read_text(encoding="utf-8")
+    assert "backup.run_forever(" in main and "backup.attempt(*copies)" in main
+
+
+def test_the_files_copied_with_the_backups_include_the_kits_uploads(client):
+    """The kit's uploads are kept in assets/<user id>/ (api/kit.py): that folder is one the backup copies."""
+    state = client.app.state
+    assert state.backup_files["assets"] == state.assets_dir
+    assert state.backup_files["outputs"] == state.output_dir
+
+
