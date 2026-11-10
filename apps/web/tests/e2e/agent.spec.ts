@@ -167,6 +167,65 @@ test('a message goes to the agent, its work and reply show, and the box empties'
     .toEqual([['Hello agent', 'Done **thinking**.', 'answered', 0]]);
 });
 
+test('the bulb, the workflows (sliders) and the retry switch: each is kept, and goes with the message', async ({
+  page,
+}) => {
+  const problems = watch(page);
+  const sent: Record<string, unknown>[] = [];
+  await page.route('**/api/agent/plan', (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/x-ndjson',
+      body:
+        JSON.stringify({ type: 'plan', steps: [], total: 0, activity: [], chips: {}, seconds: 1, reply: 'Ok.' }) + '\n',
+    });
+  });
+  await openWith(page, 'Agent knobs', []);
+
+  // the bulb: explain more, per tab
+  const bulb = page.getByRole('button', { name: /^Explain more: off/ });
+  await expect(bulb).toHaveAttribute('aria-pressed', 'false');
+  await bulb.click();
+  await expect(page.getByRole('button', { name: /^Explain more: on/ })).toHaveAttribute('aria-pressed', 'true');
+
+  // the sliders: the workflows this chat uses
+  await page.getByRole('button', { name: 'Workflows for this chat: the agent chooses' }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByText('Workflows for this chat')).toBeVisible();
+  const first = menu.getByRole('menuitemcheckbox').first();
+  await expect(first).toHaveAttribute('aria-checked', 'false');
+  await first.click();
+  await expect(page.getByRole('menu').getByRole('menuitemcheckbox').first()).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Workflows for this chat: 1 chosen' })).toBeVisible();
+
+  await box(page).click();
+  await page.keyboard.type('Make it teach');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Ok.', { exact: true })).toBeVisible({ timeout: 15_000 });
+  expect(sent.at(-1)).toMatchObject({ explain: true });
+  expect(sent.at(-1)!.workflows).toHaveLength(1);
+
+  // the retry switch, under the permission: the user's, on the server
+  const retry = async () =>
+    ((await (await page.request.get('/api/agent/preferences')).json()) as { retry_once: boolean }).retry_once;
+  expect(await retry()).toBe(false);
+  await page.getByRole('button', { name: /Generation permission/ }).click();
+  const item = page.getByRole('menuitemcheckbox', { name: /Retry a failed shot once by itself/ });
+  await expect(item).toHaveAttribute('aria-checked', 'false');
+  await item.click();
+  await expect.poll(retry).toBe(true);
+  await page.getByRole('button', { name: /Generation permission/ }).click();
+  await expect(page.getByRole('menuitemcheckbox', { name: /Retry a failed shot/ })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await page.getByRole('menuitemcheckbox', { name: /Retry a failed shot/ }).click();
+  await expect.poll(retry).toBe(false);
+  expect(problems.filter((p) => !p.includes('/api/agent/status'))).toEqual([]);
+});
+
 test('a frame added to the message goes as a chip, and the message names it', async ({ page }) => {
   await page.route('**/api/agent/plan', async (route) => {
     const sent = route.request().postDataJSON() as { instruction: string; selection: number[] };
@@ -240,7 +299,12 @@ test('questions are answered on a card above the box, by number or Enter', async
   await card.getByRole('radio', { name: /Bright/ }).click();
   await expect(card).toContainText('How long?');
   await card.getByRole('radio', { name: /10s/ }).click();
+  const asked = page.waitForRequest('**/api/agent/plan');
   await card.getByRole('button', { name: /Submit/ }).click();
+  // both answers go in one message
+  const message = JSON.stringify((await asked).postDataJSON());
+  expect(message).toContain('Bright');
+  expect(message).toContain('10s');
   await expect(page.getByText('Thanks.', { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('Bright', { exact: true }).first()).toBeVisible();
 });
