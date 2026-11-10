@@ -257,3 +257,17 @@ def test_the_daily_limit_is_checked_at_approval(studio):
     db.run("UPDATE users SET daily_cap = ? WHERE id = ?", (plan["total"], bob["id"]))   # enough for the plan
     assert studio.post("/api/agent/plans/{}/approve".format(plan["id"])).status_code == 200
     assert wait_for(studio, plan["id"])["state"] == "done"   # its steps were not refused by the limit again
+
+
+def test_a_plan_approved_at_the_same_moment_elsewhere_is_answered_as_it_is(studio, monkeypatch):
+    """Two Approves at once: the one that loses the race answers with the plan as the other left it, read on the
+    database's threads (it was read on the event loop, which the tests' loop guard refuses)."""
+    plan = studio.post("/api/agent/plans", json={"steps": [step("one")]}).json()
+    db = studio.app.state.db
+    real = db.achange
+
+    async def lost_the_race(sql, params=()):
+        return 0 if "SET state = 'running'" in sql else await real(sql, params)
+    monkeypatch.setattr(db, "achange", lost_the_race)
+    answered = studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    assert answered.status_code == 200 and answered.json()["id"] == plan["id"] and answered.json()["state"] == "waiting"

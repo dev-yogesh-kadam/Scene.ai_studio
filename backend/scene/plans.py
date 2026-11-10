@@ -180,7 +180,7 @@ class PlanRunner:
         marks = ", ".join("?" * len(from_states))
         if not await self.db.achange("UPDATE agent_plans SET state = 'running', error = '' WHERE id = ? AND state IN ({})".format(marks),
                               (plan_id, *from_states)):
-            return self.shown(self._row(plan_id))   # approved at the same moment by another request
+            return self.shown(await offload(self._row, plan_id))   # approved at the same moment by another request
         try:
             steps, progress = json.loads(row["steps"]), json.loads(row["progress"])
             if again:   # what failed is tried again: a step not queued, or whose job failed or was cancelled
