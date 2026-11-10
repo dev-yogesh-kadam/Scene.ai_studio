@@ -17,6 +17,7 @@ type Answer = {
   seconds?: number;
   chips?: Chips;
   memory_used?: string[];
+  content_note?: string;
   steps: Step[];
   total: number;
   llm?: Run['llm'];
@@ -105,6 +106,7 @@ export async function sendMessage(chat: AgentChat, typed?: Typed) {
       seconds: answer.seconds,
       chips: answer.chips || {},
       memoryUsed: answer.memory_used || [],
+      contentNote: answer.content_note || '',
       steps: answer.steps,
       total: answer.total,
       state: answer.steps.length ? 'proposed' : 'answered',

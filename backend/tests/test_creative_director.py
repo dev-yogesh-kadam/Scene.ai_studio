@@ -182,3 +182,154 @@ def test_a_message_that_looks_big_comes_with_its_craft_note_and_examples_and_a_s
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "One.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "a picture of a cat on a windowsill"})
     assert not any("Examples of strong work" in t for t in told(seen))
+
+
+# ---------------------------------------------------------------- the content check
+
+def checked_by(monkeypatch, client, verdict):
+    """The fast model's content check answers `verdict` (or raises it, when it is an exception); returns the calls."""
+    calls = []
+
+    async def check_content(system, message, shape):
+        calls.append(message)
+        if isinstance(verdict, Exception):
+            raise verdict
+        return verdict
+    monkeypatch.setattr(client.app.state.agent, "check_content", check_content)
+    return calls
+
+
+def test_a_flag_of_warn_is_a_note_on_the_plan_card_and_is_written_down(client, monkeypatch):
+    from scene import content_check
+    content_check.SEEN.clear()
+    me = register(client)
+    calls = checked_by(monkeypatch, client, {"flag": "warn", "categories": ["real_person"], "note": "This looks like a real actor."})
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "One shot.", "steps": [dict(STEP, prompt="A famous actor waves.")]})
+    plan = client.post("/api/agent/plan", json={"instruction": "a famous actor waving"}).json()
+    assert len(plan["steps"]) == 1 and plan["content_note"] == "This looks like a real actor."
+    assert "A famous actor waves." in calls[0] and "a famous actor waving" in calls[0]
+    row = client.app.state.db.one("SELECT * FROM moderation WHERE kind = 'content_check'")
+    assert row["verdict"] == "warn" and row["words"] == "real_person" and row["user_id"] == me["id"]
+    # keeping the same plan does not ask again: its verdict is remembered
+    client.post("/api/agent/plans", json={"steps": plan["steps"]})
+    assert len(calls) == 1
+
+
+def test_a_block_refuses_the_plan_only_in_the_mode_that_blocks(client, monkeypatch):
+    from scene import content_check
+    content_check.SEEN.clear()
+    register(client)
+    checked_by(monkeypatch, client, {"flag": "block", "categories": ["minors"], "note": "Nothing sexual involving a child."})
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "One shot.", "steps": [STEP]})
+    plan = client.post("/api/agent/plan", json={"instruction": "x"}).json()   # the default mode, warn: a note only
+    assert len(plan["steps"]) == 1 and plan["content_note"] == "Nothing sexual involving a child."
+    guardrails.save(client.app.state.db, {"choices": {"content_check_mode": "block"}})
+    content_check.SEEN.clear()
+    plan = client.post("/api/agent/plan", json={"instruction": "x"}).json()
+    assert plan["steps"] == [] and plan["reply"] == "This plan can't be made here: Nothing sexual involving a child."
+    refused = client.post("/api/agent/plans", json={"steps": [{"name": "x", "kind": "video", "settings": {"prompt": "y"}}]})
+    assert refused.status_code == 400 and "can't be made here" in refused.json()["detail"]
+
+
+def test_the_check_fails_open_and_is_off_when_switched_off(client, monkeypatch):
+    from scene import content_check
+    content_check.SEEN.clear()
+    register(client)
+    calls = checked_by(monkeypatch, client, agent.AgentError("Claude is busy"))
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "One shot.", "steps": [STEP]})
+    plan = client.post("/api/agent/plan", json={"instruction": "x"}).json()
+    assert len(plan["steps"]) == 1 and plan["content_note"] == ""
+    assert any("content check could not run" in e["text"] for e in plan["activity"] if e["type"] == "activity")
+    assert content_check.status()["error"] == "Claude is busy"
+    assert client.app.state.db.one("SELECT COUNT(*) AS n FROM moderation")["n"] == 0
+    guardrails.save(client.app.state.db, {"choices": {"content_check_mode": "off"}})
+    client.post("/api/agent/plan", json={"instruction": "x"})
+    assert len(calls) == 1   # off: no call at all
+
+
+def test_the_content_check_mode_is_a_choice_of_three_words(client):
+    db = client.app.state.db
+    shown = guardrails.shown(db)
+    assert shown["choices"] == {"content_check_mode": "warn"} and shown["options"]["content_check_mode"] == ["off", "warn", "block"]
+    for wrong in ({"content_check_mode": "loud"}, {"nope": "warn"}):
+        try:
+            guardrails.save(db, {"choices": wrong})
+            assert False, wrong
+        except ValueError:
+            pass
+    assert guardrails.save(db, {"choices": {"content_check_mode": "block"}})["choices"]["content_check_mode"] == "block"
+
+
+def test_the_content_check_reads_drawn_words_and_what_the_user_supplied():
+    from scene import content_check
+    steps = [{"name": "Card", "motion": {"scenes": [{"heading": "Big sale", "text": "Today"}]}},
+             {"name": "Shot", "settings": {"prompt": "She waves."}, "uses": [{"name": "Maya", "label": "Character"}]}]
+    words = content_check.plan_words(steps)
+    assert "Big sale" in words and "She waves." in words and content_check.supplied(steps) == ["Maya (Character)"]
+    assert content_check.clean({"flag": "warn", "categories": ["real_person", "made_up"], "note": " a\nnote "}) == {
+        "flag": "warn", "categories": ["real_person"], "note": "a note"}
+    assert content_check.clean({"flag": "maybe"})["flag"] == "none"
+    assert content_check.applied({"flag": "block", "categories": [], "note": "n"}, "warn")["flag"] == "warn"
+
+
+def test_the_console_checks_show_the_content_check_and_the_gates(client):
+    import asyncio
+    from scene import health
+    found = health.creative(client.app.state)
+    assert found["content_check"]["mode"] == "warn" and "shot variety" in found["gates"]
+
+
+# ---------------------------------------------------------------- the quality gates
+
+def shot(name, prompt="A dog runs.", **more):
+    return dict({"tool": "generate", "workflow": "video/h3_all_in_one", "name": name, "prompt": prompt}, **more)
+
+
+def test_the_continuity_gate_finds_a_place_or_a_person_written_two_ways():
+    same = "A girl of about twenty with a black braid and a yellow raincoat"
+    assert guardrails.continuity_gate([shot("a", same + " runs.", place="rainy night market"),
+                                       shot("b", same + " jumps.", place="rainy night market")]) is None
+    found = guardrails.continuity_gate([shot("a", same + " runs.", place="rainy night market"),
+                                        shot("b", "A girl in a red coat jumps.", place="the night market in the rain")])
+    assert "written two ways" in found and "the girl is described differently" in found and "red coat" in found
+    # a reference carries the look, and an always-on character in NeuralCore too
+    assert guardrails.continuity_gate([shot("a", same + " runs."), shot("b", "A girl in a red coat jumps.", uses=[{"item": 3}])]) is None
+    assert guardrails.continuity_gate([shot("a", same + " runs."), shot("b", "A girl in a red coat jumps.")],
+                                      [{"type": "character", "always": True, "name": "Maya"}]) is None
+    assert guardrails.continuity_gate([shot("a", place="Meera's kitchen"), shot("b", place="Meera's kitchen, next morning")]) is None
+
+
+def test_the_variety_gate_wants_more_than_one_shot_size():
+    assert "every shot is MS" in guardrails.variety_gate([shot(n, shot_size="MS") for n in "abc"])
+    assert guardrails.variety_gate([shot("a", shot_size="WS"), shot("b", shot_size="MS"), shot("c", shot_size="MS")]) is None
+    assert guardrails.variety_gate([shot(n, shot_size="MS") for n in "ab"]) is None       # two shots: not judged
+    assert guardrails.variety_gate([shot(n) for n in "abcd"]) is None                      # no sizes given: not judged
+
+
+def test_the_hook_gate_wants_a_social_video_to_open_on_a_hook():
+    flat = [shot("Street", "A quiet street at dawn.", shot_size="WS", move="static", orientation="portrait"), shot("b")]
+    assert "first one or two seconds" in guardrails.hook_gate(flat)
+    assert guardrails.hook_gate([dict(flat[0], orientation="landscape"), flat[1]]) is None          # not social
+    assert "first one or two seconds" in guardrails.hook_gate([dict(flat[0], orientation="landscape"), flat[1]], "for TikTok")
+    assert guardrails.hook_gate([dict(flat[0], shot_size="MCU"), flat[1]]) is None                   # close
+    assert guardrails.hook_gate([dict(flat[0], move="push in"), flat[1]]) is None                    # moving
+    assert guardrails.hook_gate([dict(flat[0], prompt="Coffee splashes into a cup."), flat[1]]) is None   # a hook's words
+    assert guardrails.hook_gate([dict(flat[0], shot_size="", move=""), flat[1]]) is None            # not said: not judged
+
+
+def test_the_video_text_gate_finds_words_asked_of_a_video_model():
+    assert "garbled" in guardrails.video_text_gate([shot("Sign", 'A wooden sign that reads "OPEN 24 HOURS" swings.')])
+    assert "garbled" in guardrails.video_text_gate([shot("Title", 'The words "SUMMER SALE" in big neon letters.')])
+    assert guardrails.video_text_gate([shot("Talk", 'Maya says: "We are late."')]) is None             # spoken, not drawn
+    assert "garbled" in guardrails.video_text_gate([shot("Shop", 'A shop sign that says "OPEN" flickers.')])
+    assert guardrails.video_text_gate([dict(shot("Poster", 'A sign that reads "CHAI 10".'), workflow="image/flux2")]) is None
+
+
+def test_the_quality_gates_are_one_hint_once_and_never_a_block(client, monkeypatch):
+    register(client)
+    flat = [dict(STEP, name=n, shot_size="WS", move="static", prompt="A quiet street.") for n in ("A", "B", "C")]
+    seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "Three.", "steps": flat})
+    plan = client.post("/api/agent/plan", json={"instruction": "three shots of a street for reels"}).json()
+    notes = told(seen)[-1]
+    assert "every shot is WS" in notes and "first one or two seconds" in notes
+    assert len(seen) == 2 and len(plan["steps"]) == 3   # the same plan again: the model decided to keep it

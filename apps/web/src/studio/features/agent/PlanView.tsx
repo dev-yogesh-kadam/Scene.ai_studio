@@ -119,6 +119,11 @@ export function ApprovalCard({ chat, run }: { chat: AgentChat; run: Run }) {
           <Icon name="down" />
         </span>
       </button>
+      {!folded && run.contentNote && (
+        <p className="notice small" role="note">
+          {run.contentNote}
+        </p>
+      )}
       {!folded && (
         <div className={s['agent-dock-steps']}>
           <ol className={s['approval-list']}>

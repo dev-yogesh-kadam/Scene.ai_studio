@@ -22,7 +22,7 @@ from starlette.datastructures import FormData
 from .credits import PREPAID
 from .jobs import QUEUEING
 from .db import offload
-from . import guardrails, moderation
+from . import content_check, guardrails, moderation
 
 RUNNING = ("running", "stopping")
 ENDED_JOB = ("done", "failed", "cancelled")
@@ -135,6 +135,10 @@ class PlanRunner:
         if not isinstance(steps, list) or not steps or len(steps) > 200 or not all(isinstance(s, dict) for s in steps):
             raise HTTPException(400, "A plan needs its steps.")
         problem = await offload(moderation.plan_problem, self.db, steps)   # words the studio refuses: said before Approve
+        if problem:
+            raise HTTPException(400, problem)
+        # the content check, as the agent's route ran it (its verdict of the same words is remembered: not asked again)
+        problem = content_check.problem(await content_check.check(getattr(self.state, "agent", None), self.db, user["id"], steps, body.get("name") or ""))
         if problem:
             raise HTTPException(400, problem)
         project_id = body.get("project_id") or None

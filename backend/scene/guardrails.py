@@ -18,6 +18,11 @@ with no restart):
 - guard_turn_seconds: the longest one message to the agent's live session may take (3600).
 - creative_big_job_credits: a plan priced above this is a big job (agent.big_job): it gets the brief, the concept, the
   stills first and the automatic second opinion (600). 0: a big job by its number of shots alone.
+- content_check_mode: what the content check (content_check.py) does with a plan it flags: off, warn (a note on the
+  plan card; the default) or block (a "block" flag refuses the plan). One of CHOICES, not a number.
+
+The quality gates at the end (continuity_gate, variety_gate, hook_gate, video_text_gate) are not limits: each is a
+hint the model gets once before the user sees the plan (quality_hints), never a block.
 
 Functions that read the database are sync: async code calls them with db.offload, as everything else does.
 """
@@ -25,6 +30,7 @@ Functions that read the database are sync: async code calls them with db.offload
 import asyncio
 import json
 import math
+import re
 import time
 
 from fastapi import HTTPException
@@ -91,15 +97,38 @@ def known(key):
     return _seen[key]
 
 
+# The settings that are one of a few words, not a number: {key: (the words it may be)}, the first listed in
+# CHOICE_DEFAULTS when an admin set nothing.
+CHOICES = {"content_check_mode": ("off", "warn", "block")}
+CHOICE_DEFAULTS = {"content_check_mode": "warn"}
+
+
+def choice(db, key):
+    """One of CHOICES as an admin set it, or its default."""
+    value = str(db.setting(key, CHOICE_DEFAULTS[key]) or "").strip().lower()
+    return value if value in CHOICES[key] else CHOICE_DEFAULTS[key]
+
+
 def shown(db):
-    """What the console shows: the stop and every limit with its range."""
-    return {"stop": stopped(db), "limits": limits(db), "ranges": {k: list(v) for k, v in RANGES.items()}, "defaults": dict(DEFAULTS)}
+    """What the console shows: the stop, every limit with its range, and every choice with the words it may be."""
+    return {"stop": stopped(db), "limits": limits(db), "ranges": {k: list(v) for k, v in RANGES.items()}, "defaults": dict(DEFAULTS),
+            "choices": {k: choice(db, k) for k in CHOICES}, "options": {k: list(v) for k, v in CHOICES.items()},
+            "choice_defaults": dict(CHOICE_DEFAULTS)}
 
 
 def save(db, body, by=""):
-    """Change the stop ({"stop": true/false, "text"}) and any limits ({"limits": {key: number}}) an admin sent. A value
-    out of its range, or a key that is not a limit, is refused whole (ValueError) before anything is written."""
+    """Change the stop ({"stop": true/false, "text"}), any limits ({"limits": {key: number}}) and any choices
+    ({"choices": {key: word}}) an admin sent. A value out of its range, a word a choice does not have, or a key that is
+    neither, is refused whole (ValueError) before anything is written."""
     body = body if isinstance(body, dict) else {}
+    picked = body.get("choices") or {}
+    if not isinstance(picked, dict):
+        raise ValueError("choices is an object of {name: word}.")
+    for key, value in picked.items():
+        if key not in CHOICES:
+            raise ValueError("{} is not a choice. The choices: {}.".format(key, ", ".join(CHOICES)))
+        if value not in CHOICES[key]:
+            raise ValueError("{} must be one of {}.".format(key, ", ".join(CHOICES[key])))
     changes = body.get("limits") or {}
     if not isinstance(changes, dict):
         raise ValueError("limits is an object of {name: number}.")
@@ -118,6 +147,8 @@ def save(db, body, by=""):
     if "stop" in body and not isinstance(body["stop"], bool):
         raise ValueError("stop is true or false.")
     for key, value in clean.items():
+        db.set_setting(key, value)
+    for key, value in picked.items():
         db.set_setting(key, value)
     if body.get("stop") is True:
         set_stop(db, True, by, body.get("text"))
@@ -325,3 +356,128 @@ def answer_problem(content):
     if steps is not None and (not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps)):
         return "\"steps\" is not a list of objects"
     return None
+
+
+# ---------------------------------------------------------------- the quality gates (hints, never blocks)
+#
+# Each reads the model's own steps (the answer's "steps": tool, workflow, prompt, shot_size, move, place, uses...) and
+# says what a creative director would send back, or None. quality_hints gathers them; the agent's route gives them to
+# the model once, with its other notes, before the user sees the plan. A gate judges only what a plan says: a shot with
+# no shot_size is not called the same size as another.
+
+PEOPLE = ("girl", "boy", "woman", "man", "child", "kid", "lady", "gentleman", "teenager", "student", "chef", "mother",
+          "father", "grandmother", "grandfather", "old man", "old woman", "fisherman", "fisherwoman", "dancer", "runner",
+          "singer", "bride", "groom", "worker", "farmer", "detective", "soldier", "nurse", "doctor", "barista", "dog", "cat")
+# "a girl of about twenty with a black braid and a yellow raincoat": a person and the words that describe them
+DESCRIBED = re.compile(r"\b(?:a|an|the)\s+((?:[\w'-]+\s+){0,3}?(?:" + "|".join(sorted(PEOPLE, key=len, reverse=True)) + r"))\b"
+                        r"((?:\s*,?\s*(?:of about|in (?:her|his|their)|with|wearing|dressed in|in a|in an)\s+[^,.;:]+)+)", re.IGNORECASE)
+# ...of which the words of a look are compared: its colours, its hair and its clothes ("black braid", "yellow raincoat")
+LOOK = frozenset("""black white grey gray silver red orange yellow gold golden green blue navy teal purple pink brown beige
+cream maroon striped checked denim leather linen silk wool braid braids bun ponytail curls curly beard moustache mustache
+bald hair fringe raincoat coat jacket hoodie sweater jumper shirt t-shirt kurta sari saree dupatta dress skirt jeans trousers
+suit uniform apron scarf hat cap turban hijab glasses spectacles boots sneakers sandals backpack""".split())
+WIDE = ("WS", "EWS", "")
+STILL = ("static", "")
+HOOK_WORDS = re.compile(r"\b(hook|close on|close-up|extreme close|macro|toward (?:the )?(?:camera|lens)|at (?:the )?(?:camera|lens)|"
+                         r"bursts?|splash\w*|pours?|crack\w*|snaps?|reveal\w*|mid-?air|slams?|drops?|explod\w*|sudden\w*|pov|leaps?)\b",
+                         re.IGNORECASE)
+SOCIAL = re.compile(r"\b(reels?|shorts|tiktok|tik tok|stories|story post|instagram|insta|whatsapp status|social)\b", re.IGNORECASE)
+# a video model asked for readable words: a sign that "reads" or "says", words in quotation marks in letters on something
+# (a person who "says" words speaks them: that is sound, not text)
+DRAWN = re.compile(r"(\b(reads?|(sign|banner|board|poster|screen|label|card|title)s? (that )?says|spells?|written|lettering|letters|"
+                    r"caption\w*|headline|slogan|subtitle\w*|on-?screen text|text that|the words?)\b[^.]{0,40}[\"“'‘][^\"”'’]{2,}[\"”'’])"
+                    r"|([\"“][^\"”]{2,40}[\"”]\s+(in|on)\s+(large|big|bold|neon|painted|white|red|gold)?\s*(letters|lettering|type|text|neon))",
+                    re.IGNORECASE)
+
+
+def _shots(steps, kind=None):
+    """The steps that generate a picture or a video ("video" or "image" by their workflow), in order."""
+    found = []
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, dict) or (step.get("tool") or "generate") != "generate":
+            continue
+        made = str(step.get("workflow") or "").split("/", 1)[0]
+        if kind is None or made == kind:
+            found.append(step)
+    return found
+
+
+def _place_words(place):
+    return {w for w in re.findall(r"[a-z]+", str(place or "").lower()) if w not in ("the", "a", "an", "of", "in", "at", "on")}
+
+
+def continuity_gate(steps, book=()):
+    """The same person or place described differently from shot to shot, when NeuralCore does not carry it: a place
+    written two ways ("rainy night market", "the night market in the rain"), or a person whose description changes
+    ("a girl with a black braid" then "a girl in a red coat"). A shot that uses a NeuralCore entry or a reference is
+    left out: the reference carries the look."""
+    shots = [s for s in _shots(steps) if not s.get("uses")]
+    if len(shots) < 2:
+        return None
+    found = []
+    places = list(dict.fromkeys(" ".join(str(s.get("place") or "").split()) for s in shots if str(s.get("place") or "").strip()))
+    for i, a in enumerate(places):
+        for b in places[i + 1:]:
+            wa, wb = _place_words(a), _place_words(b)
+            if a.lower() != b.lower() and wa and wb and len(wa & wb) / len(wa | wb) >= 0.5 and not (wa < wb or wb < wa):
+                found.append("the place is written two ways, “{}” and “{}”: write one place the same way in every shot".format(a, b))
+    # a character NeuralCore attaches to every shot ("always") carries the look: its people are not compared
+    carried = any(e.get("type") == "character" and e.get("always") for e in book or [])
+    described = {}   # the person's noun -> [(the words of their look, as written)]
+    for step in [] if carried else shots:
+        for who, how in DESCRIBED.findall(str(step.get("prompt") or "")):
+            said = re.findall(r"[\w'-]+", how.lower())
+            look = [w for w in said if w in LOOK]
+            if look:   # shown up to its last word of a look: "with a black braid and a yellow raincoat"
+                described.setdefault(who.lower().split()[-1], []).append(
+                    (frozenset(look), " ".join(said[:max(i for i, w in enumerate(said) if w in LOOK) + 1])))
+    for noun, ways in described.items():
+        other = next((w for w in ways if w[0] != ways[0][0]), None)
+        if other:
+            found.append("the {} is described differently across shots (“{}” and “{}”): repeat one description word for word, "
+                         "or keep the {} in NeuralCore first".format(noun, ways[0][1], other[1], noun))
+    return "Continuity: " + "; ".join(found[:3]) + "." if found else None
+
+
+def variety_gate(steps):
+    """A video plan of three shots or more whose sizes are all the same (counting only the shots that give one)."""
+    sizes = [str(s.get("shot_size") or "") for s in _shots(steps, "video")]
+    given = [z for z in sizes if z]
+    if len(sizes) < 3 or len(given) < 3 or len(set(given)) > 1:
+        return None
+    return ("Coverage: every shot is {}. Vary the sizes with the story (a wide to place us, a medium for the action, a close-up "
+            "for the feeling, an insert for the detail).".format(given[0]))
+
+
+def hook_gate(steps, instruction=""):
+    """A social video plan (portrait, or for Reels, Shorts, TikTok, Stories) of two shots or more whose first shot does
+    not hook: a static wide with no hook in its words. A first shot that gives neither its size nor its move is not
+    judged."""
+    shots = _shots(steps, "video")
+    if len(shots) < 2:
+        return None
+    social = any(s.get("orientation") == "portrait" for s in shots) or bool(SOCIAL.search(str(instruction or "")))
+    first = shots[0]
+    size, move = str(first.get("shot_size") or ""), str(first.get("move") or "")
+    if not social or (not size and not move):
+        return None
+    words = "{} {}".format(first.get("name") or "", first.get("prompt") or "")
+    if size in WIDE and move in STILL and not HOOK_WORDS.search(words):
+        return ("The hook: for social video the first one or two seconds decide whether anyone stays, and shot 1 is a static {}. "
+                "Open on motion, a face close to the camera, or the product's most striking moment.".format(size or "wide"))
+    return None
+
+
+def video_text_gate(steps):
+    """A video shot that asks the video model for readable words (a sign that reads "OPEN", a title in big letters)."""
+    asked = [s for s in _shots(steps, "video") if DRAWN.search(str(s.get("prompt") or ""))]
+    if not asked:
+        return None
+    return ("Words in a video: {} asks the video model for readable words, which come out garbled. Put the words on screen as "
+            "a designed page (render_html) over the clip, or keep the sign far off or soft.".format(
+                ", ".join("“{}”".format(str(s.get("name") or "a shot")) for s in asked[:3])))
+
+
+def quality_hints(steps, instruction="", book=()):
+    """Every quality gate's hint for a plan, in order (continuity, variety, the hook, words in a video); [] when all pass."""
+    return [h for h in (continuity_gate(steps, book), variety_gate(steps), hook_gate(steps, instruction), video_text_gate(steps)) if h]

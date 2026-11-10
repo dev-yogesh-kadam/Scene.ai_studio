@@ -20,6 +20,20 @@ export type Guardrails = {
   limits: Record<string, number>;
   ranges: Record<string, [number, number]>;
   defaults?: Record<string, number>;
+  choices?: Record<string, string>; // the settings that are one of a few words (content_check_mode)
+  options?: Record<string, string[]>;
+};
+
+/** What each choice is, and each of its words, in words; one the console does not know is shown by its name. */
+const CHOICES: Record<string, { label: string; words: Record<string, string> }> = {
+  content_check_mode: {
+    label: 'Content check of each plan (the fast model, before Approve)',
+    words: {
+      off: 'Off: no check',
+      warn: 'Warn: a note on the plan card',
+      block: 'Block: refuse what it blocks, note the rest',
+    },
+  },
 };
 
 /** What each limit is, in words; a limit the console does not know yet is shown by its name. */
@@ -150,6 +164,21 @@ export function GuardrailsCard({ g }: { g: Guardrails }) {
       {problems.length > 0 && (
         <p className="notice error">{problems.map(([k, p]) => `${LIMITS[k]?.label ?? k} must be ${p}.`).join(' ')}</p>
       )}
+      {Object.keys(g.options ?? {}).length > 0 && <h3>Checks</h3>}
+      {Object.entries(g.options ?? {}).map(([k, words]) => (
+        <Field key={k} label={CHOICES[k]?.label ?? k}>
+          <select
+            value={g.choices?.[k] ?? ''}
+            onChange={(e) => void put({ choices: { [k]: e.target.value } }, 'Saved.')}
+          >
+            {words.map((w) => (
+              <option key={w} value={w}>
+                {CHOICES[k]?.words[w] ?? w}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ))}
       <Notice notice={notice} />
       <button
         className="btn primary"

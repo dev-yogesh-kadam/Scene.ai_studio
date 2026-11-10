@@ -184,7 +184,7 @@ def programs(state):
 
 async def checks(state):
     """Every check in one answer, for the console's System section: {"database", "render", "model", "programs",
-    "disk": {"folder", "free", "total"}, "backup": {"folder", "last", "check", "restore_test"}, "langfuse"}."""
+    "disk": {"folder", "free", "total"}, "backup": {"folder", "last", "check", "restore_test"}, "langfuse", "creative"}."""
     alive = await database(state)
     render, model = await asyncio.gather(render_server(state), model_server(state))
     state.output_dir.mkdir(parents=True, exist_ok=True)
@@ -196,7 +196,17 @@ async def checks(state):
     if alive["online"]:
         found["backup"].update(check=await offload(backup.last_check, state.db), restore_test=await offload(backup.last_restore_test, state.db))
         found["langfuse"] = await langfuse(state)
+        found["creative"] = await offload(creative, state)
     return found
+
+
+def creative(state):
+    """The creative director's checks of each plan: the content check's mode and when it last could not run (it fails
+    open), and the quality gates (hints to the model, never blocks). Sync: it reads a setting."""
+    from . import content_check
+    failed = content_check.status()
+    return {"content_check": {"mode": content_check.mode(state.db), "failed_at": failed.get("at"), "error": failed.get("error", "")},
+            "gates": ["continuity", "shot variety", "a hook for social video", "no words asked of a video model"]}
 
 
 async def model_server(state, fresh=False):

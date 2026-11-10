@@ -30,6 +30,18 @@ describe('the checks card', () => {
     expect(by['Backup check'].state).toBe('ok');
     expect(by['Restore test']).toMatchObject({ state: 'off', words: 'Not run yet' });
     expect(by['Langfuse'].state).toBe('problem');
+    expect(by['Content check']).toMatchObject({ state: 'off', words: 'Not checked' });
+  });
+
+  it('the content check fails open, and says so for an hour after it could not run', () => {
+    const gates = ['continuity', 'shot variety'];
+    const failing = rowsOf({ creative: { content_check: { mode: 'warn', failed_at: now - 60, error: 'busy' }, gates } });
+    expect(failing.find((r) => r.name === 'Content check')?.state).toBe('problem');
+    expect(String(failing.find((r) => r.name === 'Content check')?.words)).toContain('fails open');
+    const fine = rowsOf({ creative: { content_check: { mode: 'block', failed_at: now - 7200 }, gates } });
+    expect(fine.find((r) => r.name === 'Content check')).toMatchObject({ state: 'ok' });
+    expect(rowsOf({ creative: { content_check: { mode: 'off' } } }).find((r) => r.name === 'Content check')?.state).toBe('off');
+    expect(String(fine.find((r) => r.name === 'Quality gates')?.words)).toContain('never blocks');
   });
 
   it('a check that is missing (the database was down, an older studio) says so, and nothing breaks', () => {

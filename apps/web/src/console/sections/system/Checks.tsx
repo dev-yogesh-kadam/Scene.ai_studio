@@ -27,6 +27,11 @@ export type Checks = {
     last_error?: string;
     owns_words?: boolean;
   } | null;
+  // the creative director's checks of each plan (content_check.py, guardrails.py's quality gates)
+  creative?: {
+    content_check?: { mode?: string; failed_at?: number | null; error?: string };
+    gates?: string[];
+  } | null;
 };
 
 /** ok: fine; problem: something to act on; off: not set up or not checked (neither). */
@@ -127,6 +132,27 @@ export function rowsOf(c: Checks): Row[] {
               state: 'ok',
               words: `Sending to ${l.url || 'Langfuse'} · ${l.backlog ?? 0} waiting${l.owns_words ? ' · keeps the words' : ''}`,
             },
+  );
+  const cc = c.creative?.content_check;
+  const HOUR = 3600;
+  rows.push(
+    !cc
+      ? { name: 'Content check', state: 'off', words: 'Not checked' }
+      : cc.mode === 'off'
+        ? { name: 'Content check', state: 'off', words: 'Off (Guardrails)' }
+        : cc.failed_at && Date.now() / 1000 - cc.failed_at < HOUR
+          ? {
+              name: 'Content check',
+              state: 'problem',
+              words: `Could not run ${ago(cc.failed_at)}${cc.error ? ': ' + cc.error : ''} · plans go on unchecked (it fails open)`,
+            }
+          : { name: 'Content check', state: 'ok', words: `Mode ${cc.mode ?? 'warn'} · fails open if the model is down` },
+  );
+  const gates = c.creative?.gates;
+  rows.push(
+    gates && gates.length
+      ? { name: 'Quality gates', state: 'ok', words: `${gates.join(', ')}: hints before Approve, never blocks` }
+      : { name: 'Quality gates', state: 'off', words: 'Not checked' },
   );
   return rows;
 }

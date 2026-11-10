@@ -12,7 +12,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import aftercare, agent, camera, guardrails, claude, conversations, core, craft_library, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
+from .. import aftercare, agent, camera, guardrails, claude, conversations, content_check, core, craft_library, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
     pages, runs, placement, sessions, sharing, skills, traces, web
 from ..db import as_everyone, offload
 from ..comfy import workflows
@@ -1202,9 +1202,9 @@ async def _planning(request, user, body, instruction, project):
     async def creative(answer, built):
         """The creative process's hints for a plan whose steps can all run (docs/creative-director.md), each given once
         a message, never a block. A big job (agent.big_job) with no brief is sent back to ask one first. Then, once, the
-        studio's notes in one hint: the concept a big job lacks, its stills first, the quality gates, and a senior
-        creative director's review (the automatic second opinion). None while a long skill runs: the skill is the
-        process, with its own questions and stages."""
+        studio's notes in one hint: the concept a big job lacks, its stills first, the quality gates of any plan
+        (guardrails.quality_hints), and a senior creative director's review (the automatic second opinion). None while
+        a long skill runs: the skill is the process, with its own questions and stages."""
         if not built or long_skill:
             return None
         big = agent.big_job(built, instruction, body.get("history"), big_limit)
@@ -1226,6 +1226,7 @@ async def _planning(request, user, body, instruction, project):
             notes.append(agent.CONCEPT_MISSING)
         if big and agent.stills_wanted(built, book, instruction, body.get("history")):
             notes.append(agent.STILLS_FIRST)
+        notes += guardrails.quality_hints(answer.get("steps"), instruction, book)   # every plan, small or big
         if big:
             critique = await auto_opinion(answer)
             if critique:
@@ -2036,6 +2037,18 @@ async def _planning(request, user, body, instruction, project):
             if run:   # the job is tagged as the run's
                 step["settings"]["run_of"] = run
             step["settings"]["turn"] = traces.mark()   # its render joins this turn's trace in Langfuse once approved
+    # The content check (content_check.py): the fast model reads the plan's words before it is shown for Approve. A
+    # "block" (in the mode that blocks) refuses it plainly; a "warn" is one line on the plan card. It fails open.
+    content_note = ""
+    checked = await content_check.check(state.agent, state.db, user["id"], steps, instruction) if steps else None
+    if checked and checked.get("error"):
+        yield activity("skip", "The content check could not run this time, so the plan goes on without it")
+    elif checked and content_check.problem(checked):
+        yield activity("skip", "The content check stopped this plan: {}".format(", ".join(checked["categories"]) or "flagged"))
+        answer["reply"], steps = content_check.problem(checked), []
+    elif checked and checked["flag"] == "warn":
+        yield activity("check", "The content check flagged this plan: {}".format(", ".join(checked["categories"]) or "a note"))
+        content_note = checked["note"]
     if steps:
         yield activity("plan", "Checked and priced {} {}".format(len(steps), "step" if len(steps) == 1 else "steps"))
     if tokens.get("prompt"):
@@ -2065,7 +2078,7 @@ async def _planning(request, user, body, instruction, project):
             await offload(shared.write, "/concept", concept, "agent")
         except (runs.RunError, ValueError):
             pass   # a module this user may only read: the plan stands without it
-    yield {"type": "plan", "reply": reply, "concept": concept,
+    yield {"type": "plan", "reply": reply, "concept": concept, "content_note": content_note,
            "thought": str(answer.get("thought") or ""), "activity": log, "seconds": round(time.monotonic() - started, 1),
            "chips": chips, "memory_used": remembered, "direction": answer.get("direction") or "", "steps": steps, "total": sum(s["credits"] for s in steps), "llm": charged,
            "balance": await offload(state.credits.balance, user["id"]), "question": None if asked_all else agent.clean_question(answer.get("question")),

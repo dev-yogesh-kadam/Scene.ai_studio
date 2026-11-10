@@ -1155,8 +1155,13 @@ async def asset_file(asset_id: int, request: Request, user: dict = Depends(admin
 @router.get("/moderation")
 async def moderation_queue(request: Request, show: str = "review", user: dict = Depends(admin_user)):
     """What was made in the last 30 days and has no verdict yet, flagged first (its prompt has a listed word); or the
-    verdicts (`show` "done") or the refused prompts (`show` "refused"); and the word list."""
+    verdicts (`show` "done"), the refused prompts (`show` "refused") or the plans the content check flagged (`show`
+    "checked", content_check.py); and the word list."""
     db, found = request.app.state.db, await offload(moderation.settings, request.app.state.db)
+    if show == "checked":
+        rows = await db.aall("SELECT m.*, u.name AS user_name, u.email AS user_email FROM moderation m LEFT JOIN users u ON u.id = m.user_id "
+                      "WHERE m.kind = 'content_check' ORDER BY m.id DESC LIMIT 200")
+        return {"show": show, "items": rows, **found}
     if show == "refused":
         rows = await db.aall("SELECT m.*, u.name AS user_name, u.email AS user_email FROM moderation m LEFT JOIN users u ON u.id = m.user_id "
                       "WHERE m.kind = 'refused' ORDER BY m.id DESC LIMIT 200")

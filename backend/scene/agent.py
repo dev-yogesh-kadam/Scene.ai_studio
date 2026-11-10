@@ -1241,6 +1241,25 @@ class Agent:
             raise AgentError("The second opinion came back empty.")
         return {"critique": critique, "model": answer.get("_model"), "tokens": add_tokens({}, answer.get("_usage"))}
 
+    async def check_content(self, system, message, shape):
+        """The content check's one call (content_check.py): the fast model (helper()), straight through claude.ask with
+        a structured answer, written down as "content_check". Returns the answer; raises AgentError when it fails, and
+        the check then fails open."""
+        model = await self.pick_model(self.helper(None))
+        s, name = self._service_of(model)
+        if s is None:
+            raise AgentError("there is no Claude to check with")
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
+        started = time.time()
+        try:
+            content, usage = await self._ask_claude(s, name, messages, shape)
+            answer = json.loads(_unfenced(content))
+        except (AgentError, ValueError, TypeError) as error:
+            await offload(self._record, "content_check", None, model, started, messages, shape, (), error=str(error) or type(error).__name__)
+            raise AgentError(str(error) or "the content check's answer could not be read")
+        await offload(self._record, "content_check", model, model, started, messages, shape, (), content=answer, usage=usage)
+        return answer
+
     async def builder(self, model=None):
         """The model that writes motion projects' files: a Sonnet when one is offered (it writes at half Opus's price),
         else the model in use."""

@@ -145,6 +145,7 @@ export type Run = {
   seconds?: number;
   chips?: Chips;
   memoryUsed?: string[];
+  contentNote?: string; // the content check's one line on this plan (a warning, never a block)
   steps: Step[];
   total: number;
   state: string; // proposed, approved, answered, dismissed
