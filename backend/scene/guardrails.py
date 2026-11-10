@@ -73,8 +73,18 @@ def limit(db, key):
     return int(min(high, max(low, value)))
 
 
+_seen = dict(DEFAULTS)   # the limits as last read in this process: for claude.py, which has no database (known())
+
+
 def limits(db):
-    return {key: limit(db, key) for key in DEFAULTS}
+    found = {key: limit(db, key) for key in DEFAULTS}
+    _seen.update(found)
+    return found
+
+
+def known(key):
+    """A limit as this process last read it (limits(), which every agent turn calls through turn_check)."""
+    return _seen[key]
 
 
 def shown(db):
@@ -146,6 +156,12 @@ def refuse_if_stopped(db):
         raise HTTPException(503, problem)
 
 
+def turn_check(db):
+    """At the start of an agent turn: refused while the studio is stopped, and the limits read again for claude.py."""
+    refuse_if_stopped(db)
+    return limits(db)
+
+
 # ---------------------------------------------------------------- spending
 
 def plan_step_problem(db, plan_id, user_id, amount):
@@ -178,8 +194,9 @@ def plan_problem(db, user, total):
 def run_problem(db, user_id, run, amount):
     """Why a render of `amount` credits may not be added to run `run` (a long skill's run), or None: the renders of one
     run may cost at most guard_run_max together (what was refunded not counted)."""
+    from .credits import PREPAID   # a plan's step: its plan was held to guard_plan_max at its approval
     most = limit(db, "guard_run_max")
-    if not most or not run or amount <= 0:
+    if not most or not run or amount <= 0 or PREPAID.get() is not None:
         return None
     row = db.one("SELECT COALESCE(SUM(cost - credits_refunded), 0) AS n FROM jobs WHERE user_id = ? AND run = ?", (user_id, str(run)[:32]))
     spent = int(row["n"] or 0) if row else 0
@@ -189,13 +206,16 @@ def run_problem(db, user_id, run, amount):
     return None
 
 
+MIN_SECONDS = 1   # the shortest length a job is priced for: a render is never shorter, whatever was typed
+
+
 def quote_problem(db, seconds, credits):
-    """Why a price can't be right, or None: a length that is not a number, not above 0 or longer than guard_job_seconds
-    (a duration typed as -5 or 1e9), or a price below 0. The server prices what it is asked: a length it can't make
+    """Why a price can't be right, or None: a length that is not a number, under MIN_SECONDS or longer than
+    guard_job_seconds (a duration typed as -5, 0.0001 or 1e9), or a price below 0. The server prices what it is asked: a length it can't make
     sense of is refused, never charged."""
     if seconds is not None:
-        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds <= 0:
-            return "The length asked for is not a number of seconds above 0."
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < MIN_SECONDS:
+            return "The length asked for is not a number of seconds of at least {:g}.".format(MIN_SECONDS)
         most = limit(db, "guard_job_seconds")
         if seconds > most:
             return "The length asked for ({:g} s) is longer than one job may be ({} s).".format(seconds, most)

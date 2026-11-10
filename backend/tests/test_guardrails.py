@@ -74,10 +74,11 @@ def test_a_negative_or_huge_length_is_refused_not_priced(studio):
 
 
 def test_quote_problem_refuses_lengths_and_prices_that_make_no_sense(database):
-    for seconds in (-5, 0, float("nan"), float("inf"), 1e9, True, "5"):
+    for seconds in (-5, 0, 0.0001, float("nan"), float("inf"), 1e9, True, "5"):
         assert guardrails.quote_problem(database, seconds, 10), seconds
     assert guardrails.quote_problem(database, 5, -1) and guardrails.quote_problem(database, 5, float("nan"))
     assert guardrails.quote_problem(database, None, 20) is None and guardrails.quote_problem(database, 15, 300) is None
+    assert guardrails.quote_problem(database, guardrails.MIN_SECONDS, 1) is None
     database.set_setting("guard_job_seconds", 10)
     assert "longer than one job may be (10 s)" in guardrails.quote_problem(database, 15, 300)
     with pytest.raises(HTTPException) as refused:
@@ -384,10 +385,10 @@ def test_the_studio_and_the_phone_are_refused_the_same_words(client):
 
 
 def test_a_plan_step_with_listed_words_is_refused_when_it_is_queued_and_its_credits_go_back(studio):
-    refuse(studio, "dragon")
     before = balance(studio)
     plan = studio.post("/api/agent/plans", json={"steps": [{"name": "Beast", "kind": "image", "settings": {
         "workflow": "image/image_t2i_flux2_dev", "name": "Beast", "values": {"100:value": "a dragon"}}}]}).json()
+    refuse(studio, "dragon")   # listed after the plan was made: the step is refused when it is queued
     studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
     ended = wait_for(studio, plan["id"])
     assert ended["state"] == "failed" and "can't be made here" in ended["error"]
@@ -491,15 +492,19 @@ def test_framed_state_frames_only_what_came_from_outside():
 
 
 @hook("agent.py question_parts(): the \"attached\" part's lines (each item's name, prompt and the opening of a text) "
-      "given through agent.external(..., \"attachments\")")
+      "given through agent.external(..., \"attachments\"), and the \"recent\" part's through agent.external(..., \"library\")")
 def test_a_file_name_and_a_files_opening_reach_the_model_framed(client, monkeypatch):
     me = register(client)
     item = text_item(client, me["id"], INJECTION[:60], INJECTION)
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "ok"})
     client.post("/api/agent/plan", json={"instruction": "use @1 for this", "selection": [item]})
     message = told(seen)[0]
-    start = message.find('<external source="attachments"')
-    assert 0 <= start < message.find(INJECTION[:60]) and message.find(INJECTION) < message.find("</external>", start)
+    assert message.count(INJECTION[:60]) >= 2   # in the recent items and among the attached ones, each inside a frame
+    at = message.find(INJECTION[:60])
+    while at >= 0:
+        opened = message.rfind("<external source=", 0, at)
+        assert opened >= 0 and message.rfind("</external>", 0, at) < opened < at < message.find("</external>", at), message[max(0, at - 200):at]
+        at = message.find(INJECTION[:60], at + 1)
 
 
 # ---------------------------------------------------------------- an answer that can't be read
@@ -543,3 +548,27 @@ def test_an_answer_that_cant_be_read_is_asked_again_once(client, monkeypatch):
     sent = answering(monkeypatch, "Sure! Here is the plan:", json.dumps({"reply": "One shot.", "steps": []}))
     assert ask(client)["reply"] == "One shot."
     assert len(sent) == 2 and sent[1].startswith("Your answer could not be read: it is not JSON.")
+
+
+# ---------------------------------------------------------------- added: the run limit at Generate, the limits for claude.py
+
+@hook("api/studio.py create_job(): after `settings[\"run_of\"] = run_of`, `over = await offload(guardrails.run_problem, "
+      "state.db, user[\"id\"], run_of, quote[\"credits\"])`; raise HTTPException(429, over) when set")
+def test_a_run_over_its_limit_is_refused_at_generate(client):
+    register(client)
+    console(client).put("/api/admin/queue", json={"paused": True})
+    client.app.state.db.set_setting("guard_run_max", 150)
+    assert post_job(client, run_of="episode-1").status_code == 200    # 100 credits of the run's 150
+    refused = post_job(client, run_of="episode-1")
+    assert refused.status_code == 429 and "used 100 of the 150" in refused.json()["detail"]
+    assert post_job(client, run_of="episode-2").status_code == 200    # another run has its own
+
+
+def test_an_agent_turn_reads_the_limits_again_for_claude(database):
+    database.set_setting("guard_tool_calls", 30)
+    assert guardrails.turn_check(database)["guard_tool_calls"] == 30 and guardrails.known("guard_tool_calls") == 30
+    guardrails.set_stop(database, True)
+    with pytest.raises(HTTPException):
+        guardrails.turn_check(database)
+    database.set_setting("guard_tool_calls", guardrails.DEFAULTS["guard_tool_calls"])
+    guardrails.limits(database)
