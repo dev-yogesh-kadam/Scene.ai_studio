@@ -3,11 +3,12 @@
 
 import { startFakeComfy } from '../support/fake-comfy.mjs';
 import { client, startStudio } from '../support/studio.mjs';
+import { PORT_BASE } from '../../playwright.config';
 import { ACCOUNTS } from './accounts';
 
 export default async function globalSetup() {
-  const fake = await startFakeComfy({ port: 8299 });
-  const studio = await startStudio({ port: 8281, consolePort: 8290, comfyUrl: fake.url });
+  const fake = await startFakeComfy({ port: PORT_BASE + 199 });
+  const studio = await startStudio({ port: PORT_BASE + 181, consolePort: PORT_BASE + 190, comfyUrl: fake.url });
   for (const account of [ACCOUNTS.admin, ACCOUNTS.user]) {
     const browser = client(studio.base);
     const made = await browser.call('/api/auth/register', { method: 'POST', json: account });

@@ -3,8 +3,10 @@
 
 import { defineConfig } from '@playwright/test';
 
-export const STUDIO = 'http://127.0.0.1:8281';
-export const CONSOLE = 'http://127.0.0.1:8290';
+// Ports from SCENE_TEST_PORT_BASE (default 8100: studio 8281, console 8290, fake ComfyUI 8299), see tests/support/studio.mjs.
+export const PORT_BASE = Number(process.env.SCENE_TEST_PORT_BASE || 8100);
+export const STUDIO = `http://127.0.0.1:${PORT_BASE + 181}`;
+export const CONSOLE = `http://127.0.0.1:${PORT_BASE + 190}`;
 
 export default defineConfig({
   testDir: 'tests/e2e',

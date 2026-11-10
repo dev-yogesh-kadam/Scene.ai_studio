@@ -14,11 +14,20 @@ export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../.
 const PYTHON =
   process.platform === 'win32' ? join(REPO, '.venv', 'Scripts', 'python.exe') : join(REPO, '.venv', 'bin', 'python');
 
+// Test studios' ports start at SCENE_TEST_PORT_BASE (default 8100), so runs side by side (one per worktree) each get
+// their own: the smoke test uses base+81 (studio), +90 (console), +99 (fake ComfyUI); Playwright +181, +190, +199.
+export const PORT_BASE = Number(process.env.SCENE_TEST_PORT_BASE || 8100);
+
 /**
  * Start the studio. Resolves when it answers. `stop()` ends it.
  * @param {{port?: number, consolePort?: number, comfyUrl?: string, dir?: string}} options
  */
-export async function startStudio({ port = 8181, consolePort = 8190, comfyUrl = 'http://127.0.0.1:9', dir } = {}) {
+export async function startStudio({
+  port = PORT_BASE + 81,
+  consolePort = PORT_BASE + 90,
+  comfyUrl = 'http://127.0.0.1:9',
+  dir,
+} = {}) {
   const home = dir || mkdtempSync(join(tmpdir(), 'scene-smoke-'));
   const database = testDatabase('create');
   mkdirSync(home, { recursive: true });

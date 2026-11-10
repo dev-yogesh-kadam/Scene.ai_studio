@@ -24,7 +24,7 @@ let studio = null;
 try {
   if (args.has('--fake-comfy')) {
     const { startFakeComfy } = await import('../support/fake-comfy.mjs');
-    fake = await startFakeComfy({ port: 8199 });
+    fake = await startFakeComfy();
   }
   studio = await startStudio({ comfyUrl: fake ? fake.url : 'http://127.0.0.1:9' });
   console.log(`studio ${studio.base}, console ${studio.console}, data in ${studio.home}`);

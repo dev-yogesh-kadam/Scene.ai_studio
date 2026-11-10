@@ -9,12 +9,12 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
-import { REPO } from './studio.mjs';
+import { PORT_BASE, REPO } from './studio.mjs';
 
 const RENDER_MS = 1500; // how long a "render" takes
 
 /** @param {{port?: number, renderMs?: number}} options */
-export async function startFakeComfy({ port = 8199, renderMs = RENDER_MS } = {}) {
+export async function startFakeComfy({ port = PORT_BASE + 99, renderMs = RENDER_MS } = {}) {
   const prompts = new Map(); // prompt_id -> {queued, kind, cancelled}
   const work = mkdtempSync(join(tmpdir(), 'scene-fake-comfy-'));
   const files = new Map(); // filename -> bytes
