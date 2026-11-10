@@ -12,6 +12,7 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 import sys
 import tempfile
 from pathlib import Path
@@ -56,6 +57,43 @@ UP = re.compile(r"(?:^|[\\/=:'\"\s,;|\[])\.\.(?:[\\/]|$)")
 
 class JobError(MediaError):
     pass
+
+
+NO_WINDOW = 0x08000000   # CREATE_NO_WINDOW: no console window on Windows
+
+
+def own_group():
+    """What a program started here takes so that stop() can end it with everything it starts: no console window on
+    Windows; elsewhere, a process group of its own (os.killpg ends that group, never the studio's)."""
+    return {"creationflags": NO_WINDOW} if sys.platform == "win32" else {"start_new_session": True}
+
+
+async def stop(process, wait=15):
+    """End a program and every program it started, and wait for it (at most `wait` seconds). HyperFrames starts Chrome
+    and ffmpeg, which Windows' kill of HyperFrames alone would leave running, holding the job's folder. Safe to call on
+    a program that has already ended."""
+    if process.returncode is None:
+        if sys.platform == "win32":   # /T: the whole tree, found by its parent's id, so before the parent is gone
+            try:
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill", "/F", "/T", "/PID", str(process.pid), stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, creationflags=NO_WINDOW)
+                await asyncio.wait_for(killer.wait(), wait)
+            except (OSError, asyncio.TimeoutError):
+                pass
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)   # its own group (own_group), so only it and what it started
+            except (OSError, AttributeError):
+                pass
+        try:
+            process.kill()
+        except (ProcessLookupError, OSError):
+            pass
+    try:
+        await asyncio.wait_for(process.wait(), wait)
+    except asyncio.TimeoutError:
+        pass
 
 
 def _unescaped(text):
@@ -201,7 +239,7 @@ async def run(argv, inputs, sidecars, outputs, target, timeout=300, work_dir=Non
     target = Path(target)
     if work_dir:
         Path(work_dir).mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+    with tempfile.TemporaryDirectory(dir=work_dir, ignore_cleanup_errors=True) as tmp:   # a cleanup error never hides the job's own
         box = Path(tmp) / "job"
         box.mkdir()
         for font in FONTS.glob("*.ttf"):
@@ -210,18 +248,16 @@ async def run(argv, inputs, sidecars, outputs, target, timeout=300, work_dir=Non
             shutil.copy(path, box / name)   # a copy: a command that writes over an input changes only the copy
         for name, text in sidecars.items():
             (box / name).write_text(text, encoding="utf-8")
-        flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}   # no console window on Windows
         process = await asyncio.create_subprocess_exec(
             ffmpeg_path(), "-hide_banner", "-nostdin", "-nostats", "-y", *_whitelisted(argv), cwd=str(box), env=_env(box),
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, **flags)
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, **own_group())
         try:
             _, said = await asyncio.wait_for(process.communicate(), timeout)
-        except asyncio.CancelledError:   # the job was cancelled
-            process.kill()
+        except asyncio.CancelledError:   # the job was cancelled: ffmpeg ended before its folder is taken away
+            await stop(process)
             raise
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            await stop(process)
             raise JobError("ffmpeg took longer than {} s and was stopped: give the job a longer timeout, or split it.".format(timeout))
         log = _log(said.decode("utf-8", "replace"))
         if process.returncode:

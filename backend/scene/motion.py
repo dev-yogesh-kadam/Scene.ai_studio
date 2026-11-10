@@ -6,16 +6,17 @@ Each folder in motion/templates is one template: index.html (the composition) an
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import platform
 import re
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 from . import media, sequence
+from .ffjob import own_group, stop
 from .config import ROOT
 
 MOTION_DIR = ROOT / "motion"
@@ -165,7 +166,7 @@ async def _produce(fill, values, target, fps, name, node, work_dir, alpha=False,
         Path(work_dir).mkdir(parents=True, exist_ok=True)
     notes = []
     async with _one_at_a_time:
-        with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+        with tempfile.TemporaryDirectory(dir=work_dir, ignore_cleanup_errors=True) as tmp, _kept_only_if_made([target]):
             project = Path(tmp) / "motion"
             project.mkdir()
             fill(project)
@@ -179,16 +180,16 @@ async def _produce(fill, values, target, fps, name, node, work_dir, alpha=False,
             if still is not None:
                 shots = Path(tmp) / "still"
                 await _run([node_path(node), str(CLI), "snapshot", str(project), "--at", "{:.3f}".format(still), "--no-end",
-                            "--output", str(shots)], project)
+                            "--output", str(shots)], project, scratch=tmp)
                 found = sorted(shots.glob("*.png"))
                 if found:
                     shutil.move(str(found[0]), str(target))
             else:
                 await _run([node_path(node), str(CLI), "render", str(project), "--output", str(target), "--fps", str(fps),
                             *(["--format", fmt] if fmt != "mp4" else []), *(["--gif-loop", "0"] if fmt == "gif" else []),
-                            "--variables-file", str(project / "variables.json"), "--quiet"], project)
-    if not target.is_file() or not target.stat().st_size:
-        raise MotionError("HyperFrames finished without making a {}.".format("picture" if still is not None else "video"))
+                            "--variables-file", str(project / "variables.json"), "--quiet"], project, scratch=tmp)
+            if not target.is_file() or not target.stat().st_size:
+                raise MotionError("HyperFrames finished without making a {}.".format("picture" if still is not None else "video"))
     made = await media.probe(target)
     return {"seconds": 0.0 if still is not None else made["seconds"], "width": made["width"], "height": made["height"],
             **({"file": target} if target != asked else {}), **({"alpha": True} if fmt == "webm" else {}),
@@ -201,7 +202,7 @@ QUIET_FINDINGS = {"studio_missing_editable_id", "nested_structure_needs_subcompo
 
 async def _lint(project, node):
     """HyperFrames' check of a page: raises MotionError with its errors, so the page can be fixed; returns its warnings."""
-    output = await _run([node_path(node), str(CLI), "lint", str(project), "--json"], project, check=False)
+    output = await _run([node_path(node), str(CLI), "lint", str(project), "--json"], project, check=False, scratch=project.parent)
     try:
         found = json.loads(output[output.index("{"):output.rindex("}") + 1])
     except ValueError:
@@ -214,23 +215,44 @@ async def _lint(project, node):
     return [said(f) for f in found.get("findings", []) if f.get("severity") == "warning" and f.get("code") not in QUIET_FINDINGS][:8]
 
 
-async def _run(command, folder, check=True, timeout=RENDER_TIMEOUT):
-    """Run HyperFrames and return what it said. check: a failure raises MotionError with its last words."""
+@contextlib.contextmanager
+def _kept_only_if_made(*lists):
+    """The files a render writes outside its temporary folder (lists of paths, which may grow as it goes) taken away
+    again when it fails or is stopped part way: a half-written video is not left in the user's folder."""
+    try:
+        yield
+    except BaseException:
+        for path in {p for paths in lists for p in paths}:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+
+async def _run(command, folder, check=True, timeout=RENDER_TIMEOUT, scratch=None):
+    """Run HyperFrames and return what it said. check: a failure raises MotionError with its last words. scratch: the
+    render's own temporary folder, where Chrome's profile and HyperFrames' other temporary files go (TEMP), so they
+    go with it; Chrome left them in the system's temporary folder, one profile for every render.
+    A render stopped (its time up, its job cancelled) is stopped with everything it started: Chrome and ffmpeg too."""
     env = dict(os.environ, HYPERFRAMES_FFMPEG_PATH=media.ffmpeg_path(), HYPERFRAMES_FFPROBE_PATH=str(_ffprobe()),
                # Nothing is sent anywhere and nothing is installed while rendering. The one thing looked up is a Google
                # Font a page names, fetched once and kept in FONT_CACHE.
                HYPERFRAMES_NO_TELEMETRY="1", DO_NOT_TRACK="1", HYPERFRAMES_NO_UPDATE_CHECK="1", HYPERFRAMES_NO_FEEDBACK="1",
                HYPERFRAMES_SKIP_SKILLS="1", HYPERFRAMES_NO_AUTO_INSTALL="1", HYPERFRAMES_FONT_CACHE_DIR=str(FONT_CACHE))
-    flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}   # no console window on Windows
+    if scratch is not None:
+        temp = Path(scratch) / "temp"
+        temp.mkdir(parents=True, exist_ok=True)
+        env.update(TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp))
     process = await asyncio.create_subprocess_exec(*command, cwd=str(folder), env=env, stdin=asyncio.subprocess.DEVNULL,
-                                                   stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, **flags)
+                                                   stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, **own_group())
     try:
         output, _ = await asyncio.wait_for(process.communicate(), timeout)
     except asyncio.CancelledError:   # the job this was for was cancelled
-        process.kill()
+        await stop(process)
         raise
     except asyncio.TimeoutError:
-        process.kill()
+        await stop(process)
         raise MotionError("The render took longer than {} minutes and was stopped.".format(timeout // 60))
     text = output.decode("utf-8", "replace")
     if check and process.returncode:
@@ -501,7 +523,8 @@ def quick_check(source):
 async def _check(project, node):
     """HyperFrames' whole check of a project (lint, runtime, layout, contrast, motion, craft, audio): raises
     MotionError with its errors, so they can be fixed; returns its warnings."""
-    await _run([node_path(node), str(CLI), "check", str(project), "--json"], project.parent, check=False, timeout=CHECK_TIMEOUT)
+    await _run([node_path(node), str(CLI), "check", str(project), "--json"], project.parent, check=False, timeout=CHECK_TIMEOUT,
+               scratch=project.parent)
     reports = sorted((project / ".hyperframes" / "artifacts" / "checks").glob("*.json"), key=lambda p: p.stat().st_mtime)
     try:
         found = json.loads(reports[-1].read_text(encoding="utf-8")) if reports else {}
@@ -546,7 +569,8 @@ async def render_project(source, target, fps=30, fmt="mp4", media_files=None, fr
         Path(work_dir).mkdir(parents=True, exist_ok=True)
     files, each = [], []
     async with _one_at_a_time:
-        with tempfile.TemporaryDirectory(dir=work_dir, ignore_cleanup_errors=True) as tmp:
+        with (tempfile.TemporaryDirectory(dir=work_dir, ignore_cleanup_errors=True) as tmp,
+              _kept_only_if_made(files, [target.with_suffix(PAGE_FORMATS[fmt])])):
             project = Path(tmp) / "project"
             shutil.copytree(source, project, ignore=shutil.ignore_patterns(".hyperframes", "renders"))
             _stage(project, media_files)
@@ -559,7 +583,7 @@ async def render_project(source, target, fps=30, fmt="mp4", media_files=None, fr
                 times = sorted({round(min(max(0.0, float(t)), max(0.0, seconds - 1.0 / fps)), 3) for t in frames})[:STILLS_MOST]
                 shots = Path(tmp) / "stills"
                 await _run([node_path(node), str(CLI), "snapshot", str(project), "--at", ",".join("{:g}".format(t) for t in times),
-                            "--no-end", "--keep", "--output", str(shots)], project.parent, timeout=CHECK_TIMEOUT)
+                            "--no-end", "--keep", "--output", str(shots)], project.parent, timeout=CHECK_TIMEOUT, scratch=tmp)
                 for at in times:
                     found = shots / "at-{:g}s.png".format(at)
                     if not found.is_file():
@@ -574,7 +598,7 @@ async def render_project(source, target, fps=30, fmt="mp4", media_files=None, fr
                 video = target.with_suffix(PAGE_FORMATS[fmt])
                 await _run([node_path(node), str(CLI), "render", str(project), "--output", str(video), "--fps", str(fps),
                             *(["--format", fmt] if fmt != "mp4" else []), *(["--gif-loop", "0"] if fmt == "gif" else []), "--quiet"],
-                           project.parent, timeout=PROJECT_TIMEOUT)
+                           project.parent, timeout=PROJECT_TIMEOUT, scratch=tmp)
                 if not video.is_file() or not video.stat().st_size:
                     raise MotionError("HyperFrames finished without making a video.")
                 files.append(video)
@@ -582,7 +606,7 @@ async def render_project(source, target, fps=30, fmt="mp4", media_files=None, fr
                 if review and fmt != "gif":
                     sheets = Path(tmp) / "review"
                     await _run([node_path(node), str(CLI), "snapshot", str(project), "--review", "--output", str(sheets)],
-                               project.parent, check=False, timeout=CHECK_TIMEOUT)
+                               project.parent, check=False, timeout=CHECK_TIMEOUT, scratch=tmp)
                     for sheet in sorted(sheets.glob("review-*.jpg")):
                         kept = target.with_name("{}_{}.jpg".format(target.stem, sheet.stem))
                         shutil.move(str(sheet), str(kept))
