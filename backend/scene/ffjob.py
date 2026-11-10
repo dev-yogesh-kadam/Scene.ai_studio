@@ -12,6 +12,7 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 import sys
 import tempfile
 from pathlib import Path
@@ -52,10 +53,52 @@ ROOTED = re.compile(r"(?:^|[\s='\"\[,;:|(])[\\/](?![\\/:,;'\"\[\]=\s)]|$)")
 DRIVE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|(?<![\w-])[A-Za-z]:(?![\\/])[\w-]+\.[A-Za-z0-9]{2,5}(?!\w)")
 SHARE = re.compile(r"\\\\[A-Za-z0-9.?]")
 UP = re.compile(r"(?:^|[\\/=:'\"\s,;|\[])\.\.(?:[\\/]|$)")
+# A path relative to another drive's own folder (E:SceneBackups/x is E:\SceneBackups\x when the job's folder is on
+# C:): a word that starts with one, or in a filter's text one with its colon escaped (E\:x) or in quotes ('E:x'). A
+# filter's own w:h is neither, and words such as "Plan B\: go" keep a space after the colon.
+DRIVE_WORD = re.compile(r"^[A-Za-z]:")
+DRIVE_IN_TEXT = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]\\+:(?=[\w.~%$-])|['\"][A-Za-z]:(?=[\w.~%$-])")
 
 
 class JobError(MediaError):
     pass
+
+
+NO_WINDOW = 0x08000000   # CREATE_NO_WINDOW: no console window on Windows
+
+
+def own_group():
+    """What a program started here takes so that stop() can end it with everything it starts: no console window on
+    Windows; elsewhere, a process group of its own (os.killpg ends that group, never the studio's)."""
+    return {"creationflags": NO_WINDOW} if sys.platform == "win32" else {"start_new_session": True}
+
+
+async def stop(process, wait=15):
+    """End a program and every program it started, and wait for it (at most `wait` seconds). HyperFrames starts Chrome
+    and ffmpeg, which Windows' kill of HyperFrames alone would leave running, holding the job's folder. Safe to call on
+    a program that has already ended."""
+    if process.returncode is None:
+        if sys.platform == "win32":   # /T: the whole tree, found by its parent's id, so before the parent is gone
+            try:
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill", "/F", "/T", "/PID", str(process.pid), stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, creationflags=NO_WINDOW)
+                await asyncio.wait_for(killer.wait(), wait)
+            except (OSError, asyncio.TimeoutError):
+                pass
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)   # its own group (own_group), so only it and what it started
+            except (OSError, AttributeError):
+                pass
+        try:
+            process.kill()
+        except (ProcessLookupError, OSError):
+            pass
+    try:
+        await asyncio.wait_for(process.wait(), wait)
+    except asyncio.TimeoutError:
+        pass
 
 
 def _unescaped(text):
@@ -75,7 +118,7 @@ def _paths_in(text, subtitles=False):
     for form in dict.fromkeys((text, _unescaped(text))):
         if UP.search(form):
             found.append("a path up out of the folder (..)")
-        if DRIVE.search(form) or ROOTED.search(form) or SHARE.search(text):
+        if DRIVE.search(form) or ROOTED.search(form) or SHARE.search(text) or (not subtitles and DRIVE_IN_TEXT.search(form)):
             found.append("a path outside the folder")
         if not subtitles and PROTOCOL.search(form):
             found.append("a URL or protocol ({})".format(PROTOCOL.search(form).group(0)))
@@ -137,6 +180,8 @@ def check(argv, inputs, sidecars, outputs, timeout=None):
         if word in SHELL:
             problems.append("\"{}\" (argv is run as it is, with no shell)".format(word))
         problems += ["{} in \"{}\"".format(p, word[:80]) for p in _paths_in(word)]
+        if DRIVE_WORD.match(word) and not _paths_in(word):
+            problems.append("a path outside the folder in \"{}\" (a drive's own folder)".format(word[:80]))
         if before == "-f" and word.lower() in DEVICES:
             problems.append("-f {} (no devices, screens or tee outputs)".format(word))
         if word in ("-protocol_whitelist", "-protocol_blacklist"):
@@ -201,7 +246,7 @@ async def run(argv, inputs, sidecars, outputs, target, timeout=300, work_dir=Non
     target = Path(target)
     if work_dir:
         Path(work_dir).mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+    with tempfile.TemporaryDirectory(dir=work_dir, ignore_cleanup_errors=True) as tmp:   # a cleanup error never hides the job's own
         box = Path(tmp) / "job"
         box.mkdir()
         for font in FONTS.glob("*.ttf"):
@@ -210,18 +255,16 @@ async def run(argv, inputs, sidecars, outputs, target, timeout=300, work_dir=Non
             shutil.copy(path, box / name)   # a copy: a command that writes over an input changes only the copy
         for name, text in sidecars.items():
             (box / name).write_text(text, encoding="utf-8")
-        flags = {"creationflags": 0x08000000} if sys.platform == "win32" else {}   # no console window on Windows
         process = await asyncio.create_subprocess_exec(
             ffmpeg_path(), "-hide_banner", "-nostdin", "-nostats", "-y", *_whitelisted(argv), cwd=str(box), env=_env(box),
-            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, **flags)
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE, **own_group())
         try:
             _, said = await asyncio.wait_for(process.communicate(), timeout)
-        except asyncio.CancelledError:   # the job was cancelled
-            process.kill()
+        except asyncio.CancelledError:   # the job was cancelled: ffmpeg ended before its folder is taken away
+            await stop(process)
             raise
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            await stop(process)
             raise JobError("ffmpeg took longer than {} s and was stopped: give the job a longer timeout, or split it.".format(timeout))
         log = _log(said.decode("utf-8", "replace"))
         if process.returncode:

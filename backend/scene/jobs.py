@@ -36,6 +36,9 @@ RESUMES = 3          # times a render cut off by the render server going away go
 JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever came after it (the canvas waits for its result)
 OFFLINE_CHECK = 10  # seconds between asking whether the render server answers again, while renders wait for it
 CLEAN_VOICE = "audio/audio_separate_voice"   # takes the voice out of music and effects, for a job that asks ("clean_voice")
+POLL = 2             # seconds between asking ComfyUI whether a render is done
+LOST_POLLS = 5       # polls in a row ComfyUI has neither finished nor holds a render before it counts as lost
+RENDER_MOST = 4 * 3600   # seconds one render may take on ComfyUI, waiting in its own queue too: past it, it is stopped
 
 
 # The plan and step being queued now (plans.py): JobManager.add writes them into the job's own row.
@@ -43,6 +46,11 @@ QUEUEING = contextvars.ContextVar("queueing", default=None)
 
 class Cancelled(Exception):
     pass
+
+
+class LostRender(httpx.TransportError):
+    """ComfyUI no longer has a render it was given (restarted, or the prompt taken off its queue): like a lost
+    connection, the job goes back in the queue while the render server is held for (hold_queue_offline), else fails."""
 
 
 class Closed(HTTPException):
@@ -586,12 +594,15 @@ class JobManager:
         prompt, ctx = workflows.build_prompt(wf, dict(settings, clips=1))
         live["titles"] = {nid: n.get("_meta", {}).get("title") or n["class_type"] for nid, n in prompt.items()}
         live["prompt_id"] = await live["comfy"].queue(prompt, client_id)
-        failures = 0
+        queued, failures, lost = time.monotonic(), 0, 0
         while True:
-            await asyncio.sleep(2)
+            await asyncio.sleep(POLL)
             if live.get("cancel"):
-                await live["comfy"].cancel(live["prompt_id"])
+                await self._stop_on_comfy(live)   # a cancel is a cancel, whether or not the render server answers it
                 raise Cancelled()
+            if time.monotonic() - queued > RENDER_MOST:
+                await self._stop_on_comfy(live)
+                raise ComfyError("The render server had not finished this render after {:g} hours: it was stopped.".format(RENDER_MOST / 3600))
             try:
                 found = await live["comfy"].history(live["prompt_id"])
                 failures = 0
@@ -605,7 +616,23 @@ class JobManager:
                 raise ComfyError(_execution_error(status))
             if status.get("completed"):
                 return found, ctx
+            if not found:   # not finished: still running or waiting there, or lost (ComfyUI restarted)
+                try:
+                    held = await live["comfy"].holds(live["prompt_id"])
+                except httpx.HTTPError:
+                    held = True   # not known: the history's own failures count a server gone
+                lost = 0 if held else lost + 1
+                if lost >= LOST_POLLS:
+                    raise LostRender("ComfyUI no longer has the render: it was restarted, or the render was taken off its queue")
             self.notify(job["user_id"])
+
+    @staticmethod
+    async def _stop_on_comfy(live):
+        """Take a render off ComfyUI (its queue, or stopped while it runs), as far as ComfyUI answers."""
+        try:
+            await live["comfy"].cancel(live["prompt_id"])
+        except httpx.HTTPError:
+            pass
 
     async def _listen(self, job, live, client_id):
         """Follow ComfyUI's websocket for step progress. Best effort: the job works without it."""

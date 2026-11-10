@@ -56,6 +56,15 @@ class Comfy:
             raise ComfyError(_explain(body) or "ComfyUI rejected the workflow: " + r.text[:500])
         return body["prompt_id"]
 
+    async def holds(self, prompt_id):
+        """Whether ComfyUI has the prompt in its queue, running or waiting. A prompt it has neither finished (history)
+        nor holds is lost: ComfyUI was restarted, or the prompt was taken off its queue from its own page."""
+        r = await self.http.get(self.url + "/queue", timeout=15)
+        r.raise_for_status()
+        body = r.json()
+        return any(isinstance(entry, list) and len(entry) > 1 and entry[1] == prompt_id
+                   for part in ("queue_running", "queue_pending") for entry in body.get(part) or [])
+
     async def history(self, prompt_id):
         r = await self.http.get("{}/history/{}".format(self.url, prompt_id), timeout=30)
         r.raise_for_status()

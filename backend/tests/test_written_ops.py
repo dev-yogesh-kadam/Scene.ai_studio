@@ -74,6 +74,25 @@ def test_a_command_a_page_could_have_planted_reaches_nothing_either():
             ffjob.check(["-i", "a.mp4", "o.mp4"], [CLIP], [{"name": name, "content": "x"}], OUT)
 
 
+def test_a_path_relative_to_another_drive_is_refused_too():
+    # E:SceneBackups/x is E:\SceneBackups\x when the job's folder is on C: (a drive's own folder, no slash after it)
+    refused(["-f", "data", "-i", "E:SceneBackups/scene.dump", "-map", "0", "-c", "copy", "-f", "data", "o.txt"],
+            "outside the folder", outputs=[{"name": "o.txt"}])
+    refused(["-i", "D:secret", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vstats_file", "C:Users/LUFI/x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-passlogfile", "E:x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vf", "subtitles=E\\:SceneBackups/x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vf", "drawtext=textfile=C\\:Scene/Data/secrets/x", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-vf", "drawtext=textfile='E:x'", "o.mp4"], "outside the folder")
+    refused(["-i", "a.mp4", "-filter_complex_script", "g.txt", "o.mp4"], "outside the folder",
+            sidecars=[{"name": "g.txt", "content": "movie='E:x' [m]; [0][m] overlay"}])
+    # ...while a filter's own w:h, stream options and a caption's "B\: go" are not paths
+    for argv in (["-i", "a.mp4", "-vf", "crop=w:h:0:0,pad=w:h,scale=w=1280:h=720", "-c:v", "libx264", "-b:a", "128k", "o.mp4"],
+                 ["-i", "a.mp4", "-vf", "drawtext=fontfile=Anton-Regular.ttf:text='Plan B\\: go':x=w-tw", "o.mp4"],
+                 ["-i", "a.mp4", "-map", "0:v", "-metadata:s:a:0", "language=eng", "o.mp4"]):
+        ffjob.check(argv, [CLIP], None, OUT)
+
+
 def test_ordinary_commands_pass_the_check():
     ok = lambda argv, sidecars=None, outputs=OUT: ffjob.check(argv, [CLIP], sidecars, outputs)
     argv, _, timeout = ok(["ffmpeg", "-i", "a.mp4", "-vf", "drawtext=fontfile=Anton-Regular.ttf:text='Scene 4\\: Rooftop':"
@@ -190,6 +209,30 @@ def test_an_html_op_is_checked_before_it_is_queued(client):
         response = post(op="html", **body)
         assert response.status_code == 400 and words in response.json()["detail"], response.text
     assert len(client.app.state.db.all("SELECT id FROM jobs")) == jobs_before
+
+
+def test_a_checked_page_is_sealed_with_a_policy_first_in_its_head():
+    page = motion.sealed(PAGE)
+    assert page.index("Content-Security-Policy") < page.index("<script") and "form-action 'none'" in page
+    assert motion.sealed("<html><header>x</header></html>").startswith('<meta http-equiv="Content-Security-Policy"')
+
+
+@pytest.mark.skipif(not motion.status()["ready"], reason="HyperFrames is not installed here")
+def test_a_script_that_builds_a_link_from_pieces_reaches_nothing_from_a_render(tmp_path):
+    from test_fetch import a_server
+    server, seen = a_server(b"x")
+    port = server.server_port
+    # every way a script could reach this machine's network without the words the check looks for
+    reach = ("var u = 'ht' + 'tp://127.0.0.1:{p}/'; new Image().src = u + 'img';"
+             "var s = document.createElement('script'); s.src = u + 'script'; document.head.appendChild(s);"
+             "var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = u + 'css'; document.head.appendChild(l);"
+             "window['fe' + 'tch'](u + 'fetch').catch(function () {{}});").format(p=port)
+    page = PAGE.replace("__MORE__", "").replace("const tl =", reach + " const tl =")
+    try:
+        made = asyncio.run(motion.render_page(page, 320, 180, 1, tmp_path / "page.mp4"))
+    finally:
+        server.shutdown()
+    assert made["width"] == 320 and seen == [], seen
 
 
 @pytest.mark.skipif(not motion.status()["ready"], reason="HyperFrames is not installed here")

@@ -25,6 +25,7 @@ TRACK_SIDE = 720       # a timing track is a square of this size
 MIN_FRAMES = 96        # 4 s: the shortest clip a video model makes; a shorter track is padded to it
 MAX_PAD = 12           # frames a trimmed clip may be short and have its last frame held; more is refused
 SHEET_TILE = 384       # proof sheets: the width of one frame, six to a row, sixty to a sheet
+READ_LIMIT = 900       # seconds ffmpeg may take to read a sound for its loudness (two for a 30-minute episode)
 SHEET_ROW, SHEET_MAX = 6, 60
 FONTS = Path(__file__).parent / "fonts"
 FONT = "Poppins-Bold.ttf"
@@ -552,10 +553,14 @@ async def _envelope(path):
         ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000",
         "-f", "s16le", "-", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        raw, err = await process.communicate()
+        raw, err = await asyncio.wait_for(process.communicate(), READ_LIMIT)
     except asyncio.CancelledError:
         process.kill()
         raise
+    except asyncio.TimeoutError:   # a file ffmpeg hangs on: the job fails instead of waiting for good
+        process.kill()
+        await process.wait()
+        raise MediaError("ffmpeg stopped responding while reading the sound and was stopped after {} s.".format(READ_LIMIT))
     if process.returncode != 0:
         raise MediaError("ffmpeg could not read the sound: " + err.decode("utf-8", "replace").strip()[-300:])
     samples = array.array("h")
