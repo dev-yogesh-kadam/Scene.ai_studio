@@ -1,7 +1,9 @@
+import asyncio
 import json
 from pathlib import Path
 
 from conftest import ROOT
+from scene import catalog
 from scene.comfy import workflows
 
 VIDEO = ROOT / "workflows" / "video"
@@ -131,6 +133,50 @@ def test_a_dynamic_combo_keeps_the_settings_of_its_chosen_option():
     widgets = [("format", [{"key": "mp4", "inputs": {"required": {"crf": ["FLOAT", {}]}}}, {"key": "auto", "inputs": {"required": {}}}]), ("after", "INT")]
     assert workflows._assign(widgets, ["mp4", 16, 3])[0] == {"format": "mp4", "format.crf": 16, "after": 3}
     assert workflows._assign(widgets, ["auto", 3])[0] == {"format": "auto", "after": 3}
+
+
+def _stale(**save_video):
+    """The node definitions with SaveVideo's as another ComfyUI gave them."""
+    nodes = json.loads(json.dumps(NODES))
+    nodes["SaveVideo"] = {"input": {"required": {"video": ["VIDEO", {}], "filename_prefix": ["STRING", {}], **save_video}}}
+    return nodes
+
+
+def test_a_dynamic_combo_is_known_by_its_shape_not_by_its_type_name():
+    """video_minimax_h3_i2v failed on the real server with "SaveVideo.execute() missing ... 'format'": a dynamic combo
+    whose type name the reader did not know was skipped, and the save node went out without its format."""
+    options = NODES["SaveVideo"]["input"]["required"]["format"][1]
+    wf = workflows.load_workflow(GONE / "video_minimax_h3_i2v.json", _stale(format=["COMFY_DYNAMICCOMBO_V4", options]))
+    saved = workflows.build_prompt(wf, {"values": {"105:104:prompt": "She waves."}})[0]["92"]["inputs"]
+    assert saved["format"] == "auto" and saved["format.codec"] == "auto"
+
+
+def test_definitions_that_do_not_fit_a_saved_node_are_fetched_afresh(tmp_path):
+    """A node list saved from an older ComfyUI (SaveVideo's format and codec plain lists) leaves one of the save node's
+    four values over: the workflow is read as guessed, so the catalog asks ComfyUI for its definitions, and the save
+    node gets "format.codec"."""
+    stale = _stale(format=[["auto", "mp4"], {}], codec=[["auto", "h264"], {}])
+    assert workflows.load_workflow(GONE / "video_minimax_h3_i2v.json", stale)["approximate"]
+    folder = tmp_path / "workflows" / "video"
+    folder.mkdir(parents=True)
+    for name in ("video_minimax_h3_i2v.json", "video_minimax_h3_i2v.studio.json"):
+        (folder / name).write_bytes((GONE / name).read_bytes())
+    cache = tmp_path / "cache" / "node_definitions.json"
+    cache.parent.mkdir()
+    cache.write_text(json.dumps(stale), encoding="utf-8")
+
+    class Comfy:
+        asked = 0
+
+        async def object_info(self):
+            Comfy.asked += 1
+            return NODES
+
+    found = catalog.Catalog(tmp_path / "workflows", Comfy(), cache)
+    wf = asyncio.run(found.load("video/video_minimax_h3_i2v"))
+    assert Comfy.asked == 1 and not wf["approximate"]
+    assert wf["nodes"]["92"]["inputs"]["format.codec"] == "auto"
+    assert json.loads(cache.read_text(encoding="utf-8"))["SaveVideo"] == NODES["SaveVideo"]   # the saved list is the fresh one
 
 
 def test_presets_add_optional_and_extra_reference_slots():

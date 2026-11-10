@@ -200,7 +200,10 @@ def _widget_values(node, object_info):
     if complete:
         return out, True
     if object_info and node.get("type") in object_info:
-        return _assign(_widgets_from_info(object_info[node["type"]]), values)[0], True
+        # Values left over: the definitions in hand do not fit the node as it was saved (a node list saved from an older
+        # ComfyUI). The job could then go out without a setting the node needs, as video_minimax_h3_i2v's save node
+        # once went without its "format"; marked as guessed, the catalog fetches the definitions afresh.
+        return _assign(_widgets_from_info(object_info[node["type"]]), values)
     if embedded:
         return out, False
     raise WorkflowError(
@@ -233,6 +236,15 @@ def _assign(widgets, values):
     return out, not any(v is not None for v in values[pos:])
 
 
+def _is_dynamic_combo(wtype, opts):
+    """A dynamic combo by its shape, whatever ComfyUI's name for its type ("COMFY_DYNAMICCOMBO_V3" now): a list of
+    options, each {"key": ..., "inputs": ...}. A type not known here is skipped, and a skipped "format" fails the save."""
+    options = opts.get("options")
+    return str(wtype).startswith("COMFY_DYNAMICCOMBO") or (
+        wtype not in WIDGET_TYPES and isinstance(options, list) and bool(options)
+        and all(isinstance(o, dict) and "key" in o for o in options))
+
+
 def _widgets_from_info(node_info, prefix=""):
     """The widgets of a node (or of one dynamic combo option), in order. A dynamic combo's type is its option list."""
     inputs = node_info.get("input") or node_info.get("inputs") or {}
@@ -249,7 +261,7 @@ def _widgets_from_info(node_info, prefix=""):
         opts = entry[1] if len(entry) > 1 and isinstance(entry[1], dict) else {}
         if isinstance(wtype, list):
             wtype = "COMBO"
-        if wtype == DYNAMIC_COMBO:
+        if wtype == DYNAMIC_COMBO or _is_dynamic_combo(wtype, opts):
             wtype = opts.get("options") or []
         elif wtype not in ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO") or opts.get("forceInput"):
             continue
