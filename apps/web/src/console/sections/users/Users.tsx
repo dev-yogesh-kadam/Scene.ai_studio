@@ -7,6 +7,7 @@ import { CreditsDialog } from '../credits/CreditsDialog';
 import { useConsole, useFilters, useSection } from '../shared/context';
 import { ExportLink, Loaded, SearchBox, Table, ago, number } from '../shared/ui';
 import { UserDrawer, type StaffRole } from './UserDrawer';
+import { allUsers } from './allUsers';
 import { classesOf } from '../../../common/cx';
 import css0 from '../../../common/components/Shared2.module.css';
 import css1 from '../../../common/components/Shared3.module.css';
@@ -33,8 +34,7 @@ export default function Users() {
   const [open, setOpen] = useState<number | null>(null);
   const [giving, setGiving] = useState<UserRow | null>(null);
   const query = useSection('users', [s.q, s.show], async () => {
-    const list = (await api<{ users: UserRow[] }>('/api/admin/users?' + new URLSearchParams({ q: s.q, show: s.show })))
-      .users;
+    const list = await allUsers<UserRow>({ q: s.q, show: s.show });
     const roles = user.role === 'admin' ? (await api<{ roles: StaffRole[] }>('/api/admin/roles')).roles : [];
     return { list, roles };
   });

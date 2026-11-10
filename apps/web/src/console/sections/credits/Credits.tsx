@@ -5,6 +5,7 @@ import { api } from '../../../common/api';
 import { Segmented } from '../../../common/components/Segmented';
 import { useConsole, useFilters, useSection } from '../shared/context';
 import { ExportLink, Loaded, Person, SearchBox, Table, Tile, failed, number, stamp } from '../shared/ui';
+import { allUsers } from '../users/allUsers';
 import { CreditsDialog, EveryoneDialog } from './CreditsDialog';
 import { REASON } from './reasons';
 import { classesOf } from '../../../common/cx';
@@ -67,12 +68,7 @@ export default function Credits() {
             <button className="btn small" onClick={() => setEveryone(true)}>
               Give everyone credits
             </button>
-            <button
-              className="btn small primary"
-              onClick={() =>
-                void api<{ users: Person_[] }>('/api/admin/users').then((found) => setPeople(found.users), failed)
-              }
-            >
+            <button className="btn small primary" onClick={() => void allUsers<Person_>().then(setPeople, failed)}>
               Give or take credits
             </button>
           </div>
