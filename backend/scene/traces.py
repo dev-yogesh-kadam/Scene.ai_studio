@@ -7,7 +7,10 @@ in it carries the same one. Who asked is the user the request acts for (db.ACTIN
 calls are for (an Agent tab of a project), for Langfuse. TURN is what the turn is, for Langfuse as well: its name
 ("Agent turn", "Film run"), its tags (the skills it used) and what else is known of it (the project, the skills).
 
-Each call is also handed to Langfuse when one is set in the console (langfuse_trace.py).
+Each call is also handed to Langfuse when one is set in the console (langfuse_trace.py). With the setting
+langfuse_owns_words on (off by default; docs/observability.md), a call's words file is let go as soon as Langfuse has
+taken them (`forget_words`), and the console reads them back from there (langfuse_trace.Sender.exchange); the row stays.
+Note that `asked` is the model asked for (an alias such as "claude/sonnet"), not words: the words are only in the file.
 """
 
 import contextvars
@@ -41,7 +44,18 @@ def mark():
 class Recorder:
     def __init__(self, db, folder):
         self.db, self.folder = db, Path(folder)
-        self.langfuse = None   # sends each call to Langfuse as well (langfuse_trace.Sender; main.py sets it)
+        self._langfuse = None
+
+    @property
+    def langfuse(self):
+        """Sends each call to Langfuse as well (langfuse_trace.Sender; main.py sets it)."""
+        return self._langfuse
+
+    @langfuse.setter
+    def langfuse(self, sender):
+        self._langfuse = sender
+        if sender is not None:
+            sender.on_delivered = self.forget_words   # told which calls' words Langfuse took
 
     def record(self, purpose, model, asked, started, messages, answer_format, content=None, usage=None, error=None, tool=None):
         acting = ACTING.get()
@@ -55,19 +69,34 @@ class Recorder:
              int(usage.get("prompt") or 0), int(usage.get("cached") or 0), int(usage.get("answer") or 0), str(tool or "")[:60], str(error or "")[:500],
              sum(len(str(m.get("content") or "")) for m in messages)))
         shown = [{k: (len(v) if k == "images" else v) for k, v in m.items()} for m in messages]   # a picture's size, not itself
-        if self.langfuse is not None:
-            try:
-                self.langfuse.add(purpose, model, asked, started, ended, shown, content, usage, error, tool,
-                                  RUN.get(), SESSION.get(), user_id, TURN.get())
-            except Exception as problem:   # Langfuse is a help: the call is written down here all the same
-                print("The agent's call could not be readied for Langfuse: {}".format(problem))
-        try:
+        try:   # written before Langfuse is handed the call, so a quick sending can't let go of a file not there yet
             self.folder.mkdir(parents=True, exist_ok=True)
             kept = {"messages": shown, "format": answer_format, "answer": content}
             (self.folder / "{}.json.gz".format(call_id)).write_bytes(gzip.compress(json.dumps(kept, ensure_ascii=False).encode("utf-8")))
         except (OSError, TypeError, ValueError):
             pass   # the row is what counts; the words are a help
+        if self.langfuse is not None:
+            try:
+                self.langfuse.add(purpose, model, asked, started, ended, shown, content, usage, error, tool,
+                                  RUN.get(), SESSION.get(), user_id, TURN.get(), call=call_id, answer_format=answer_format)
+            except Exception as problem:   # Langfuse is a help: the call is written down here all the same
+                print("The agent's call could not be readied for Langfuse: {}".format(problem))
         return call_id
+
+    def forget_words(self, call_ids):
+        """Langfuse has taken the words of these calls: with langfuse_owns_words on, their files go now (the rows stay,
+        and the console reads the words back from Langfuse). Off, the default, they stay their week as always."""
+        from .langfuse_trace import owns_words
+        if not owns_words(self.db):
+            return 0
+        gone = 0
+        for call_id in call_ids:
+            try:
+                (self.folder / "{}.json.gz".format(int(call_id))).unlink()
+                gone += 1
+            except (OSError, ValueError):
+                pass
+        return gone
 
     def exchange(self, call_id):
         try:
@@ -75,10 +104,12 @@ class Recorder:
         except (OSError, ValueError, EOFError):
             return None
 
-    def prune(self, now=None):
-        """Forget rows older than a month and words older than a week."""
+    def prune(self, now=None, retention_days=0):
+        """Forget rows older than a month and words older than a week. With retention_days (config.json, retention.py)
+        set, the rows are left to it: it archives them before it deletes them, monthly, so none is deleted unarchived."""
         now = now or time.time()
-        self.db.run("DELETE FROM agent_calls WHERE started < ?", (now - KEEP_CALLS,))
+        if not retention_days or retention_days <= 0:
+            self.db.run("DELETE FROM agent_calls WHERE started < ?", (now - KEEP_CALLS,))
         if self.folder.is_dir():
             for path in self.folder.glob("*.json.gz"):
                 try:

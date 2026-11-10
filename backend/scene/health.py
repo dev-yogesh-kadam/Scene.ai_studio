@@ -1,5 +1,5 @@
 """Whether the studio is well: its render server (ComfyUI), the agent's model (Claude, through Claude Code on this
-machine), its disk, its backups and its queue.
+machine), its disk, its backups, its queue and the sending of the agent's calls to Langfuse (`langfuse`).
 
 `problems` says what is wrong right now; the admin console's Overview lists it. The `Watcher` asks it every minute
 while the app runs, so nobody has to have the console open: a problem found twice in a row becomes an alert (the
@@ -13,7 +13,7 @@ import time
 
 import httpx
 
-from . import backup, phone, versions
+from . import backup, langfuse_trace, phone, retention, versions
 from .db import offload
 
 CHECK_EVERY = 60     # seconds between checks
@@ -31,7 +31,9 @@ RESOLVED = {
     "waiting": "No job has been waiting for over an hour",
     "slow": "The slow job is no longer running",
     "failures": "Jobs have stopped failing",
+    "langfuse": "Langfuse takes the agent's calls again",
 }
+LANGFUSE_DOWN = 300  # seconds Langfuse may not take the calls before it is a problem (a restart of it takes a minute or two)
 
 
 def clock(timestamp):
@@ -115,6 +117,20 @@ async def _model_server(state):
             "limits": agent.claude_limits, "detail": detail, "since": state.model_seen["since"]}
 
 
+async def langfuse(state):
+    """How the sending of the agent's calls to Langfuse goes, for the console: {"in_use": whether a Langfuse is set and
+    on, "url", "backlog": calls and scores waiting, "keep": the most kept waiting, "sent", "dropped": lost because more
+    than keep waited (since the studio started), "refused": what Langfuse would never take, "last_sent", "down_since",
+    "last_error", "owns_words": whether the words are kept in Langfuse only (langfuse_owns_words)}."""
+    sender = getattr(getattr(state, "traces", None), "langfuse", None)
+    if sender is None:
+        return {"in_use": False, "url": "", "backlog": 0, "keep": langfuse_trace.KEEP, "sent": 0, "dropped": 0, "refused": 0,
+                "last_sent": None, "down_since": None, "last_error": "", "owns_words": False}
+    target = await offload(sender.target)
+    owns = await offload(langfuse_trace.owns_words, state.db)
+    return dict(sender.status(), in_use=target is not None, url=target[0] if target else "", owns_words=bool(owns and target))
+
+
 def problem(key, level, text, tab):
     """`level`: critical, serious or warning. `tab`: the console's section that deals with it."""
     return {"key": key, "level": level, "text": text, "tab": tab}
@@ -153,6 +169,13 @@ async def problems(state, render=None, model=None):
         if stuck:
             found.append(problem("waiting", "warning", "{} job{} been waiting for over an hour.".format(
                 stuck, " has" if stuck == 1 else "s have"), "jobs"))
+    tracing = await langfuse(state)
+    if tracing["in_use"] and tracing["down_since"] and now - tracing["down_since"] >= LANGFUSE_DOWN:
+        found.append(problem("langfuse", "warning", "Langfuse at {} has not taken the agent's calls since {} ({}). {} wait for it; "
+                             "at most {:,} are kept, the oldest go first{}. Users' answers are not affected.".format(
+                                 tracing["url"], clock(tracing["down_since"]), tracing["last_error"] or "no answer",
+                                 tracing["backlog"], tracing["keep"],
+                                 "; {:,} lost so far".format(tracing["dropped"]) if tracing["dropped"] else ""), "endpoints"))
     for job in await db.aall("SELECT name, started, est_seconds FROM jobs WHERE status = 'running' AND started IS NOT NULL"):
         if now - job["started"] > max(1800, 3 * (job["est_seconds"] or 0)):
             found.append(problem("slow", "warning", "\"{}\" has been running for {}, far longer than it should.".format(
@@ -179,6 +202,7 @@ class Watcher:
         self.state = state
         self.streak = {}   # problem key -> checks in a row it was found in
         self.http = httpx.AsyncClient(timeout=10)
+        self.moved = 0.0   # when the Claude sessions' old events were last moved to Langfuse (retention.move_events)
 
     async def step(self, found, now=None):
         """One check's problems in; the messages it sent out, as (level, text)."""
@@ -209,7 +233,15 @@ class Watcher:
         """Note what the render PC changed in the workflow files, and fetch its node list again when it answers and the
         one in hand is old: the console's Workflows section compares the workflows with it."""
         await offload(versions.look, self.state)
-        await offload(self.state.traces.prune)
+        await offload(self.state.traces.prune, None, getattr(self.state.settings, "retention_days", 0))
+        if time.time() - self.moved >= retention.MOVE_EVERY and getattr(self.state.traces, "langfuse", None) is not None:
+            self.moved = time.time()
+            try:
+                moved = await asyncio.to_thread(retention.move_events, self.state.db, self.state.traces.langfuse)
+                if moved:
+                    print("{:,} old event(s) of the Claude sessions moved to Langfuse (langfuse_owns_words).".format(moved))
+            except (httpx.HTTPError, OSError) as error:   # Langfuse down: they stay whole, and go the next time
+                print("The Claude sessions' old events were not moved to Langfuse: {}".format(error))
         checked = await offload(backup.last_check, self.state.db)
         if self.state.settings.backup_keep > 0 and (not checked or checked["when"] < time.time() - DAY):   # once a day
             await asyncio.to_thread(backup.check, self.state.db, self.state.backup_dir)

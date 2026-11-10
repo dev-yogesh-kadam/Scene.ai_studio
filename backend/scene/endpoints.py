@@ -158,6 +158,14 @@ async def status(state):
                     item["detail"] += " · project " + projects[0].get("name", "") if projects else " · the keys are refused"
         except (httpx.HTTPError, ValueError, AttributeError, TypeError):
             item["online"] = False
+        sender = getattr(getattr(state, "traces", None), "langfuse", None)
+        if row["kind"] == "langfuse" and row["active"] and sender is not None:   # how the sending goes (Sender.status)
+            sending = item["sending"] = sender.status()
+            said = [part for part in (item.get("detail") or "",
+                                      "{:,} call(s) waiting".format(sending["backlog"]) if sending["backlog"] else "",
+                                      "{:,} lost while it did not answer".format(sending["dropped"]) if sending["dropped"] else "")
+                    if part]
+            item["detail"] = " · ".join(said)
         return item
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(4, connect=2)) as http:
