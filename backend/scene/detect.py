@@ -53,6 +53,7 @@ BANDS = ("lowpass=f=200", "bandpass=f=1200:width_type=o:w=2", "highpass=f=4000")
 TEMPO_RANGE = (60.0, 200.0)   # beats a minute looked for
 TEMPO_PRIOR = 120.0       # of two tempos that fit as well, the one nearer this (most songs are 80 to 160)
 MAX_SECONDS = 600         # at most ten minutes of a song are read
+READ_LIMIT = 600          # seconds ffmpeg may take to read it (a few, as a rule): a hung one is stopped
 
 
 async def _bands(path, start=0.0, seconds=None):
@@ -67,10 +68,14 @@ async def _bands(path, start=0.0, seconds=None):
         "-filter_complex", graph, "-map", "[out]", "-ar", str(RATE), "-f", "s16le", "-",
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        raw, err = await process.communicate()
+        raw, err = await asyncio.wait_for(process.communicate(), READ_LIMIT)
     except asyncio.CancelledError:
         process.kill()
         raise
+    except asyncio.TimeoutError:   # a file ffmpeg hangs on: the job fails instead of waiting for good
+        process.kill()
+        await process.wait()
+        raise MediaError("ffmpeg stopped responding while reading the music and was stopped after {} s.".format(READ_LIMIT))
     if process.returncode != 0:
         raise MediaError("ffmpeg could not read the music: " + err.decode("utf-8", "replace").strip()[-300:])
     return _split(raw)

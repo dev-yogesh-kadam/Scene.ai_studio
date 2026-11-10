@@ -36,17 +36,25 @@ class Embedder:
         """A vector of DIMENSIONS for each text (a document, or with `query` the words a user searches with)."""
         if self.provider == "fake":
             return [_hashed(t) for t in texts]
-        if self.provider == "voyage":
-            answer = httpx.post("https://api.voyageai.com/v1/embeddings", timeout=60,
-                                headers={"Authorization": "Bearer " + self.api_key},
-                                json={"model": self.model, "input": texts, "input_type": "query" if query else "document",
-                                      "output_dimension": DIMENSIONS})
-        else:
-            answer = httpx.post("{}/openai/deployments/{}/embeddings?api-version=2024-10-21".format(self.endpoint, self.model),
-                                timeout=60, headers={"api-key": self.api_key}, json={"input": texts, "dimensions": DIMENSIONS})
+        try:
+            answer = self._ask(texts, query)
+        except httpx.HTTPError as error:   # the service unreachable or slow: said as the search's own error
+            raise SemanticError("The embedding API could not be reached ({}).".format(type(error).__name__))
         if answer.status_code != 200:
             raise SemanticError("The embedding API said {}: {}".format(answer.status_code, answer.text[:300]))
-        return [row["embedding"] for row in sorted(answer.json()["data"], key=lambda r: r["index"])]
+        try:
+            return [row["embedding"] for row in sorted(answer.json()["data"], key=lambda r: r["index"])]
+        except (ValueError, KeyError, TypeError):
+            raise SemanticError("The embedding API gave back something that is not a list of vectors.")
+
+    def _ask(self, texts, query):
+        if self.provider == "voyage":
+            return httpx.post("https://api.voyageai.com/v1/embeddings", timeout=60,
+                              headers={"Authorization": "Bearer " + self.api_key},
+                              json={"model": self.model, "input": texts, "input_type": "query" if query else "document",
+                                    "output_dimension": DIMENSIONS})
+        return httpx.post("{}/openai/deployments/{}/embeddings?api-version=2024-10-21".format(self.endpoint, self.model),
+                          timeout=60, headers={"api-key": self.api_key}, json={"input": texts, "dimensions": DIMENSIONS})
 
 
 def _hashed(text):
