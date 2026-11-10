@@ -163,3 +163,20 @@ def test_changing_the_password_and_turning_off_two_step_sign_in_are_logged(clien
     assert off.status_code == 200
     actions = [r["action"] for r in client.app.state.db.all("SELECT action FROM audit_log ORDER BY id")]
     assert "Changed password" in actions and "Turned off two-step sign-in" in actions
+
+
+# ---------------------------------------------------------------- the image
+
+def test_the_image_runs_as_its_own_account_with_no_secret_in_it():
+    """A static check of the Dockerfile and the build context's exclusions (building the image is not needed)."""
+    import re
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    users = re.findall(r"(?m)^USER\s+(\S+)", dockerfile)
+    assert users and users[-1] not in ("root", "0")                          # the last USER, the one that runs the app
+    assert dockerfile.rfind("USER ") > dockerfile.rfind("RUN ")              # nothing runs as root after it
+    for line in re.findall(r"(?m)^(?:ENV|ARG)\s.*$", dockerfile):            # no password or key baked into a layer
+        assert not re.search(r"(PASSWORD|_KEY|TOKEN|SECRET)[A-Z_]*=(?!/)\S", line), line
+    ignored = set((ROOT / ".dockerignore").read_text(encoding="utf-8").split("\n"))
+    for pattern in ("config.json", "secret.key", "scene.env", "docs", "**/config.json", "**/secret.key", "**/scene.env",
+                    "**/*.mp4", "**/*.mov", "**/.env"):
+        assert pattern in ignored, pattern
