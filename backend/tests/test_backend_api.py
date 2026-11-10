@@ -139,6 +139,28 @@ def test_the_api_maps_are_off_on_both_sites(client):
             assert "swagger" not in answer.text.lower() and "redoc" not in answer.text.lower() and '"openapi"' not in answer.text
 
 
+def test_a_body_or_a_project_id_of_the_wrong_kind_is_refused_not_a_crash(client):
+    signed_in(client)
+    project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
+    for path in ("/api/kit", "/api/kit/sheet"):
+        for body in (b"not json", b"[]", b"5", b'"words"'):
+            answer = client.post(path, content=body, headers={"content-type": "application/json"})
+            assert answer.status_code == 400 and isinstance(answer.json()["detail"], str), (path, body)
+    for wrong in ("x", ["1"], {"id": 1}, -3, 2 ** 40, True, "12x"):
+        for method, path, body in (("post", "/api/kit", {"project_id": wrong, "text": "Fade in.", "name": "S"}),
+                                   ("post", "/api/kit/order", {"project_id": wrong, "ids": []}),
+                                   ("put", "/api/core/state", {"project_id": wrong, "path": "/x", "value": 1}),
+                                   ("put", "/api/boards/canvas", {"project": wrong, "data": {}}),
+                                   ("post", "/api/agent/session/compact", {"project_id": wrong, "run": "t1"})):
+            answer = getattr(client, method)(path, json=body)
+            assert answer.status_code == 400 and answer.json()["detail"] == "That is not a project's id.", (path, wrong, answer.text)
+    # a project's id as a form gives it (digits) still works, and ids of the wrong kind in a list are left out
+    added = client.post("/api/kit", data={"project_id": str(project)}, files={"file": ("a.txt", b"Fade in.", "text/plain")})
+    assert added.status_code == 200, added.text
+    assert client.post("/api/kit/order", json={"project_id": project, "ids": 5}).status_code == 200
+    assert client.post("/api/kit/order", json={"project_id": project, "ids": ["x", True, None]}).status_code == 200
+
+
 # ---------------------------------------------------------------- skills: read in the studio, changed in the console
 
 # ---------------------------------------------------------------- the console's other routes that had no test

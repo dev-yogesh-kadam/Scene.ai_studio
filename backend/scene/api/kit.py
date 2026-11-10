@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from .. import kit, memory, sharing, storage
 from ..db import as_everyone, offload
 from ..references import media_kind, read_text_upload, read_upload, text_kind
-from .deps import current_user, limited, uploading
+from .deps import current_user, json_object, limited, project_ref, uploading
 
 router = APIRouter(prefix="/api/kit", tags=["kit"])
 SCRIPT_CHARS = 200_000   # the most a script typed or pasted into the kit holds
@@ -36,6 +36,7 @@ def _folder(request, user):
 def _keeper(request, user, project, need):
     """(project id or None, whose kit it is, and how to read it): the user's own, or for a shared project its owner's,
     read on the owner's behalf once the user is found to be in it with role `need`."""
+    project = project_ref(project)
     if not project:
         return None, user, contextlib.nullcontext
     found = sharing.require(request.app.state.db, user, project, need)
@@ -86,7 +87,7 @@ async def get_kit(request: Request, project: int = 0, user: dict = Depends(curre
 async def add_entry(request: Request, user: dict = Depends(current_user)):
     state = request.app.state
     if request.headers.get("content-type", "").startswith("application/json"):
-        body = await request.json()
+        body = await json_object(request)
         project, keeper, reading = await offload(_keeper, request, user, body.get("project_id"), "creator")
         if not project:
             raise HTTPException(400, "NeuralCore belongs to a project. Open a project first.")
@@ -146,7 +147,7 @@ async def import_sheet(request: Request, user: dict = Depends(current_user)):
     failed, with why."""
     from .. import sheet
     if request.headers.get("content-type", "").startswith("application/json"):
-        body = await request.json()
+        body = await json_object(request)
         given, text = body.get("project_id"), str(body.get("text") or "")
     else:
         form = await request.form(max_files=1, max_fields=4)
@@ -210,7 +211,7 @@ async def change_entry(asset_id: int, body: dict, request: Request, user: dict =
 @router.post("/order")
 async def order_entries(body: dict, request: Request, user: dict = Depends(current_user)):
     project, keeper, reading = await offload(_keeper, request, user, body.get("project_id"), "creator")
-    ids = [i for i in body.get("ids") or [] if isinstance(i, int)]
+    ids = [i for i in body["ids"] if isinstance(i, int) and not isinstance(i, bool)] if isinstance(body.get("ids"), list) else []
     with reading():
         await offload(kit.reorder, request.app.state.db, keeper["id"], project, ids)
         return {"entries": [memory.kit_row(e) for e in await offload(kit.entries, request.app.state.db, keeper["id"], project)]}

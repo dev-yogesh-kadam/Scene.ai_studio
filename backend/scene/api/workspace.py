@@ -19,7 +19,7 @@ from .. import aftercare, agent, camera, guardrails, claude, conversations, core
 from ..db import as_everyone, offload
 from ..comfy import workflows
 from ..security import LIMITS
-from .deps import allowed as within_limit, costly, current_user
+from .deps import allowed as within_limit, costly, current_user, project_ref
 from .studio import fit_resolution, price
 
 router = APIRouter(prefix="/api", tags=["workspace"])
@@ -76,6 +76,7 @@ STUDIO_ABILITY = (
 def _project_id(request, user, project, need="creator"):
     """0 stands for "no project"; any other id must be a project of the user's, or one shared with them where their
     role allows `need` (most of what is done here makes something: a creator)."""
+    project = project_ref(project)
     if not project:
         return 0
     return sharing.require(request.app.state.db, user, project, need)["id"]
