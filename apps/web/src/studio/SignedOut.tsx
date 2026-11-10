@@ -4,9 +4,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import type { Me } from '@scene/shared/types/api';
+import type { AuthInfo, Me } from '@scene/shared/types/api';
 import { api } from '../common/api';
-import type { AuthInfo } from '../common/components/AuthForm';
 import { promptOf, withPrompt } from '../common/landing/words';
 import { tabTitle } from '../common/format';
 import { AuthPage } from './pages/auth/AuthPage';
@@ -38,12 +37,14 @@ export function SignedOut({ onSignedIn }: { onSignedIn: (user: Me) => void }) {
   };
   if (state.isPending) return null; // drawn once the studio says whether new accounts are open
   const shown = state.data ?? { first_run: false, signup_open: false }; // shown anyway when it can't say
-  if (at === '/') return <LandingPage signupOpen={shown.signup_open} />;
+  // A link an admin sent with the invite code (?invite=) opens Create account, the code filled in.
+  const register = (at === '/signup' || new URLSearchParams(location.search).has('invite')) && shown.signup_open;
+  if (at === '/' && !register) return <LandingPage signupOpen={shown.signup_open} />;
   return (
     <AuthPage
-      key={at === '/signup' ? 'register' : 'login'}
+      key={register ? 'register' : 'login'}
       info={shown}
-      start={at === '/signup' && shown.signup_open ? 'register' : 'login'}
+      start={register ? 'register' : 'login'}
       onSignedIn={signedIn}
       below={(openForm) => (
         <SignInBelow
