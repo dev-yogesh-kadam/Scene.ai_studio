@@ -107,3 +107,32 @@ def test_servers_of_kinds_no_longer_used_are_taken_out_before_their_check(scratc
     schema.upgrade(scratch)
     with psycopg.connect(scratch) as conn:
         assert [r[0] for r in conn.execute("SELECT kind FROM endpoints ORDER BY id")] == ["comfy"]
+
+
+# Tables with a user_id that have no row rule, on purpose for now (docs/database.md lists the ruled ones): read only by
+# admins (agent_calls, moderation), shared across users (project_members), or always filtered by user_id in its SQL
+# (claude_sessions). A new user table is ruled, or added here with its reason.
+UNRULED = {"agent_calls", "claude_sessions", "moderation", "project_members"}
+
+
+def test_every_table_of_a_users_rows_has_its_row_rule(database):
+    rows = database.all(
+        "SELECT c.relname AS name, c.relrowsecurity AS rls, c.relforcerowsecurity AS forced, "
+        "EXISTS (SELECT 1 FROM pg_policies p WHERE p.tablename = c.relname AND p.policyname = 'own_rows') AS own, "
+        "EXISTS (SELECT 1 FROM information_schema.columns k WHERE k.table_schema = 'public' AND k.table_name = c.relname "
+        "AND k.column_name = 'user_id') AS has_user "
+        "FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'")
+    ruled = {r["name"] for r in rows if r["rls"] and r["forced"] and r["own"]}
+    users_tables = {r["name"] for r in rows if r["has_user"]} | {"users"}
+    assert users_tables - ruled == UNRULED
+    assert not ruled - users_tables
+
+
+def test_the_query_indexes_of_0012_come_and_go_with_it(scratch):
+    def indexes():
+        with psycopg.connect(scratch) as conn:
+            return {r[0] for r in conn.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'")}
+    schema.upgrade(scratch, "0012")
+    assert {"projects_user", "alerts_open"} <= indexes()
+    schema.downgrade(scratch, "0011")
+    assert not {"projects_user", "alerts_open"} & indexes()
