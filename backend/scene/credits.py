@@ -163,6 +163,15 @@ class Credits:
             return True
         return bool(row["enabled"]) and (not row["admins_only"] or bool(user and user.get("role") == "admin"))
 
+    def enabled_of(self, workflow_ids, user=None):
+        """The ids of these workflows `user` may use (enabled()), their pricing read in one query: the agent's turn and the
+        Create page asked for each workflow of the catalog in turn."""
+        ids = list(dict.fromkeys(workflow_ids))
+        rows = {r["workflow"]: r for r in self.db.all("SELECT workflow, enabled, admins_only FROM workflow_pricing WHERE workflow = ANY(?)",
+                                                      (ids,))} if ids else {}
+        admin = bool(user and user.get("role") == "admin")
+        return {i for i in ids if i not in rows or (bool(rows[i]["enabled"]) and (not rows[i]["admins_only"] or admin))}
+
     def rate_for(self, workflow_id):
         """(base credits, credits per second, multiplier) for one workflow."""
         kind = kind_of(workflow_id)

@@ -168,7 +168,9 @@ async def announcement(request: Request, user: dict = Depends(current_user)):
 @router.get("/workflows")
 async def list_workflows(request: Request, user: dict = Depends(current_user)):
     state = request.app.state
-    listed = [w for w in await state.catalog.listing() if await offload(state.credits.enabled, w["id"], user)]
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)
+    listed = [w for w in every if w["id"] in on]
     return {"workflows": listed, "kinds": KINDS, "default": state.catalog.current(state.settings.default_workflow)}
 
 

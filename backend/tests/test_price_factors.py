@@ -88,3 +88,24 @@ def test_an_estimate_prices_every_choice_with_its_rates_read_once(client, monkey
     asked.clear()
     quote(client)
     assert a_run and any("FROM generations ORDER BY created DESC LIMIT 500" in q for q in asked)
+
+
+def test_which_workflows_a_user_may_use_is_read_in_one_query(client, monkeypatch):
+    """The agent's turn and the Create page asked credits.enabled for each workflow of the catalog in turn (43 queries
+    of a turn's 104); enabled_of answers the same for all of them at once."""
+    from scene import versions
+    me = register(client)
+    db, credits = client.app.state.db, client.app.state.credits
+    versions.set_audience(db, "image/off", "off")
+    versions.set_audience(db, "image/tried", "admins")
+    versions.set_audience(db, "image/open", "everyone")
+    ids = ["image/off", "image/tried", "image/open", "image/none"]
+    admin, member = dict(me, role="admin"), dict(me, role="user")
+    for who in (admin, member, None):
+        assert credits.enabled_of(ids, who) == {i for i in ids if credits.enabled(i, who)}
+    assert credits.enabled_of(ids, member) == {"image/open", "image/none"} and credits.enabled_of([], member) == set()
+    asked = []
+    real = db._execute
+    monkeypatch.setattr(db, "_execute", lambda sql, params=(), *a, **k: asked.append(sql) or real(sql, params, *a, **k))
+    listed = client.get("/api/workflows").json()["workflows"]
+    assert listed and sum("workflow_pricing" in q for q in asked) == 1

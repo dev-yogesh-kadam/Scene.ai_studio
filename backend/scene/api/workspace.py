@@ -433,7 +433,9 @@ STILL_WORKFLOWS = ("flux2_klein_9b", "krea2_turbo")   # cheap picture workflows,
 
 async def _still_workflow(state, user):
     """The workflow that draws a storyboard still: a cheap picture workflow that is switched on. None when there is none."""
-    found = [w for w in await state.catalog.listing() if w["kind"] == "image" and not w.get("error") and await offload(state.credits.enabled, w["id"], user)]
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)
+    found = [w for w in every if w["kind"] == "image" and not w.get("error") and w["id"] in on]
     for word in STILL_WORKFLOWS:
         for w in found:
             if word in w["id"]:
@@ -551,8 +553,10 @@ async def agent_reroll(body: dict, request: Request, user: dict = Depends(curren
 
 async def _menu(state, user):
     """The workflows an approval card can switch a step to: every readable one that is switched on."""
-    return [{"id": w["id"], "title": w["title"], "kind": w["kind"]} for w in await state.catalog.listing()
-            if w["kind"] in ("video", "image", "audio") and not w.get("error") and await offload(state.credits.enabled, w["id"], user)]
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)
+    return [{"id": w["id"], "title": w["title"], "kind": w["kind"]} for w in every
+            if w["kind"] in ("video", "image", "audio") and not w.get("error") and w["id"] in on]
 
 
 @router.post("/agent/step", dependencies=[costly("agent")])
@@ -869,8 +873,10 @@ async def _planning(request, user, body, instruction, project):
     chat_pins = [w for w in body.get("workflows") or [] if isinstance(w, str)][:12] if isinstance(body.get("workflows"), list) else []
     pinned_kinds = {w.split("/", 1)[0] for w in chat_pins if w.split("/", 1)[0] in PINNABLE}
     named_here = instruction.lower()
-    for listed in await state.catalog.listing():
-        if listed.get("error") or not await offload(state.credits.enabled, listed["id"], user):
+    every = await state.catalog.listing()
+    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)   # one query, not one a workflow
+    for listed in every:
+        if listed.get("error") or listed["id"] not in on:
             continue
         if listed["kind"] in pinned_kinds and listed["id"] not in chat_pins and listed["title"].lower() not in named_here \
                 and listed["id"].lower() not in named_here:
