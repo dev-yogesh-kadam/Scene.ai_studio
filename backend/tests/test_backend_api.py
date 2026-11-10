@@ -187,6 +187,35 @@ def skills_here(monkeypatch, tmp_path):
     return skills
 
 
+def test_the_studio_lists_skills_and_drafts_and_never_publishes_one(client, skills_here):
+    from test_api import ADMIN, console
+    admin = client.post("/api/auth/register", json=ADMIN).json()
+    assert [s["id"] for s in client.get("/api/skills").json()["skills"]] == ["reel"]
+    draft = skills_here.save_draft({"title": "Chai ad", "desc": "Use for a tea ad", "text": "1. Ask the brand."}, {"id": admin["id"], "name": "Ada"})
+    listed = client.get("/api/skills/drafts").json()
+    assert [d["id"] for d in listed["drafts"]] == [draft["id"]] and listed["can_publish"] is False
+    refused = client.post("/api/skills/drafts/{}/publish".format(draft["id"]), json={})
+    assert refused.status_code == 403 and "admin console" in refused.json()["detail"]   # even for an admin, on this site
+    assert skills_here.find(draft["id"]) is None
+    assert client.delete("/api/skills/drafts/nope").status_code == 404
+    signed_in(client, BOB)
+    assert client.get("/api/skills/drafts").json()["drafts"] == []   # another's draft is not listed
+    assert client.delete("/api/skills/drafts/{}".format(draft["id"])).status_code == 403
+    client.post("/api/auth/login", json=ADMIN)
+    assert client.delete("/api/skills/drafts/{}".format(draft["id"])).json() == {"ok": True}
+    # the console publishes, and writes it down
+    desk = console(client)
+    again = skills_here.save_draft({"title": "Chai ad", "desc": "Use for a tea ad", "text": "1. Ask the brand."}, {"id": admin["id"], "name": "Ada"})
+    assert desk.get("/api/admin/skills/drafts").json()["drafts"][0]["id"] == again["id"]
+    published = desk.post("/api/admin/skills/drafts/{}/publish".format(again["id"]), json={"title": "Tea ad"}).json()["skill"]
+    assert published["title"] == "Tea ad" and skills_here.find(again["id"])
+    third = skills_here.save_draft({"title": "Gone", "text": "1."}, {"id": admin["id"]})
+    assert desk.delete("/api/admin/skills/drafts/{}".format(third["id"])).json() == {"ok": True}
+    assert desk.delete("/api/admin/skills/drafts/{}".format(third["id"])).status_code == 404
+    actions = [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]]
+    assert "Published skill" in actions and "Discarded skill draft" in actions
+
+
 def test_the_console_makes_changes_and_deletes_a_skill_and_writes_each_down(client, skills_here):
     from test_api import ADMIN, console
     client.post("/api/auth/register", json=ADMIN)

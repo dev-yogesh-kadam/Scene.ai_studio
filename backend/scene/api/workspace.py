@@ -642,21 +642,19 @@ def _is_admin(user):
 
 @router.get("/skills/drafts")
 async def list_skill_drafts(user: dict = Depends(current_user)):
-    """The skills drafted in chats that wait for an admin: an admin sees every one, anyone else their own."""
+    """The skills drafted in chats that wait for an admin: an admin sees every one, anyone else their own. They are
+    published in the admin console (POST /api/admin/skills/drafts/{id}/publish), never here."""
     found = skills.drafts()
-    return {"drafts": found if _is_admin(user) else [d for d in found if d["by"] == user["id"]], "can_publish": _is_admin(user)}
+    return {"drafts": found if _is_admin(user) else [d for d in found if d["by"] == user["id"]], "can_publish": False}
 
 
 @router.post("/skills/drafts/{draft_id}/publish")
-async def publish_skill_draft(draft_id: str, body: dict, user: dict = Depends(current_user)):
-    """Make a drafted skill one the agent uses. Admins only; body may change its title, desc, words or text first."""
-    if not _is_admin(user):
-        raise HTTPException(403, "Only an admin can publish a skill.")
-    try:
-        saved = await offload(skills.publish, draft_id, {k: v for k, v in (body or {}).items() if k in ("title", "desc", "words", "text")})
-    except ValueError as error:
-        raise HTTPException(400, str(error))
-    return {"skill": {"id": saved["id"], "title": saved["title"], "desc": saved["desc"], "version": saved["version"]}}
+async def publish_skill_draft(draft_id: str, user: dict = Depends(current_user)):
+    """Refused on the studio's site: a published skill changes what the agent does for everyone, so it is an admin's
+    change, made in the admin console, which asks for its own sign-in (and two-step sign-in, when the studio asks it of
+    admins) and writes it in the audit log."""
+    raise HTTPException(403, "Skills are published in the admin console (Skills, Drafts)." if _is_admin(user)
+                        else "Only an admin can publish a skill.")
 
 
 @router.delete("/skills/drafts/{draft_id}")
