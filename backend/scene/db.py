@@ -38,6 +38,8 @@ SERVERS = [
 # keeps the default. PostgreSQL enforces it with row-level security (the policies own_rows, migration 0001).
 EVERYONE = "all"
 ACTING = contextvars.ContextVar("acting", default=EVERYONE)
+# (database, connection) of the transaction the code running now is in (Database.transaction), or None.
+_IN_TRANSACTION = contextvars.ContextVar("in_transaction", default=None)
 
 
 def act_for(user_id):
@@ -183,30 +185,61 @@ class Database:
 
     def _execute(self, sql, params):
         """Run one statement on a connection of the pool, for ACTING's rows. A connection the server dropped (it
-        restarted) is thrown away and the statement tried once more on another."""
+        restarted) is thrown away and the statement tried once more on another. Inside transaction(), on its
+        connection (and never tried again: the transaction is what failed)."""
+        open_one = _IN_TRANSACTION.get()
+        if open_one is not None and open_one[0] is self:
+            return self._statement(open_one[1], sql, params)
         if self.serving and self.loop_guard != "off" and _on_event_loop():
             self._on_loop(sql)
-        acting = ACTING.get()
         for attempt in (1, 2):
             conn = None
             try:
                 with self.pool.connection() as conn:
-                    statement = postgres_sql(self.shape.translate(sql))
-                    if getattr(conn, "acting", None) == acting:
-                        cursor = conn.execute(statement, tuple(params))   # it already shows this user's rows
-                    else:
-                        with conn.pipeline():   # whose rows, then the statement: sent together, one round trip
-                            conn.execute("SELECT set_config('app.user_id', %s, false)", (acting,))
-                            cursor = conn.execute(statement, tuple(params))
-                        conn.acting = acting
-                    empty_json = edge.json_columns(cursor.description)   # NULL there was '' (migration 0004)
-                    hidden = edge.hidden_columns(cursor.description)   # a search column (0009): `SELECT *` stays as it was
-                    rows = [{k: "" if v is None and k in empty_json else _plain(v) for k, v in row.items() if k not in hidden}
-                            for row in cursor.fetchall()] if cursor.description else []
-                    return rows, cursor.rowcount
+                    return self._statement(conn, sql, params)
             except self.psycopg.OperationalError:
                 if attempt == 2 or conn is None or not conn.broken:
                     raise
+
+    def _statement(self, conn, sql, params):
+        """One statement on `conn`, for ACTING's rows: (rows, how many rows it changed)."""
+        acting = ACTING.get()
+        statement = postgres_sql(self.shape.translate(sql))
+        if getattr(conn, "acting", None) == acting:
+            cursor = conn.execute(statement, tuple(params))   # it already shows this user's rows
+        else:
+            with conn.pipeline():   # whose rows, then the statement: sent together, one round trip
+                conn.execute("SELECT set_config('app.user_id', %s, false)", (acting,))
+                cursor = conn.execute(statement, tuple(params))
+            conn.acting = acting
+        empty_json = edge.json_columns(cursor.description)   # NULL there was '' (migration 0004)
+        hidden = edge.hidden_columns(cursor.description)   # a search column (0009): `SELECT *` stays as it was
+        rows = [{k: "" if v is None and k in empty_json else _plain(v) for k, v in row.items() if k not in hidden}
+                for row in cursor.fetchall()] if cursor.description else []
+        return rows, cursor.rowcount
+
+    @contextlib.contextmanager
+    def transaction(self):
+        """Every statement of this database inside the block, on this thread, runs in one transaction on one
+        connection: all of it is kept, or (an exception) none of it. For a read-then-write that must not interleave
+        with another request's (a row lock, `SELECT ... FOR UPDATE`, holds until the block ends). A transaction
+        inside another is part of it. Sync: keep it short, and never await inside it."""
+        open_one = _IN_TRANSACTION.get()
+        if open_one is not None and open_one[0] is self:
+            yield
+            return
+        if self.serving and self.loop_guard != "off" and _on_event_loop():
+            self._on_loop("BEGIN (a transaction)")
+        with self.pool.connection() as conn:
+            token = _IN_TRANSACTION.set((self, conn))
+            try:
+                with conn.transaction():
+                    yield
+            except BaseException:
+                conn.acting = None   # a set_config made inside a transaction that rolled back is undone with it
+                raise
+            finally:
+                _IN_TRANSACTION.reset(token)
 
     def _on_loop(self, sql):
         """A plain (blocking) statement on the event loop's thread: where it came from, once, or refused."""
