@@ -39,7 +39,7 @@ async def write_state(run: str, body: dict, request: Request, user: dict = Depen
 
 @router.delete("/runs/{run}/state")
 async def delete_state(run: str, request: Request, path: str, user: dict = Depends(current_user)):
-    return {"deleted": _guarded(lambda: runs.delete(request.app.state.db, user["id"], run, path))}
+    return {"deleted": await offload(_guarded, lambda: runs.delete(request.app.state.db, user["id"], run, path))}
 
 
 @router.get("/runs/{run}/coverage")

@@ -161,9 +161,66 @@ def test_a_body_or_a_project_id_of_the_wrong_kind_is_refused_not_a_crash(client)
     assert client.post("/api/kit/order", json={"project_id": project, "ids": ["x", True, None]}).status_code == 200
 
 
+def test_a_runs_state_is_deleted_off_the_event_loop(client):
+    signed_in(client)
+    client.put("/api/runs/run1/state", json={"path": "/shots/1", "value": "a"})
+    client.put("/api/runs/run1/state", json={"path": "/shots/2", "value": "b"})
+    assert client.delete("/api/runs/run1/state", params={"path": "/shots/1"}).json() == {"deleted": 1}
+    assert "/shots/1" not in client.get("/api/runs/run1/state", params={"path": "/shots"}).text
+
+
 # ---------------------------------------------------------------- skills: read in the studio, changed in the console
 
+@pytest.fixture
+def skills_here(monkeypatch, tmp_path):
+    """The skills and their drafts in a folder of the test's own: the console's routes write files."""
+    from scene import skills
+    import inspect
+    for name in ("load", "find", "save", "remove", "drafts", "publish", "discard", "save_draft"):
+        real = getattr(skills, name)
+        place = list(inspect.signature(real).parameters).index("folder")
+
+        def here(*args, _real=real, _place=place, **kwargs):
+            return _real(*args, **kwargs) if len(args) > _place or "folder" in kwargs else _real(*args, folder=tmp_path, **kwargs)
+        monkeypatch.setattr(skills, name, here)
+    (tmp_path / "reel.md").write_text("id: reel\ntitle: Reel\ndescription: Use for reels\n---\n1. Ask the length.", encoding="utf-8")
+    return skills
+
+
+def test_the_console_makes_changes_and_deletes_a_skill_and_writes_each_down(client, skills_here):
+    from test_api import ADMIN, console
+    client.post("/api/auth/register", json=ADMIN)
+    desk = console(client)
+    assert [s["id"] for s in desk.get("/api/admin/skills").json()["skills"]] == ["reel"]
+    made = desk.post("/api/admin/skills", json={"id": "promo", "title": "Promo", "desc": "Use for promos", "text": "1. Ask."})
+    assert made.status_code == 200 and made.json()["skill"]["id"] == "promo"
+    assert desk.post("/api/admin/skills", json={"id": "promo", "title": "Again", "text": "1."}).status_code == 400
+    assert desk.put("/api/admin/skills/promo", json={"title": "Promo 2", "text": "1. Ask twice."}).json()["skill"]["title"] == "Promo 2"
+    assert desk.put("/api/admin/skills/nope", json={"title": "x"}).status_code == 404
+    assert desk.delete("/api/admin/skills/promo").json() == {"ok": True}
+    assert desk.delete("/api/admin/skills/promo").status_code == 404
+    assert desk.delete("/api/admin/skills/..%2Freel").status_code == 404 and skills_here.find("reel")
+    actions = [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]]
+    assert {"Created skill", "Edited skill", "Deleted skill"} <= set(actions)
+
+
 # ---------------------------------------------------------------- the console's other routes that had no test
+
+def test_the_consoles_home_page_files_and_backup_check_answer_cleanly(client):
+    from test_api import ADMIN, console
+    client.post("/api/auth/register", json=ADMIN)
+    desk = console(client)
+    for site, path in ((desk, "/api/admin/showcase/nope/file"), (desk, "/api/admin/showcase/nope/poster"),
+                       (client, "/api/showcase/nope/file"), (client, "/api/showcase/nope/poster")):
+        answer = site.get(path)
+        assert answer.status_code == 404 and answer.json()["detail"] == "No such item on the Home page.", path
+    for body in ({"items": 5}, {"items": [1, 2]}, {"sections": "Films"}):
+        assert desk.put("/api/admin/showcase", json=body).status_code == 400, body
+    assert desk.put("/api/admin/showcase", json={"sections": ["Films"], "items": []}).json()["sections"] == ["Films"]
+    checked = desk.post("/api/admin/backups/check")
+    assert checked.status_code == 200 and isinstance(checked.json()["ok"], bool)
+    assert "Checked the newest backup" in [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]]
+
 
 def test_the_cast_of_a_project_is_its_always_on_entries(client):
     signed_in(client)

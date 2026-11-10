@@ -624,6 +624,11 @@ async def add_to_showcase(body: dict, request: Request, user: dict = Depends(adm
 @router.put("/showcase")
 async def change_showcase(body: dict, request: Request, user: dict = Depends(admin_user)):
     """Sections, order, names and sections of the items: see showcase.change."""
+    items = body.get("items")
+    if items is not None and not (isinstance(items, list) and all(isinstance(i, dict) for i in items)):
+        raise HTTPException(400, "items is a list of {key, name?, section?, show_prompt?}.")
+    if "sections" in body and not isinstance(body["sections"], list):
+        raise HTTPException(400, "sections is a list of names.")
     await offload(showcase.change, request.app.state.db, body)
     await offload(audit.record, request, user, "Changed the Home page")
     return await offload(_showcase, request)
@@ -641,7 +646,7 @@ async def remove_from_showcase(key: str, request: Request, user: dict = Depends(
 
 @router.get("/showcase/{key}/file")
 async def showcase_file(key: str, request: Request, user: dict = Depends(admin_user)):
-    item = showcase.find(request.app.state.db, key)
+    item = await offload(showcase.find, request.app.state.db, key)
     path = item and showcase.path_of(request.app.state.showcase_dir, item)
     elsewhere = path and storage.signed(request.app.state, "showcase", path)
     if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
@@ -653,7 +658,7 @@ async def showcase_file(key: str, request: Request, user: dict = Depends(admin_u
 
 @router.get("/showcase/{key}/poster")
 async def showcase_poster(key: str, request: Request, user: dict = Depends(admin_user)):
-    item = showcase.find(request.app.state.db, key)
+    item = await offload(showcase.find, request.app.state.db, key)
     if not item:
         raise HTTPException(404, "No such item on the Home page.")
     return await poster_response(request, showcase.path_of(request.app.state.showcase_dir, item))
@@ -929,7 +934,7 @@ async def check_backup(request: Request, user: dict = Depends(admin_user)):
     """Read the newest copy of the database back, to know it would serve if it were needed."""
     state = request.app.state
     found = await asyncio.to_thread(backup.check, state.db, state.backup_dir)
-    audit.record(request, user, "Checked the newest backup", found.get("copy", ""), "whole" if found["ok"] else found.get("detail", ""))
+    await offload(audit.record, request, user, "Checked the newest backup", found.get("copy", ""), "whole" if found["ok"] else found.get("detail", ""))
     return found
 
 
@@ -1334,7 +1339,7 @@ async def call_to_dataset(call_id: int, body: dict, request: Request, user: dict
         raise HTTPException(502, "Langfuse refused it ({}): {}".format(error.response.status_code, error.response.text[:200]))
     except httpx.HTTPError as error:
         raise HTTPException(502, "Langfuse did not answer ({}).".format(type(error).__name__))
-    audit.record(request, user, "Kept an agent call in a Langfuse dataset", str(call_id), name)
+    await offload(audit.record, request, user, "Kept an agent call in a Langfuse dataset", str(call_id), name)
     return {"dataset": name, "item": item.get("id")}
 
 
@@ -1895,7 +1900,7 @@ async def admin_create_skill(body: dict, request: Request, user: dict = Depends(
         saved = skills.save(body)
     except ValueError as err:
         raise HTTPException(400, str(err))
-    audit.record(request, user, "Created skill", saved["id"], saved["title"])
+    await offload(audit.record, request, user, "Created skill", saved["id"], saved["title"])
     return {"skill": {"id": saved["id"], "title": saved["title"], "desc": saved["desc"], "version": saved["version"],
                       "words": saved["words"].pattern, "text": saved["text"]}}
 
@@ -1909,7 +1914,7 @@ async def admin_update_skill(skill_id: str, body: dict, request: Request, user: 
         saved = skills.save({**body, "id": skill_id})
     except ValueError as err:
         raise HTTPException(400, str(err))
-    audit.record(request, user, "Edited skill", saved["id"], saved["title"])
+    await offload(audit.record, request, user, "Edited skill", saved["id"], saved["title"])
     return {"skill": {"id": saved["id"], "title": saved["title"], "desc": saved["desc"], "version": saved["version"],
                       "words": saved["words"].pattern, "text": saved["text"]}}
 
@@ -1919,7 +1924,7 @@ async def admin_delete_skill(skill_id: str, request: Request, user: dict = Depen
     """Delete a skill file for good."""
     if not skills.remove(skill_id):
         raise HTTPException(404, "No such skill.")
-    audit.record(request, user, "Deleted skill", skill_id)
+    await offload(audit.record, request, user, "Deleted skill", skill_id)
     return {"ok": True}
 
 
@@ -1940,7 +1945,7 @@ async def admin_publish_skill_draft(draft_id: str, body: dict, request: Request,
         saved = await offload(skills.publish, draft_id, {k: v for k, v in (body or {}).items() if k in ("title", "desc", "words", "text")})
     except ValueError as err:
         raise HTTPException(400, str(err))
-    audit.record(request, user, "Published skill", saved["id"], saved["title"])
+    await offload(audit.record, request, user, "Published skill", saved["id"], saved["title"])
     return {"skill": {"id": saved["id"], "title": saved["title"], "desc": saved["desc"], "version": saved["version"],
                       "words": saved["words"].pattern, "text": saved["text"]}}
 
@@ -1949,7 +1954,7 @@ async def admin_publish_skill_draft(draft_id: str, body: dict, request: Request,
 async def admin_discard_skill_draft(draft_id: str, request: Request, user: dict = Depends(admin_user)):
     if not skills.discard(draft_id):
         raise HTTPException(404, "No such draft.")
-    audit.record(request, user, "Discarded skill draft", draft_id)
+    await offload(audit.record, request, user, "Discarded skill draft", draft_id)
     return {"ok": True}
 
 
