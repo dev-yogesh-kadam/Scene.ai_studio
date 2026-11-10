@@ -379,3 +379,21 @@ def test_the_moved_column_of_0013_comes_and_goes_with_it(scratch):
     assert {"moved", "claude_events_unmoved"} <= columns()
     schema.downgrade(scratch, "0012")
     assert not {"moved", "claude_events_unmoved"} & columns() and {"text", "data"} <= columns()
+
+
+def test_the_console_sets_langfuse_owns_words_and_reads_a_calls_words_back_from_langfuse(client, monkeypatch):
+    from test_api import console, register
+    register(client)
+    desk = console(client)
+    assert desk.get("/api/admin/settings").json()["langfuse_owns_words"] is False   # today's behaviour by default
+    assert desk.put("/api/admin/settings", json={"langfuse_owns_words": True}).json()["langfuse_owns_words"] is True
+    db = client.app.state.db
+    call = db.run("INSERT INTO agent_calls (purpose, model, asked, started, seconds) VALUES ('plan', 'claude/sonnet', 'sonnet', 0, 1)")
+
+    class Kept:   # Langfuse, which has the words now that the file is gone
+        async def exchange(self, call_id, http=None):
+            return {"messages": [{"role": "user", "content": "hello"}], "format": {}, "answer": "hi"} if call_id == call else None
+    monkeypatch.setattr(client.app.state.traces, "exchange", lambda call_id: None)
+    monkeypatch.setattr(type(client.app.state.traces), "langfuse", property(lambda self: Kept()))
+    shown = desk.get("/api/admin/agent/calls/{}".format(call)).json()
+    assert shown["exchange"]["messages"][0]["content"] == "hello"

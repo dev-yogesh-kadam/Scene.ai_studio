@@ -45,6 +45,8 @@ def _settings(state):
             # Langfuse (docs/langfuse.md): whether the words are sent with the numbers, and the share of the agent's turns
             # (in percent) the fast model grades
             "langfuse_words": state.db.setting("langfuse_words", "1") != "0",
+            # whether a call's words are kept in Langfuse alone once it has them (docs/observability.md)
+            "langfuse_owns_words": state.db.setting("langfuse_owns_words", "0") == "1",
             "langfuse_grade_share": _share(state.db.setting("langfuse_grade_share", "0"))}
 
 
@@ -1067,6 +1069,8 @@ async def put_settings(body: dict, request: Request, user: dict = Depends(admin_
         await state.db.aset_setting("admin_mfa", "1" if body["admin_mfa"] else "0")
     if "langfuse_words" in body:
         await state.db.aset_setting("langfuse_words", "1" if body["langfuse_words"] else "0")
+    if "langfuse_owns_words" in body:
+        await state.db.aset_setting("langfuse_owns_words", "1" if body["langfuse_owns_words"] else "0")
     if "langfuse_grade_share" in body:
         await state.db.aset_setting("langfuse_grade_share", _number(body, "langfuse_grade_share", 100))
     after = await offload(_settings, state)
@@ -1294,6 +1298,14 @@ async def agent_run(run: str, request: Request, user: dict = Depends(admin_user)
             "langfuse": await request.app.state.traces.langfuse.link()}
 
 
+async def _exchange(state, call_id):
+    """A call's words: from its file while it is kept here, else from Langfuse when it keeps them alone (owns_words)."""
+    kept = await offload(state.traces.exchange, call_id)
+    if not kept and state.traces.langfuse is not None:
+        kept = await state.traces.langfuse.exchange(call_id)
+    return kept
+
+
 @router.get("/agent/calls/{call_id}")
 async def agent_call(call_id: int, request: Request, user: dict = Depends(admin_user)):
     """One call and its words: the messages sent and the answer, while they are kept (a week)."""
@@ -1301,14 +1313,14 @@ async def agent_call(call_id: int, request: Request, user: dict = Depends(admin_
     row = await state.db.aone("SELECT * FROM agent_calls WHERE id = ?", (call_id,))
     if row is None:
         raise HTTPException(404, "No such call.")
-    return dict(row, exchange=state.traces.exchange(call_id))
+    return dict(row, exchange=await _exchange(state, call_id))
 
 
 @router.post("/agent/calls/{call_id}/replay")
 async def replay_call(call_id: int, body: dict, request: Request, user: dict = Depends(admin_user)):
     """Ask a model the same as this call asked, to compare: {model}. Pictures are not kept, so they are not sent again."""
     state = request.app.state
-    kept = state.traces.exchange(call_id)
+    kept = await _exchange(state, call_id)
     if not kept:
         raise HTTPException(404, "The words of this call are no longer kept: they are kept for a week.")
     pictures = sum(int(m.get("images") or 0) for m in kept["messages"])
@@ -1332,7 +1344,7 @@ async def call_to_dataset(call_id: int, body: dict, request: Request, user: dict
     name = " ".join(str(body.get("dataset") or "").split())[:100]
     if not name:
         raise HTTPException(400, "Name the dataset.")
-    kept = state.traces.exchange(call_id)
+    kept = await _exchange(state, call_id)
     if not kept:
         raise HTTPException(404, "The words of this call are no longer kept: they are kept for a week.")
     sender = state.traces.langfuse
