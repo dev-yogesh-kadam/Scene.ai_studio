@@ -105,6 +105,8 @@ def save(db, body, by=""):
             raise ValueError("{} is not a limit. The limits: {}.".format(key, ", ".join(RANGES)))
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError("{} must be a number.".format(key))
+        if value != int(value):   # 2.5 sessions or credits is not a limit: refused, not cut to 2
+            raise ValueError("{} must be a whole number.".format(key))
         low, high = RANGES[key]
         if not (value == 0 and low == 0) and not low <= value <= high:
             raise ValueError("{} must be {} to {}{}.".format(key, low, high, " (0: no limit)" if low == 0 else ""))

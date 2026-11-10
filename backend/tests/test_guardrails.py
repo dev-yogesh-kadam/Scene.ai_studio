@@ -571,3 +571,9 @@ def test_an_agent_turn_reads_the_limits_again_for_claude(database):
         guardrails.turn_check(database)
     database.set_setting("guard_tool_calls", guardrails.DEFAULTS["guard_tool_calls"])
     guardrails.limits(database)
+
+
+def test_a_limit_that_is_not_a_whole_number_is_refused_not_cut(studio):
+    with pytest.raises(ValueError, match="whole number"):
+        guardrails.save(studio.app.state.db, {"limits": {"guard_sessions_per_user": 2.5}}, "Ada")
+    assert guardrails.save(studio.app.state.db, {"limits": {"guard_sessions_per_user": 2.0}}, "Ada") is not None
