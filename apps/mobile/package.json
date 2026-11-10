@@ -1,7 +1,7 @@
 {
   "name": "scene-phone-site",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "dependencies": {
     "@scene/shared": "*",
     "@expo-google-fonts/inter": "^0.4.2",
