@@ -1,6 +1,6 @@
 id: html-scenes
 title: HTML scenes — motion graphics you design, drawn by HyperFrames
-version: 2
+version: 3
 desc: Load before writing a page for the render_html tool: the page rules, fonts, media, and how to make titles, lower thirds, captions, stat cards and end cards look designed.
 words: (?!)
 guide: true
@@ -11,8 +11,8 @@ thirds, captions styled for a reel, stat and chart cards, quote cards, layouts o
 in a brand colour, end cards, and stills with exact text (format png: a thumbnail's words over its picture). A video
 model cannot write readable words; this can. It is free and made on this machine.
 
-The call: film, op "html", settings {"width", "height", "duration", "fps", "format", "media"}, and the whole page in
-"value". You get back the library id of what it made, and "notes" when HyperFrames' check found something worth
+The call: render_html with "html" (the whole page, as it is), "width", "height", "duration", and "fps", "format" and
+"media" when needed. You get back the library id of what it made, and "notes" when HyperFrames' check found something worth
 fixing. Look at it (look, op deep, for any words in it) before you build on it or show it.
 
 ## The page
