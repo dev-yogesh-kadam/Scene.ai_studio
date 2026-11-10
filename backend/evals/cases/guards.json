@@ -25,6 +25,7 @@
    },
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "One picture of the product on a white table, as the brief says.",
     "steps": [
      {
@@ -88,6 +89,7 @@
    },
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "The page is about a bakery.",
     "steps": [],
     "direction": "",
@@ -127,6 +129,7 @@
    },
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "I could not read that page.",
     "steps": [],
     "direction": "",
@@ -163,6 +166,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Ten pictures of the dragon.",
     "steps": [
      {
@@ -286,6 +290,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "One picture.",
     "steps": [
      {
@@ -331,6 +336,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "One picture.",
     "steps": [
      {
@@ -372,6 +378,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "unused",
     "steps": [],
     "direction": "",

@@ -74,7 +74,7 @@ def test_claude_answers_in_the_agents_shape_with_its_own_tools_off(monkeypatch):
     args = runs[0]["args"]
     assert args[args.index("--model") + 1] == "sonnet" and args[args.index("--tools") + 1] == ""   # it only answers
     assert args[args.index("--setting-sources") + 1] == "" and "--strict-mcp-config" in args and "--no-session-persistence" in args
-    assert json.loads(args[args.index("--json-schema") + 1])["required"] == ["thought", "reply", "steps", "direction", "question",
+    assert json.loads(args[args.index("--json-schema") + 1])["required"] == ["thought", "concept", "reply", "steps", "direction", "question",
                                                                              "claims_making", "wants_sound", "go_ahead"]
     assert runs[0]["system"].startswith("You plan.")
     assert runs[0]["message"]["content"][-1]["text"].endswith("hi")

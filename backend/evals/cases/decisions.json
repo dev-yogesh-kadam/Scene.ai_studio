@@ -19,6 +19,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Planning it.",
     "steps": [
      {
@@ -70,6 +71,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Sure!",
     "steps": [],
     "direction": "",
@@ -83,6 +85,7 @@
    },
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "One shot of the train.",
     "steps": [
      {
@@ -145,6 +148,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Adding it.",
     "steps": [
      {
@@ -202,6 +206,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "I cannot use ffmpeg.",
     "steps": [],
     "direction": "",
@@ -253,6 +258,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Two halves.",
     "steps": [
      {
@@ -317,6 +323,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Trimmed.",
     "steps": [
      {
@@ -356,6 +363,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "A couple of things first.",
     "steps": [],
     "direction": "",
@@ -397,6 +405,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "A few things first.",
     "steps": [],
     "direction": "",
@@ -455,6 +464,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "One thing.",
     "steps": [],
     "direction": "",
@@ -491,6 +501,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "Hmm.",
     "steps": [],
     "direction": "",
@@ -524,6 +535,7 @@
   "recorded": [
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "I'm making it now!",
     "steps": [],
     "direction": "",
@@ -537,6 +549,7 @@
    },
    {
     "thought": "Reading the message.",
+    "concept": "",
     "reply": "I'm making it now!",
     "steps": [],
     "direction": "",
