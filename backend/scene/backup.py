@@ -14,8 +14,6 @@ from pathlib import Path
 
 from . import vault
 
-EVERY = 24 * 3600   # seconds between copies while the app keeps running
-
 
 def make(db, folder, config_file="", keep=14):
     """Write today's copies, in place of earlier ones from today, and delete those older than the newest `keep` days."""
@@ -204,21 +202,63 @@ def attempt_files(db, folder, sources, keep=14):
         return None
 
 
+CHECK_EVERY = 3600   # seconds between looks at whether the day's copies are made
+
+
 async def run_forever(db, folder, config_file="", keep=14, sources=None, database=True, restore_url="", retention_days=0):
     """The database was copied as the app started (when `database`); its files follow here (when there are `sources`),
     without holding the start up. Then both once a day; the restore test once a week (when `restore_url` is set); the
-    agent's old records archived once a month (when `retention_days`)."""
-    from . import retention
-    while True:
-        if sources:
-            await asyncio.to_thread(attempt_files, db, folder, sources, keep)
-        if restore_url and time.time() - ((await asyncio.to_thread(last_restore_test, db) or {}).get("when") or 0) >= RESTORE_EVERY:
-            await asyncio.to_thread(restore_test, db, folder, restore_url)
-        if retention_days > 0 and await asyncio.to_thread(retention.due, db):
+    agent's old records archived once a month (when `retention_days`). See Schedule."""
+    await Schedule(db, folder, config_file, keep, sources, database, restore_url, retention_days).run_forever()
+
+
+class Schedule:
+    """The daily copies, by the calendar: every CHECK_EVERY seconds it looks whether today's are made, and makes them
+    when not. So a studio that runs for weeks makes its copy soon after midnight each day, one that was asleep (the PC
+    suspended) or whose copy failed (the backup disk unplugged) makes it within the hour, and a restart on the same day
+    does not make a second one. Each part's failure is printed and tried again the next time: none stops the others or
+    the schedule."""
+
+    def __init__(self, db, folder, config_file="", keep=14, sources=None, database=True, restore_url="", retention_days=0):
+        self.db, self.folder, self.config_file, self.keep = db, Path(folder), config_file, keep
+        self.sources, self.database, self.restore_url, self.retention_days = sources, database, restore_url, retention_days
+        self.files_day = None   # the day the files were last copied
+
+    def copied_today(self, today):
+        return (self.folder / "scene_{}{}".format(today, self.db.suffix)).is_file()
+
+    async def tick(self, today=None):
+        """One look: what is due is done. Returns the parts it did."""
+        from . import retention
+        today = today or date.today().isoformat()
+        done = []
+        if self.database and not self.copied_today(today):
+            if await asyncio.to_thread(attempt, self.db, self.folder, self.config_file, self.keep) is not None:
+                done.append("database")
+        if self.sources and self.files_day != today:
+            if await asyncio.to_thread(attempt_files, self.db, self.folder, self.sources, self.keep) is not None:
+                self.files_day = today
+                done.append("files")
+        try:
+            last = (await asyncio.to_thread(last_restore_test, self.db) or {}).get("when") or 0
+            if self.restore_url and time.time() - last >= RESTORE_EVERY:
+                await asyncio.to_thread(restore_test, self.db, self.folder, self.restore_url)
+                done.append("restore_test")
+        except Exception as error:
+            print("The restore test of the backups could not run: {}".format(error))
+        if self.retention_days > 0:
             try:
-                await asyncio.to_thread(retention.archive, db, folder, retention_days)
+                if await asyncio.to_thread(retention.due, self.db):
+                    await asyncio.to_thread(retention.archive, self.db, self.folder, self.retention_days)
+                    done.append("archive")
             except Exception as error:
                 print("The agent's old records were not archived: {}".format(error))
-        await asyncio.sleep(EVERY)
-        if database:
-            await asyncio.to_thread(attempt, db, folder, config_file, keep)
+        return done
+
+    async def run_forever(self):
+        while True:
+            try:
+                await self.tick()
+            except Exception as error:   # whatever it was, the next look comes
+                print("The backup schedule's look failed: {}".format(error))
+            await asyncio.sleep(CHECK_EVERY)

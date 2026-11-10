@@ -7,6 +7,21 @@
 #
 #   docker compose up --build
 # The passwords below are for this local setup only. ComfyUI is not in it: point SCENE_COMFY_URL at a render server.
+#
+# Its own project (`name`), so its containers and volumes never mix with another compose project's (Langfuse's).
+# Its ports, on 127.0.0.1 only, can be moved where something else listens (on the studio PC, 8090 is the console's):
+#   SCENE_DOCKER_PORT (8080), SCENE_DOCKER_CONSOLE_PORT (8090), SCENE_DOCKER_BLOB_PORT (10000).
+# A second stack beside this one: `docker compose -p <another name> up` with other ports.
+# Each container's log (JSON lines for the app) is kept in files of at most 10 MB, five of them: Docker's default
+# keeps one file that grows for ever.
+
+name: scene-docker
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   db:
@@ -22,22 +37,28 @@ services:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "scene"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
+    logging: *logging
 
   blob:
     image: mcr.microsoft.com/azure-storage/azurite:3.35.0
-    command: azurite-blob --blobHost 0.0.0.0 --loose --skipApiVersionCheck
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort ${SCENE_DOCKER_BLOB_PORT:-10000} --loose --skipApiVersionCheck
     volumes:
       - blob:/data
-    # The app shares this container's network (app: network_mode), so the links it signs, http://127.0.0.1:10000/...,
+    # The app shares this container's network (app: network_mode), so the links it signs, http://127.0.0.1:<port>/...,
     # open in a browser on this machine too; on Azure they are https://<account>.blob.core.windows.net/... So the
-    # app's ports are published here.
+    # app's ports are published here, each the same inside and out.
     ports:
-      - "127.0.0.1:10000:10000"
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:8090:8090"
+      - "127.0.0.1:${SCENE_DOCKER_BLOB_PORT:-10000}:${SCENE_DOCKER_BLOB_PORT:-10000}"
+      - "127.0.0.1:${SCENE_DOCKER_PORT:-8080}:${SCENE_DOCKER_PORT:-8080}"
+      - "127.0.0.1:${SCENE_DOCKER_CONSOLE_PORT:-8090}:${SCENE_DOCKER_CONSOLE_PORT:-8090}"
+    restart: unless-stopped
+    logging: *logging
 
   redis:
     image: redis:7.4-alpine
+    restart: unless-stopped
+    logging: *logging
 
   migrate:
     build: .
@@ -45,9 +66,11 @@ services:
     environment: &settings
       SCENE_DATABASE_URL: postgresql://scene_app:local-app@db:5432/scene
       SCENE_DATABASE_OWNER_URL: postgresql://scene_owner:local-owner@db:5432/scene
+      SCENE_PORT: ${SCENE_DOCKER_PORT:-8080}
+      SCENE_CONSOLE_PORT: ${SCENE_DOCKER_CONSOLE_PORT:-8090}
       SCENE_STORAGE_BACKEND: azure
       # Azurite's well-known development account (not a secret).
-      SCENE_AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+      SCENE_AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:${SCENE_DOCKER_BLOB_PORT:-10000}/devstoreaccount1;"
       SCENE_REDIS_URL: redis://redis:6379/0
       SCENE_SECRET_KEY: ${SCENE_SECRET_KEY:?Set SCENE_SECRET_KEY (a Fernet key) in your shell or an .env file}
       SCENE_COMFY_URL: ${SCENE_COMFY_URL:-http://host.docker.internal:8188}
@@ -59,6 +82,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    logging: *logging
 
   app:
     build: .
@@ -73,6 +97,8 @@ services:
         condition: service_started
       redis:
         condition: service_started
+    restart: unless-stopped
+    logging: *logging
 
 volumes:
   db:
