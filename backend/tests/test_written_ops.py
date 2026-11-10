@@ -211,6 +211,30 @@ def test_an_html_op_is_checked_before_it_is_queued(client):
     assert len(client.app.state.db.all("SELECT id FROM jobs")) == jobs_before
 
 
+def test_a_checked_page_is_sealed_with_a_policy_first_in_its_head():
+    page = motion.sealed(PAGE)
+    assert page.index("Content-Security-Policy") < page.index("<script") and "form-action 'none'" in page
+    assert motion.sealed("<html><header>x</header></html>").startswith('<meta http-equiv="Content-Security-Policy"')
+
+
+@pytest.mark.skipif(not motion.status()["ready"], reason="HyperFrames is not installed here")
+def test_a_script_that_builds_a_link_from_pieces_reaches_nothing_from_a_render(tmp_path):
+    from test_fetch import a_server
+    server, seen = a_server(b"x")
+    port = server.server_port
+    # every way a script could reach this machine's network without the words the check looks for
+    reach = ("var u = 'ht' + 'tp://127.0.0.1:{p}/'; new Image().src = u + 'img';"
+             "var s = document.createElement('script'); s.src = u + 'script'; document.head.appendChild(s);"
+             "var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = u + 'css'; document.head.appendChild(l);"
+             "window['fe' + 'tch'](u + 'fetch').catch(function () {{}});").format(p=port)
+    page = PAGE.replace("__MORE__", "").replace("const tl =", reach + " const tl =")
+    try:
+        made = asyncio.run(motion.render_page(page, 320, 180, 1, tmp_path / "page.mp4"))
+    finally:
+        server.shutdown()
+    assert made["width"] == 320 and seen == [], seen
+
+
 @pytest.mark.skipif(not motion.status()["ready"], reason="HyperFrames is not installed here")
 def test_an_html_op_draws_the_page_and_files_a_still_as_a_picture(client):
     me = register(client)

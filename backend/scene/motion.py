@@ -290,6 +290,28 @@ BARRED = [(re.compile(r"<\s*(iframe|frame|object|embed|base|portal)\b", re.IGNOR
           (re.compile(r"\bfile:/|\.\.[\\/]|(?<![\w])[A-Za-z]:[\\/]", re.IGNORECASE), "a path to a file off the page's folder")]
 
 
+# What a page the agent wrote may load once it is checked, said to Chrome too (a Content-Security-Policy, put first in its
+# head): its own folder (HyperFrames serves it from localhost), data: and blob:, and Google Fonts. The checks above
+# read the page's words; a script that builds a link from pieces gets past them, not past this. (A top-level
+# navigation is not something a policy stops: see docs/motion.md.)
+POLICY = ("default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; "
+          "style-src 'self' data: blob: 'unsafe-inline' https://fonts.googleapis.com; "
+          "font-src 'self' data: blob: https://fonts.gstatic.com https://fonts.googleapis.com; "
+          "form-action 'none'; base-uri 'self'; object-src 'none'")
+HEAD = re.compile(r"<head(?:\s[^>]*)?>", re.IGNORECASE)
+
+
+def sealed(page):
+    """A checked page with POLICY first in its head (or first of all, when it has no head)."""
+    meta = '<meta http-equiv="Content-Security-Policy" content="{}">'.format(POLICY)
+    found = HEAD.search(page)
+    if found:
+        return page[:found.end()] + meta + page[found.end():]
+    doctype = re.match(r"\s*<!doctype[^>]*>", page, re.IGNORECASE)
+    at = doctype.end() if doctype else 0
+    return page[:at] + meta + page[at:]
+
+
 def gsap_files():
     """The GSAP files a page may load by name (gsap.min.js, SplitText.min.js, DrawSVGPlugin.min.js...)."""
     return {p.name for p in GSAP_DIST.glob("*.min.js")} if GSAP_DIST.is_dir() else set()
@@ -373,7 +395,7 @@ async def render_page(page, width, height, seconds, target, fps=30, fmt="mp4", m
         page_budget(page, width, height, seconds, fps)
 
     def fill(project):
-        (project / "index.html").write_text(page, encoding="utf-8")
+        (project / "index.html").write_text(sealed(page), encoding="utf-8")
         for name in gsap_files():
             if re.search(r"[\"'/]" + re.escape(name) + r"[\"']", page):
                 shutil.copy(GSAP_DIST / name, project / name)
@@ -575,6 +597,9 @@ async def render_project(source, target, fps=30, fmt="mp4", media_files=None, fr
             shutil.copytree(source, project, ignore=shutil.ignore_patterns(".hyperframes", "renders"))
             _stage(project, media_files)
             width, height, seconds = check_project(project)
+            for page in project.rglob("*.html"):   # checked: now sealed, for Chrome
+                if page.relative_to(project).parts[0] != "lib":
+                    page.write_text(sealed(page.read_text(encoding="utf-8", errors="replace")), encoding="utf-8")
             if not frames:
                 page = "".join(p.read_text(encoding="utf-8", errors="replace") for p in project.rglob("*.html"))
                 project_budget(width, height, seconds, fps, bool(re.search(r"<\s*video\b", page, re.IGNORECASE)))
