@@ -1,0 +1,792 @@
+[
+ {
+  "id": "en-three-chained-shots",
+  "lang": "en",
+  "about": "One line with three actions becomes three chained shots, each priced",
+  "tags": [
+   "plan"
+  ],
+  "ask": {
+   "instruction": "a girl runs through a rainy market, jumps over a crate and hides behind a stall, for Reels"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Three shots of the chase: the **run**, the **jump** and the **hiding**.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Market run",
+      "prompt": "A girl of about twenty with a black braid and a yellow raincoat runs through a crowded night market in heavy rain.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Crate jump",
+      "prompt": "A girl of about twenty with a black braid and a yellow raincoat leaps over a wooden crate and lands running.",
+      "duration": 4,
+      "orientation": "portrait",
+      "after": 1,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Hiding",
+      "prompt": "A girl of about twenty with a black braid and a yellow raincoat crouches behind a fruit stall, breathing hard.",
+      "duration": 5,
+      "orientation": "portrait",
+      "after": 2,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 3,
+   "kinds": [
+    "video",
+    "video",
+    "video"
+   ],
+   "workflows": [
+    "video/h3_all_in_one",
+    "video/h3_all_in_one",
+    "video/h3_all_in_one"
+   ],
+   "priced": true,
+   "question": false,
+   "names": [
+    "Market run",
+    "Crate jump",
+    "Hiding"
+   ]
+  }
+ },
+ {
+  "id": "en-one-picture",
+  "lang": "en",
+  "about": "A picture asked for is one image step on the picture workflow",
+  "tags": [
+   "plan"
+  ],
+  "ask": {
+   "instruction": "a poster of a red fox in snow, square"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "One square picture of the fox.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "image/image_t2i_flux2_dev",
+      "name": "Fox in snow",
+      "prompt": "A red fox sits in deep snow at dawn, breath steaming.",
+      "uses": [],
+      "clips": 1,
+      "after": 0,
+      "orientation": "square"
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "kinds": [
+    "image"
+   ],
+   "workflows": [
+    "image/image_t2i_flux2_dev"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "en-greeting-no-plan",
+  "lang": "en",
+  "about": "A greeting gets words and no steps, nothing priced",
+  "tags": [
+   "talk"
+  ],
+  "ask": {
+   "instruction": "hi, what can you do?"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Hi! I plan and make pictures, videos and music. Tell me what you want to see.",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "question": false,
+   "reply_has": "pictures"
+  }
+ },
+ {
+  "id": "en-music-for-shots",
+  "lang": "en",
+  "about": "Music for two shots is as long as they are together, and priced",
+  "tags": [
+   "plan",
+   "music"
+  ],
+  "ask": {
+   "instruction": "two shots of coffee being made and music for them"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Two shots and a tune for them.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Pour",
+      "prompt": "Coffee pours into a white cup.",
+      "duration": 7,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Smile",
+      "prompt": "A barista smiles over the counter.",
+      "duration": 8,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "audio/audio_minimax_music_3",
+      "name": "Music",
+      "prompt": "Warm acoustic guitar, unhurried.",
+      "uses": [],
+      "clips": 1,
+      "after": 0,
+      "duration": 300,
+      "choices": [
+       {
+        "setting": "37:13:max_duration",
+        "value": "300"
+       }
+      ]
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 3,
+   "kinds": [
+    "video",
+    "video",
+    "audio"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "en-unknown-workflow-left-out",
+  "lang": "en",
+  "about": "A step on a workflow the studio does not have (off the schema, on purpose) goes back to be fixed",
+  "tags": [
+   "plan",
+   "checks"
+  ],
+  "ask": {
+   "instruction": "a dog in a park, one shot"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "One shot of the dog.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Dog in the park",
+      "prompt": "A dog runs across a park.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/nope",
+      "name": "Bad",
+      "prompt": "Nothing.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   },
+   {
+    "thought": "Reading the message.",
+    "reply": "One shot of the dog.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Dog in the park",
+      "prompt": "A dog runs across a park.",
+      "duration": 6,
+      "orientation": "portrait",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": false,
+   "steps": 1,
+   "names": [
+    "Dog in the park"
+   ],
+   "priced": true,
+   "asked": 2,
+   "told": [
+    "video/nope"
+   ]
+  }
+ },
+ {
+  "id": "en-shot-lengths-kept-in-range",
+  "lang": "en",
+  "about": "Shot lengths the model gives past 4 to 15 s are brought into range, priced as made",
+  "tags": [
+   "plan",
+   "checks"
+  ],
+  "ask": {
+   "instruction": "a crane move over a city and a blink, for YouTube"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Two shots.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Epic",
+      "prompt": "A long crane move over a city at dusk.",
+      "duration": 99,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Blink",
+      "prompt": "A quick glance at the camera.",
+      "duration": 2,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 2,
+   "priced": true,
+   "kinds": [
+    "video",
+    "video"
+   ]
+  }
+ },
+ {
+  "id": "en-too-many-steps",
+  "lang": "en",
+  "about": "A plan longer than the studio allows in one approval is cut to its limit",
+  "tags": [
+   "plan",
+   "checks"
+  ],
+  "ask": {
+   "instruction": "a 20 shot montage of a city waking up"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Twenty shots of the city.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 0",
+      "prompt": "The city at dawn, view 0.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 1",
+      "prompt": "The city at dawn, view 1.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 2",
+      "prompt": "The city at dawn, view 2.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 3",
+      "prompt": "The city at dawn, view 3.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 4",
+      "prompt": "The city at dawn, view 4.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 5",
+      "prompt": "The city at dawn, view 5.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 6",
+      "prompt": "The city at dawn, view 6.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 7",
+      "prompt": "The city at dawn, view 7.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 8",
+      "prompt": "The city at dawn, view 8.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 9",
+      "prompt": "The city at dawn, view 9.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 10",
+      "prompt": "The city at dawn, view 10.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 11",
+      "prompt": "The city at dawn, view 11.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 12",
+      "prompt": "The city at dawn, view 12.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 13",
+      "prompt": "The city at dawn, view 13.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 14",
+      "prompt": "The city at dawn, view 14.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 15",
+      "prompt": "The city at dawn, view 15.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 16",
+      "prompt": "The city at dawn, view 16.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 17",
+      "prompt": "The city at dawn, view 17.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 18",
+      "prompt": "The city at dawn, view 18.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     },
+     {
+      "tool": "generate",
+      "workflow": "video/h3_all_in_one",
+      "name": "Shot 19",
+      "prompt": "The city at dawn, view 19.",
+      "duration": 4,
+      "orientation": "landscape",
+      "after": 0,
+      "uses": [],
+      "clips": 1,
+      "start_from": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": {
+    "max": 12
+   },
+   "priced": true
+  }
+ },
+ {
+  "id": "en-variations",
+  "lang": "en",
+  "about": "Three takes of one step are a step for each take, each priced",
+  "tags": [
+   "plan"
+  ],
+  "ask": {
+   "instruction": "three takes of a cat on a windowsill"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Three takes of the cat.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "image/image_t2i_flux2_dev",
+      "name": "Cat",
+      "prompt": "A tabby cat on a sunny windowsill.",
+      "uses": [],
+      "clips": 1,
+      "after": 0,
+      "variations": 3
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 3,
+   "kinds": [
+    "image",
+    "image",
+    "image"
+   ],
+   "priced": true
+  }
+ },
+ {
+  "id": "en-reply-without-choices",
+  "lang": "en",
+  "about": "A plan's reply is kept as written when it offers no choice in words",
+  "tags": [
+   "plan"
+  ],
+  "ask": {
+   "instruction": "a sunset over the sea, one picture"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "One picture of the sunset.",
+    "steps": [
+     {
+      "tool": "generate",
+      "workflow": "image/image_t2i_flux2_dev",
+      "name": "Sunset",
+      "prompt": "The sun sets over a calm sea, orange sky.",
+      "uses": [],
+      "clips": 1,
+      "after": 0
+     }
+    ],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": true,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 1,
+   "reply_has": "sunset",
+   "question": false,
+   "priced": true
+  }
+ },
+ {
+  "id": "en-made-up-item-taken-out",
+  "lang": "en",
+  "about": "An item id the model made up is taken out of the reply",
+  "tags": [
+   "talk",
+   "checks"
+  ],
+  "ask": {
+   "instruction": "show me what we made"
+  },
+  "recorded": [
+   {
+    "thought": "Reading the message.",
+    "reply": "Here is [[item:99999]].",
+    "steps": [],
+    "direction": "",
+    "question": {
+     "text": "",
+     "options": []
+    },
+    "claims_making": false,
+    "wants_sound": false,
+    "go_ahead": false
+   }
+  ],
+  "expect": {
+   "schema": true,
+   "steps": 0,
+   "reply_lacks": "99999"
+  }
+ }
+]
