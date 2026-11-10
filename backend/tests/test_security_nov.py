@@ -70,6 +70,14 @@ def test_the_expensive_paths_are_limited_per_user(client):
     assert client.post("/api/edit/film", json={}).status_code != 429
 
 
+def test_the_agent_and_render_routes_of_the_workspace_are_limited_per_user(client):
+    account(client)
+    limit = security.LIMITS
+    for path, name in (("/api/agent/compact", "agent"), ("/api/motion/scenes", "motion"), ("/api/edit/sound", "render")):
+        answers = [client.post(path, json={}).status_code for _ in range(limit[name][0] + 1)]
+        assert 429 not in answers[:-1] and answers[-1] == 429, (path, answers[-3:])
+
+
 def test_an_agent_tool_can_ask_whether_its_user_is_over_the_limit(client):
     import asyncio
     from scene.api.deps import allowed

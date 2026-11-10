@@ -18,7 +18,8 @@ from .. import aftercare, agent, camera, claude, conversations, core, credits, e
     pages, runs, sequence, placement, sessions, sharing, skills, storage, traces, web
 from ..db import as_everyone, offload
 from ..comfy import workflows
-from .deps import current_user
+from ..security import LIMITS
+from .deps import allowed, costly, current_user
 from .studio import fit_resolution, price
 
 router = APIRouter(prefix="/api", tags=["workspace"])
@@ -143,7 +144,7 @@ async def delete_board(kind: str, request: Request, project: int = 0, user: dict
     return {"ok": True}
 
 
-@router.post("/agent/session/compact")
+@router.post("/agent/session/compact", dependencies=[costly("agent")])
 async def compact_session(body: dict, request: Request, user: dict = Depends(current_user)):
     """Compact an agent tab's Claude session now (the user's "Compact now"): Claude Code sums up the conversation so far
     and goes on from that, in the same session. Body: {"run", "project_id"}. Returns {"context"} as a plan gives it."""
@@ -182,7 +183,7 @@ def row_model(state, user, project, run):
     return row["model"] if row else ""
 
 
-@router.post("/timeline/export")
+@router.post("/timeline/export", dependencies=[costly("render")])
 async def export_timeline(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue a job that joins the timeline's clips into one video for the library. Costs no credits: it needs no GPU."""
     state = request.app.state
@@ -212,7 +213,7 @@ async def export_timeline(body: dict, request: Request, user: dict = Depends(cur
     return {"job": job_id, "name": name}
 
 
-@router.post("/edit/assemble")
+@router.post("/edit/assemble", dependencies=[costly("render")])
 async def assemble(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue the finished cut: the clips in order, a title card and an end card, music under it. Costs no credits.
     Body: {"name"?, "clips": [{"id", "start"?, "end"?, "fade"?: crossfade in from the clip before}], "music"?: audio item id,
@@ -254,7 +255,7 @@ async def assemble(body: dict, request: Request, user: dict = Depends(current_us
     return {"job": await offload(state.jobs.add, user["id"], name, edits.ASSEMBLE, settings, facts, None, 0, project_id), "name": name}
 
 
-@router.post("/edit/sound")
+@router.post("/edit/sound", dependencies=[costly("render")])
 async def add_sound(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue a job that puts one of the user's sounds on one of their videos, for the library. Costs no credits."""
     state = request.app.state
@@ -302,7 +303,7 @@ async def motion_templates(request: Request, user: dict = Depends(current_user))
     return {**motion.status(request.app.state.settings.node_path), "templates": motion.templates()}
 
 
-@router.post("/motion/scenes")
+@router.post("/motion/scenes", dependencies=[costly("motion")])
 async def motion_scenes(body: dict, request: Request, user: dict = Depends(current_user)):
     return await _patient(_motion_scenes(body, request, user))
 
@@ -356,7 +357,7 @@ async def motion_estimate(body: dict, request: Request, user: dict = Depends(cur
     return {"seconds": round(seconds, 1), "credits": cost, "balance": await offload(state.credits.balance, user["id"])}
 
 
-@router.post("/motion/render")
+@router.post("/motion/render", dependencies=[costly("render")])
 async def motion_render(body: dict, request: Request, user: dict = Depends(current_user)):
     """Queue the render of a motion graphic for the library. It is charged by its length now, and the queue gives
     the credits back if the render fails or is cancelled."""
@@ -710,7 +711,7 @@ async def save_studio_preferences(body: dict, request: Request, user: dict = Dep
 
 # ---------------------------------------------------------------- review
 
-@router.post("/agent/review")
+@router.post("/agent/review", dependencies=[costly("agent")])
 async def agent_review(body: dict, request: Request, user: dict = Depends(current_user)):
     return await _patient(_agent_review(body, request, user))
 
@@ -794,7 +795,7 @@ async def _retake(state, user, item, verdict, previous):
             "why": fix.get("why") or "", "start": start, "workflow_title": schema["title"]}
 
 
-@router.post("/agent/compact")
+@router.post("/agent/compact", dependencies=[costly("agent")])
 async def agent_compact(body: dict, request: Request, user: dict = Depends(current_user)):
     return await _patient(_agent_compact(body, request, user))
 
@@ -843,7 +844,7 @@ def _as_shot(step, shot_id):
     return step
 
 
-@router.post("/agent/storyboard")
+@router.post("/agent/storyboard", dependencies=[costly("agent")])
 async def agent_storyboard(body: dict, request: Request, user: dict = Depends(current_user)):
     """Stage one of a long film: a cheap still for each planned video shot, to look at before any clip is made.
     Body: {"shots": [{"shot_id", "proposal"}], "project_id"?}. Returns {"steps": [...], "dropped": [...], "total"};
@@ -873,7 +874,7 @@ async def agent_storyboard(body: dict, request: Request, user: dict = Depends(cu
     return {"steps": steps, "dropped": dropped, "total": sum(s["credits"] for s in steps)}
 
 
-@router.post("/agent/animate")
+@router.post("/agent/animate", dependencies=[costly("agent")])
 async def agent_animate(body: dict, request: Request, user: dict = Depends(current_user)):
     """Stage two: each approved still becomes the first frame of its clip. Body: {"shots": [{"shot_id", "item", "proposal"}],
     "project_id"?}, item being the library id of the still. Returns {"steps", "dropped", "total"}, not queued."""
@@ -910,7 +911,7 @@ async def agent_animate(body: dict, request: Request, user: dict = Depends(curre
     return {"steps": steps, "dropped": dropped, "total": sum(s["credits"] for s in steps)}
 
 
-@router.post("/agent/reroll")
+@router.post("/agent/reroll", dependencies=[costly("agent")])
 async def agent_reroll(body: dict, request: Request, user: dict = Depends(current_user)):
     """Another take of a finished shot: the same prompt and settings with a new seed, priced and not queued.
     Body: {"item", "prompt"?}. Returns {"retake"}, as the review does for a failed shot."""
@@ -939,7 +940,7 @@ async def _menu(state, user):
             if w["kind"] in ("video", "image", "audio") and not w.get("error") and await offload(state.credits.enabled, w["id"], user)]
 
 
-@router.post("/agent/step")
+@router.post("/agent/step", dependencies=[costly("agent")])
 async def agent_step(body: dict, request: Request, user: dict = Depends(current_user)):
     """Change one step of a plan on its approval card: the workflow, the shape, the size, the length or the prompt.
     The step is built again with the same checks as a planned one and priced. Nothing is queued or charged."""
@@ -1027,7 +1028,7 @@ async def agent_step(body: dict, request: Request, user: dict = Depends(current_
         raise HTTPException(400, str(e))
 
 
-@router.post("/agent/plan")
+@router.post("/agent/plan", dependencies=[costly("agent")])
 async def agent_plan(body: dict, request: Request, user: dict = Depends(current_user)):
     """Ask the agent for a plan. Each step comes back as checked, priced job settings; nothing is queued or charged.
 
@@ -1723,6 +1724,9 @@ async def _planning(request, user, body, instruction, project):
     async def page_build(call):
         """A motion project's files written by the page writer (agent.build_pages) from the director's brief, in a call
         of its own: only what it wrote, the quick check and its notes come back here."""
+        if not await allowed(state, "page_build", user["id"]):
+            return ("Not built: the page writer's limit ({} an hour) is reached; go on without it or wait."
+                    .format(LIMITS["page_build"][0]))
         try:
             name, _ = pages.split(call.get("path"))
         except pages.PageError as error:
