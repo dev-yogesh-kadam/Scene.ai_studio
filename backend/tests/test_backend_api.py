@@ -98,6 +98,47 @@ def test_a_stranger_can_neither_read_nor_change_anything_of_anothers(client):
 
 # ---------------------------------------------------------------- errors are JSON, and the request's fault is a 400
 
+def test_a_crash_is_answered_as_json_without_a_trace(client, monkeypatch):
+    from fastapi.testclient import TestClient
+    signed_in(client)
+    quiet = TestClient(client.app, raise_server_exceptions=False)
+    quiet.cookies = client.cookies
+
+    def boom(user_id):
+        raise RuntimeError("secret table internals at line 42")
+    monkeypatch.setattr(client.app.state.jobs, "snapshot", boom)
+    answer = quiet.get("/api/jobs")
+    assert answer.status_code == 500 and answer.headers["content-type"] == "application/json"
+    assert "went wrong" in answer.json()["detail"] and "secret" not in answer.text and "Traceback" not in answer.text
+
+    import psycopg
+
+    def wrong_kind(user_id):
+        raise psycopg.errors.InvalidTextRepresentation('invalid input syntax for type integer: "x" (column jobs.id)')
+    monkeypatch.setattr(client.app.state.jobs, "snapshot", wrong_kind)
+    answer = quiet.get("/api/jobs")
+    assert answer.status_code == 400 and "not of the right kind" in answer.json()["detail"] and "jobs.id" not in answer.text
+
+
+def test_fields_of_the_wrong_kind_are_listed_without_what_was_sent(client):
+    signed_in(client)
+    png = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b"secret words"
+    for path in ("/api/projects", "/api/agent/plans", "/api/preferences"):   # a file where JSON goes: was a crash
+        answer = client.request("PUT" if path == "/api/preferences" else "POST", path, files={"file": ("a.png", png, "image/png")})
+        assert answer.status_code == 422 and answer.json()["detail"][0]["loc"] == ["body"], path
+        assert "secret words" not in answer.text and "input" not in answer.json()["detail"][0]
+    assert "x" * 1000 not in client.post("/api/projects", content=json.dumps(["x" * 5000]),
+                                         headers={"content-type": "application/json"}).text   # nothing sent is echoed
+
+
+def test_the_api_maps_are_off_on_both_sites(client):
+    for site in (client, client.console):
+        for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
+            answer = site.get(path)   # the console answers a one-word path with its own page (a section's address)
+            assert answer.status_code == 404 or (site is client.console and "Admin console" in answer.text), path
+            assert "swagger" not in answer.text.lower() and "redoc" not in answer.text.lower() and '"openapi"' not in answer.text
+
+
 # ---------------------------------------------------------------- skills: read in the studio, changed in the console
 
 # ---------------------------------------------------------------- the console's other routes that had no test
