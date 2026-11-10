@@ -54,6 +54,8 @@ done
 export SCENE_TEST_PORT_BASE="$PORT_BASE"
 
 TMPROOT="${TMPDIR:-${TEMP:-/tmp}}"
+# Git Bash gives TEMP as C:\Users\...: as C:/Users/... the step commands keep it (backslashes would be lost)
+command -v cygpath >/dev/null 2>&1 && TMPROOT="$(cygpath -m "$TMPROOT")"
 KEY="$(printf '%s_%s' "${HOSTPORT/:/_}" "$DATABASE" | tr -c 'A-Za-z0-9_.-' '_')"
 LOCKROOT="$TMPROOT/scene-gate-locks"; mkdir -p "$LOCKROOT"
 LOCK="$LOCKROOT/$KEY.lock"
