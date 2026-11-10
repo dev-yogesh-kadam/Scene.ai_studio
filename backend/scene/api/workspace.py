@@ -19,7 +19,7 @@ from .. import aftercare, agent, camera, claude, conversations, core, credits, e
 from ..db import as_everyone, offload
 from ..comfy import workflows
 from ..security import LIMITS
-from .deps import allowed, costly, current_user
+from .deps import allowed as within_limit, costly, current_user
 from .studio import fit_resolution, price
 
 router = APIRouter(prefix="/api", tags=["workspace"])
@@ -1724,7 +1724,7 @@ async def _planning(request, user, body, instruction, project):
     async def page_build(call):
         """A motion project's files written by the page writer (agent.build_pages) from the director's brief, in a call
         of its own: only what it wrote, the quick check and its notes come back here."""
-        if not await allowed(state, "page_build", user["id"]):
+        if not await within_limit(state, "page_build", user["id"]):
             return ("Not built: the page writer's limit ({} an hour) is reached; go on without it or wait."
                     .format(LIMITS["page_build"][0]))
         try:
