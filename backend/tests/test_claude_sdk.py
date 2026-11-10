@@ -412,3 +412,25 @@ def test_the_default_message_is_the_callers_and_quotes_at_most_300_characters():
     error = claude.failure("x " * 400, default="Claude Code could not do /compact: {}")
     assert type(error) is claude.Failed and str(error).startswith("Claude Code could not do /compact: x x")
     assert len(str(error)) <= len("Claude Code could not do /compact: ") + 300
+
+
+# ---------------------------------------------------------------- what the live loop writes down
+
+def test_the_live_loops_calls_are_written_down_off_the_event_loop(fake_sdk):
+    """Each call is a row and a gzipped file of its whole messages (traces.Recorder): written on the database's threads,
+    as chat() does, never on the event loop (where the tests' loop guard refused it and the record was lost)."""
+    import threading
+    made, scripts = fake_sdk
+    scripts += [[init("s-1"), result(dict(PLAN, reply="ok"))], [result(None, text="the program stopped", subtype="error_during_execution")]]
+    written = []
+
+    class Recorder:
+        def record(self, purpose, model, asked, started, messages, answer_format, **found):
+            written.append((purpose, threading.current_thread() is threading.main_thread(), "error" in found))
+    b = brain()
+    b.recorder = Recorder()
+    thread = {"key": "k", "id": None}
+    asyncio.run(ask(b, thread=thread))
+    with pytest.raises(AgentError):
+        asyncio.run(ask(b, thread=thread))
+    assert written == [("plan", False, False), ("plan", False, True)]

@@ -1196,8 +1196,9 @@ class Agent:
             except claude.Lost as error:
                 raise ContextLost(str(error))
             except claude.Failed as error:
-                self._record("plan", None, model, started, [{"role": "system", "content": system}, {"role": "user", "content": text}],
-                             shape, (), error=str(error))
+                # written on the database's threads, as chat() does: the record is a row and a file of the whole call
+                await offload(self._record, "plan", None, model, started, [{"role": "system", "content": system},
+                                                                           {"role": "user", "content": text}], shape, (), error=str(error))
                 raise AgentError(str(error))
             self.claude_limits = limits or self.claude_limits
             used += [*called, "finish"]
@@ -1209,8 +1210,9 @@ class Agent:
             if not isinstance(answer, dict):
                 raise AgentError("The agent's model gave an answer that can't be read. Try again.")
             answer.update(_model=model, _usage=usage)
-            self._record("plan", model, model, started, [{"role": "system", "content": system}, {"role": "user", "content": text}],
-                         shape, (), content=answer, usage=usage, tool=",".join(called) or None)
+            await offload(self._record, "plan", model, model, started, [{"role": "system", "content": system},
+                                                                        {"role": "user", "content": text}],
+                          shape, (), content=answer, usage=usage, tool=",".join(called) or None)
             empty = not str(answer.get("reply") or "").strip() and not answer.get("steps") and not clean_question(answer.get("question")) \
                     and not clean_questions(answer.get("questions"))
             if fixes == FIX_ROUNDS:
