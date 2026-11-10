@@ -4,6 +4,7 @@
 
 import { devices, expect, test, type Page } from '@playwright/test';
 import { ACCOUNTS } from './accounts';
+import { axe } from './axe';
 import { watch } from './watch';
 
 test.use({ viewport: devices['iPhone 13'].viewport, userAgent: devices['iPhone 13'].userAgent, hasTouch: true });
@@ -28,6 +29,7 @@ test('the phone site loads at /m/ and draws, with no policy violation or error',
   await styled(page);
   expect(await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').length)).toBeGreaterThan(0);
   expect(problems).toEqual([]);
+  expect(await axe(page, 'phone sign-in')).toEqual([]);
 });
 
 test('a phone opening a studio page is sent to the phone site, and signs in there', async ({ page }) => {
@@ -43,4 +45,5 @@ test('a phone opening a studio page is sent to the phone site, and signs in ther
   await page.waitForTimeout(600);
   await styled(page);
   expect(problems).toEqual([]);
+  expect(await axe(page, 'phone home')).toEqual([]);
 });

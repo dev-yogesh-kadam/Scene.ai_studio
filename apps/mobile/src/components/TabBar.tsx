@@ -22,7 +22,7 @@ const icons: Record<string, [IconName, IconName]> = {
 export function TabBar({ state, descriptors, navigateToTab }: BarProps) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+    <View accessibilityRole="tablist" style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
       {state.routes.map((route, index) => {
         const focused = state.index === index;
         const label = descriptors[route.key].options.title ?? route.name;
@@ -39,7 +39,8 @@ export function TabBar({ state, descriptors, navigateToTab }: BarProps) {
             accessibilityLabel={label}
             onPress={() => {
               if (!focused) navigateToTab(route.key);
-            }}>
+            }}
+          >
             <Icon name={focused ? on : off} size={25} color={color} />
             <Text style={[styles.label, { color }]}>{label}</Text>
           </Tap>

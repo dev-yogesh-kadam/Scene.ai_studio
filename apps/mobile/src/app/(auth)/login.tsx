@@ -53,7 +53,11 @@ export default function LoginScreen() {
         <ScrollView contentContainerStyle={styles.center} keyboardShouldPersistTaps="handled">
           <Animated.View entering={FadeIn.duration(600)} style={styles.brand}>
             <View style={styles.logoGlow}>
-              <Image source={require('@/assets/images/logo.png')} style={styles.logo} />
+              <Image
+                source={require('@/assets/images/logo.png')}
+                style={styles.logo}
+                accessibilityLabel="Scene.ai logo"
+              />
             </View>
             <Text style={styles.title}>Scene.ai</Text>
             <Text style={styles.subtitle}>Your studio, in your pocket</Text>
@@ -81,7 +85,7 @@ export default function LoginScreen() {
                 placeholder="Password"
                 placeholderTextColor={colors.textMuted}
                 secureTextEntry
-                autoComplete="password"
+                autoComplete="current-password"
                 returnKeyType="go"
                 value={password}
                 onChangeText={setPassword}
@@ -94,7 +98,9 @@ export default function LoginScreen() {
               <Animated.View entering={FadeIn.duration(200)} style={styles.codeBox}>
                 <View style={styles.codeHeader}>
                   <Icon name="shield-checkmark" size={18} color={colors.accent} />
-                  <Text style={styles.hint}>Enter the 6-digit code from your authenticator app, or a recovery code.</Text>
+                  <Text style={styles.hint}>
+                    Enter the 6-digit code from your authenticator app, or a recovery code.
+                  </Text>
                 </View>
                 <TextInput
                   style={[styles.fields, styles.input, styles.code]}
@@ -127,7 +133,8 @@ export default function LoginScreen() {
                   setCode('');
                   setError('');
                 }}
-                style={styles.linkBox}>
+                style={styles.linkBox}
+              >
                 <Text style={styles.link}>Use a different account</Text>
               </Tap>
             ) : null}
@@ -143,7 +150,13 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
-  center: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.xxl, gap: 40 },
+  center: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xxl,
+    gap: 40,
+  },
   brand: { alignItems: 'center' },
   logoGlow: {
     borderRadius: 28,
