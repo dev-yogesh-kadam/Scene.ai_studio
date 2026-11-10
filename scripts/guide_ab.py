@@ -21,9 +21,9 @@ import video_ab as vab  # noqa: E402
 from scene import agent, camera, catalog, claude, prompters  # noqa: E402
 from scene.comfy import client, workflows  # noqa: E402
 
-OUT = Path("C:/Scene/prompt-ab/guides-2026-11-04")
-FISHERMAN = Path("C:/Scene/prompt-ab/models/portrait@flux2_dev/new.png")
-VOICE = Path("C:/Scene/prompt-ab/video/inputs/voice_clean.wav")
+OUT = Path("C:/Scene/workbench/prompt-ab/guides-2026-11-04")
+FISHERMAN = Path("C:/Scene/workbench/prompt-ab/models/portrait@flux2_dev/new.png")
+VOICE = Path("C:/Scene/workbench/prompt-ab/video/inputs/voice_clean.wav")
 LINES = ("Garam hai, dhyan se.", "Shukriya, bhaiya.")
 SEED = 4112026
 

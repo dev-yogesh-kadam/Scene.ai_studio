@@ -146,7 +146,7 @@ class Database:
     Row-level security: each statement tells the connection it takes whose rows it is for (ACTING, as app.user_id), in
     the same round trip as the statement, unless that connection already shows that user's rows: a pooled connection
     never carries one request's user into another's statement. (A RESET as each connection went back doubled the cost
-    of every statement: docs/db-upgrade-log.md, Part 2.)
+    of every statement: docs/history/db-upgrade-log.md, Part 2.)
 
     The event loop never waits for the database: async code awaits aall/aone/arun/achange/asetting/aset_setting (or
     offload(fn) for a helper that queries), which run on the database's own threads with the caller's context (and so

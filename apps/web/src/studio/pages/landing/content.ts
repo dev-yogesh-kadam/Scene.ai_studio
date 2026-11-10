@@ -88,7 +88,7 @@ export const USES: [string, string, string, boolean?][] = [
   ['deep', 'Titles and motion graphics', 'An intro card and lower thirds for my podcast, clean and bold.', true],
 ];
 
-// What the agent does besides planning (docs/agent-features-2026-11.md, docs/guide.md section 11).
+// What the agent does besides planning (docs/history/agent-features-2026-11.md, docs/guide.md section 11).
 export const AGENT: string[] = [
   'Plans whole films, ads and Reels',
   'Prices every step first',

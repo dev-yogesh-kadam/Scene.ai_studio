@@ -17,12 +17,10 @@ config.example.json
 secret.key
 storage
 docs
-documentation
-legacy
-craft skills
-craft skills v2
+content
 motion/.fonts
 *.mp4
+*.mov
 *.zip
 backend/tests
 workflows/archive

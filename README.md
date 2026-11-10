@@ -55,8 +55,9 @@ from `apps/mobile/` (`npm run build`; `scripts/start.bat` does it the first time
 | `workflows/video/`, `workflows/image/`, `workflows/audio/` | The ComfyUI workflows users can run. `workflows/reports/` holds the render PC's model lists and is not read by the app. |
 | `workflows/upscaler/` | Workflows that make a video the user has larger. They appear as "Upscale video" on the Canvas. |
 | `motion/` | Motion graphics: the HyperFrames packages (`package.json`) and the templates. |
+| `content/` | Source material, not read by the app: `craft-skills/v1` and `v2` (the craft skills the studio's own skills in `backend/scene/skills/` were made from) and `skill-maps/` (HTML maps of the skills, see its README). |
 | `scripts/` | Start scripts for each system, and `check_models.py`, which checks the agent's models and that no key can reach git. |
-| `docs/` | Kept on this machine only (not in git): the [handover](docs/HANDOVER.md) (start here), [architecture](docs/architecture.md), [servers and folders](docs/servers.md), [how to add workflows](docs/workflows.md), [motion graphics](docs/motion.md) and the latest [code review](docs/code-review.md). |
+| `docs/` | Kept on this machine only (not in git), indexed in [docs/README.md](docs/README.md): the [handover](docs/HANDOVER.md) (start here), [architecture](docs/architecture.md), [servers and folders](docs/servers.md), [how to add workflows](docs/workflows.md), [motion graphics](docs/motion.md) and the latest [code review](docs/code-review.md). |
 | `storage/` | Created at run time: the database and every user's files. Not in git. |
 
 ## What users can do

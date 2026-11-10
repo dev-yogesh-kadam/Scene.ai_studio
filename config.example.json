@@ -1,4 +1,5 @@
 {
+  "_note": "Copy to config.json. Passwords and keys (database_url, database_owner_url, restore_test_url, redis_url, embedding_api_key, azure_storage_connection_string) go in scene.env or SCENE_* environment variables, never here. 8080 is the code's default port; the studio PC runs on 8081 (docs/ports.md).",
   "comfy_url": "http://127.0.0.1:8188",
   "agent_model": "",
   "claude_models": "sonnet, opus, haiku",
@@ -9,8 +10,11 @@
   "claude_context": 1000000,
   "host": "0.0.0.0",
   "port": 8080,
-  "database_url": "",
-  "database_owner_url": "",
+  "console_host": "127.0.0.1",
+  "console_port": 8090,
+  "storage_dir": "storage",
+  "output_dir": "",
+  "backup_dir": "",
   "default_workflow": "video/h3_all_in_one",
   "allow_signup": true,
   "secure_cookies": false

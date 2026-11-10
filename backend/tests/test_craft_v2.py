@@ -16,7 +16,7 @@ from test_agent_memory import film
 from test_agent_shots import hosted
 from test_api import register
 
-V2 = Path(__file__).resolve().parents[2] / "craft skills v2" / "craft skills"
+V2 = Path(__file__).resolve().parents[2] / "content" / "craft-skills" / "v2" / "craft skills"
 SEEDANCE_AND_WAN_ROWS = {"`": 6, "|": 12, "seedance_2_5": 2, "seedream-5-0-pro": 1, "craft-prompter-seedance-2-5": 1, "Board": 2,
                          "Chain": 1, "Recall": 2, "seedance_2_0": 1, "seedance_2_0_fast": 1, "seedance_2_0_mini": 1,
                          "craft-prompter-seedance-2": 1, "wan_3_0": 1, "wan_3_0_prime": 1, "craft-prompter-wan-3": 1}

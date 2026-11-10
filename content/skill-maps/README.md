@@ -1,4 +1,6 @@
-# Documentation
+# Skill maps
+
+Moved here from `documentation/` on 10 November 2026; the craft skills the pages describe are now in `content/craft-skills/v1` (was `craft skills/`) and `content/craft-skills/v2` (was `craft skills v2/`). The pages keep the old folder names as they were written.
 
 Reference pages about how the studio works, kept for anyone joining later. Each `.html` file opens on its own in a
 browser (double-click it); nothing else is needed.

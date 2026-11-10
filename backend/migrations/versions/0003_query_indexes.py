@@ -1,4 +1,4 @@
-"""Indexes for the queries EXPLAIN ANALYZE found slow on a copy of the real data grown a hundredfold (docs/db-upgrade-log.md,
+"""Indexes for the queries EXPLAIN ANALYZE found slow on a copy of the real data grown a hundredfold (docs/history/db-upgrade-log.md,
 Part 2): a project's library, the projects list's counts and covers, the library's pages, a user's job list.
 
 Revision 0003, after 0002. Made 2026-11-10."""

@@ -18,7 +18,7 @@ import prompt_ab as ab  # noqa: E402
 from scene import agent, catalog, claude, media  # noqa: E402
 from scene.comfy import client, workflows  # noqa: E402
 
-OUT = Path("C:/Scene/prompt-ab/sheet-no-words-2026-11-04")
+OUT = Path("C:/Scene/workbench/prompt-ab/sheet-no-words-2026-11-04")
 LOOK = ("Meera, a woman of about thirty, slim, with warm brown skin, a long black braid over her right shoulder, a small "
         "gold nose ring, a mustard-yellow cotton kurta with a white dupatta, silver bangles on her left wrist and brown "
         "leather kolhapuri sandals")

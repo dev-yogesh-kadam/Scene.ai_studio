@@ -12,7 +12,7 @@ Groups (RUNS below):
 Every variant of a group gets the same seed. Prompts are written by the agent's model (prompt_ab.write_prompt) with the
 old or the new instructions; a group's variants share one prompt, so only the setting or the model differs. Each group
 is ranked blind by Opus from frames (it cannot hear: lips are judged by eye), old/new pairs compared blind. Pictures,
-the voice and the source clip come from the earlier runs in C:/Scene/prompt-ab. Writes <out>/report.html."""
+the voice and the source clip come from the earlier runs in C:/Scene/workbench/prompt-ab. Writes <out>/report.html."""
 
 import asyncio
 import json
@@ -31,7 +31,7 @@ import prompt_ab as ab  # noqa: E402
 from scene import catalog, claude, media, review  # noqa: E402
 from scene.comfy import client, workflows  # noqa: E402
 
-AB = Path("C:/Scene/prompt-ab")
+AB = Path("C:/Scene/workbench/prompt-ab")
 PICTURES = {"perfume": AB / "models/product@flux2_dev/new.png", "market": AB / "models/market@flux2_dev/new.png",
             "fisherman": AB / "models/portrait@flux2_dev/new.png"}
 SOURCE_CLIP = AB / "corridor/new.mp4"     # the restyle source: the corridor walk of the second round

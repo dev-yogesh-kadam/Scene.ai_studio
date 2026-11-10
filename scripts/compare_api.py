@@ -1,5 +1,5 @@
 """Ask two studios the same questions as the same users and compare the answers: the API must not change in a database
-upgrade (docs/db-upgrade-log.md). Each studio runs on a copy of the same data: the old code on a copy of the database
+upgrade (docs/history/db-upgrade-log.md). Each studio runs on a copy of the same data: the old code on a copy of the database
 as it was, the new code on the migrated copy. Sessions are made in both copies for each user (the same token), every
 GET route without path parameters is asked, and each project's library, placement, boards, agent tabs and NeuralCore.
 
