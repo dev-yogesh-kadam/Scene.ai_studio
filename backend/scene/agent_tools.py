@@ -311,6 +311,11 @@ TOOLS = {
         "Presets).",
         {"type": "object", "required": ["query"], "properties": {
             "query": _field(S, "Words to look for."), "op": _field(S, "A category, or \"\".")}}),
+    "workflow_info": (
+        "Gives you one workflow you may use in full: its settings, references, prompt tips and its model's prompt guide. "
+        "Call it before you plan a step with a workflow the message lists in one line only.",
+        {"type": "object", "required": ["op"], "properties": {
+            "op": _field(S, "The workflow's id, as the message lists it.")}}),
     "memory": (
         "The user's memory across all their projects (see Memory).",
         {"type": "object", "required": ["op"], "properties": {

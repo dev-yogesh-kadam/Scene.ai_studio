@@ -1657,6 +1657,12 @@ async def _planning(request, user, body, instruction, project):
         noted("bulb", "Asked {} for a second opinion".format(str(found["model"] or "a stronger model").split("/")[-1]))
         return found["critique"]
 
+    async def workflow_info(call):
+        found = agent.workflow_info(offers, call.get("op"))
+        if found.startswith("{"):
+            noted("plan", "Read the workflow {}".format(str(call.get("op")).strip()))
+        return found
+
     async def import_url(call):
         from .. import fetch
         from .library import IMPORTED, _file_in   # library.py files what is brought in
@@ -1678,7 +1684,14 @@ async def _planning(request, user, body, instruction, project):
              "state_read": state_read, "state_write": state_write, "state_check": state_check, "film": film_op,
              "render_html": render_html, "ffmpeg": ffmpeg_job, "import_url": import_url,
              "transcript": read_transcript, "timing": timing, "read_text": read_text, "read_skill": read_skill, "memory": memory_tool,
-             "preset_search": preset_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion}
+             "preset_search": preset_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion,
+             "workflow_info": workflow_info}
+    # Workflows in full only of the kinds the message (or the user's turn before it) is about: the rest go as one line each,
+    # read in full with workflow_info (they were about 28,000 characters of every first message, the video models'
+    # prompt guides most of it). A skill in use names what it needs: then every workflow goes in full, as before.
+    earlier = [t.get("instruction") for t in (body.get("history") or [])[-1:] if isinstance(t, dict)] \
+        if isinstance(body.get("history"), list) else []
+    detailed = agent.likely_kinds([instruction, *earlier]) if with_tools and not picked else None
     drafted = []   # the skills drafted in this message (skill_draft)
     made_now = []  # what the film tool made in this message: work done without a step
     explain = body.get("explain") is True   # the panel's "Explain more": the reply may teach
@@ -1700,7 +1713,7 @@ async def _planning(request, user, body, instruction, project):
                                      "" if first else guides, body.get("direction") or "",
                                      await offload(recall.digest, state.db, user["id"]) if with_tools else None,
                                      skills.catalogue(picked) if with_tools and not long_skill else "", explain if with_tools else None,
-                                     canvas_boards if with_tools and project else None)
+                                     canvas_boards if with_tools and project else None, detailed)
         full = "\n\n".join(text for _, text in parts)
         # A conversation with Claude goes on in one session (a thread): a later message sends only what is new.
         thread = await offload(_thread, state, user, project, body, chosen_model, system)
