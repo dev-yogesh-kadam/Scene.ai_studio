@@ -291,3 +291,42 @@ def test_the_image_has_hyperframes_with_its_chrome_and_node():
     assert str(motion.FONT.relative_to(ROOT)).replace(os.sep, "/").startswith("apps/web/public/fonts")
 
 
+# ---------------------------------------------------------------- the start scripts
+
+def test_the_start_scripts_rebuild_what_a_pull_changed_and_fetch_hyperframes_chrome():
+    bat = (ROOT / "scripts" / "start.bat").read_text(encoding="utf-8")
+    sh = (ROOT / "scripts" / "start.sh").read_text(encoding="utf-8")
+    for script in (bat, sh):
+        assert "start.stale.mjs packages" in script and "start.stale.mjs mobile" in script
+        assert "stale.mjs" in script and "browser ensure" in script and "PYTHONUNBUFFERED=1" in script
+        assert "apps/mobile" in script and not re.search(r"(?<![/\\\w])mobile[/\\]", script)
+    assert (ROOT / "scripts" / "start.stale.mjs").is_file()
+
+
+def test_the_stale_check_says_when_the_phone_site_and_the_packages_are_due(tmp_path):
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is not installed")
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts" / "start.stale.mjs", tmp_path / "scripts")
+
+    def due(what):
+        return subprocess.run([node, str(tmp_path / "scripts" / "start.stale.mjs"), what], timeout=30).returncode == 0
+    assert due("packages") and due("mobile")                                # nothing installed, nothing built
+    for path in ("package.json", "package-lock.json", "apps/mobile/src/app.tsx", "packages/shared/src/x.ts"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("{}")
+    later = 2_000_000_000
+    for path, when in (("node_modules/.package-lock.json", later), ("apps/mobile/dist/index.html", later)):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("{}")
+        os.utime(tmp_path / path, (when, when))
+    assert not due("packages") and not due("mobile")                        # installed and built after every change
+    os.utime(tmp_path / "package-lock.json", (later + 10, later + 10))       # a pull brought a new dependency
+    os.utime(tmp_path / "packages/shared/src/x.ts", (later + 10, later + 10))
+    assert due("packages") and due("mobile")
+    assert subprocess.run([node, str(tmp_path / "scripts" / "start.stale.mjs")], timeout=30,
+                          capture_output=True).returncode == 2
+
