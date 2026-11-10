@@ -3,11 +3,13 @@ library's public page. The words of the page come back, with its title and the d
 cite it.
 
 Like a link brought into the library (fetch.py), a page is fetched only from public addresses: every address its name
-resolves to is checked before connecting and at every redirect, and the address connected to before the body is read.
-Only pages (HTML or plain text) are read, at most MAX_BYTES of one. Claude Code's own WebFetch is not used: it runs on
+resolves to is checked before connecting and at every redirect, the connection is made to a checked address
+(fetch.public_client: no DNS rebinding), and the address connected to is checked before the body is read. Only pages
+(HTML or plain text) are read, at most MAX_BYTES of one, within DEADLINE seconds. Claude Code's own WebFetch is not used: it runs on
 this machine and would reach the studio's own network.
 """
 
+import asyncio
 import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin
@@ -17,6 +19,7 @@ import httpx
 from . import fetch
 
 MAX_BYTES = 3_000_000
+DEADLINE = 60          # seconds the whole page may take, redirects and all
 TEXT_CHARS = 200_000   # the words of a page that are kept
 SKIPPED = {"script", "style", "noscript", "svg", "template", "iframe", "head"}
 BLOCKS = {"p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "section", "article", "header",
@@ -88,38 +91,47 @@ async def page(url, client=None):
     if not re.match(r"^https?://", url, re.IGNORECASE):
         url = "https://" + url if url and "://" not in url else url
     own = client is None
-    client = client or httpx.AsyncClient(timeout=fetch.TIMEOUT, follow_redirects=False,
-                                         headers={"User-Agent": "Mozilla/5.0 (compatible; Scene.ai research)"})
     try:
-        for _ in range(fetch.REDIRECTS + 1):
-            try:
-                await fetch._check_host(url)
-            except fetch.FetchError as error:
-                raise WebError(str(error).replace("brought in", "read"))
-            async with client.stream("GET", url) as response:
-                if response.is_redirect:
-                    url = urljoin(url, response.headers.get("location", ""))
-                    continue
-                stream = response.extensions.get("network_stream")
-                peer = stream.get_extra_info("server_addr") if stream is not None else None
-                if peer and not fetch._public(peer[0]):
-                    raise WebError("The link led into a private network: it was not read.")
-                if response.status_code != 200:
-                    raise WebError("The page answered {}.".format(response.status_code))
-                kind = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
-                if kind and not (kind.startswith("text/") or kind in ("application/xhtml+xml", "application/json")):
-                    raise WebError("The link is not a page ({}): bring a picture, clip or sound in with import_url.".format(kind))
-                data = bytearray()
-                async for chunk in response.aiter_bytes():
-                    data += chunk
-                    if len(data) > MAX_BYTES:
-                        break
-                text = bytes(data[:MAX_BYTES]).decode(response.encoding or "utf-8", "replace")
-                found = words_of(text) if "html" in kind or "<html" in text[:2000].lower() else {"title": "", "date": "", "text": text[:TEXT_CHARS]}
-                return dict(found, url=url)
-        raise WebError("The link redirected more than {} times.".format(fetch.REDIRECTS))
+        client = client or fetch.public_client({"User-Agent": "Mozilla/5.0 (compatible; Scene.ai research)"})
+        async with asyncio.timeout(DEADLINE):
+            return await _read(client, url)
+    except TimeoutError:
+        raise WebError("The page took longer than {} s to read.".format(DEADLINE))
+    except fetch.FetchError as error:   # refused before connecting, or by the connection's own check
+        raise WebError(str(error).replace("brought in", "read").replace("fetched", "read"))
     except httpx.HTTPError as error:
         raise WebError("The page could not be fetched: {}".format(type(error).__name__))
     finally:
-        if own:
+        if own and client is not None:
             await client.aclose()
+
+
+async def _read(client, url):
+    """page() without its client and its time limit."""
+    for _ in range(fetch.REDIRECTS + 1):
+        await fetch._check_host(url)
+        async with client.stream("GET", url) as response:
+            if response.is_redirect:
+                url = urljoin(url, response.headers.get("location", ""))
+                continue
+            stream = response.extensions.get("network_stream")
+            peer = stream.get_extra_info("server_addr") if stream is not None else None
+            if peer and not fetch._public(peer[0]):
+                raise WebError("The link led into a private network: it was not read.")
+            if response.status_code != 200:
+                raise WebError("The page answered {}.".format(response.status_code))
+            kind = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+            if kind and not (kind.startswith("text/") or kind in ("application/xhtml+xml", "application/json")):
+                raise WebError("The link is not a page ({}): bring a picture, clip or sound in with import_url.".format(kind))
+            data = bytearray()
+            async for chunk in response.aiter_bytes():
+                data += chunk
+                if len(data) > MAX_BYTES:
+                    break
+            try:
+                text = bytes(data[:MAX_BYTES]).decode(response.encoding or "utf-8", "replace")
+            except LookupError:   # a charset Python does not know
+                text = bytes(data[:MAX_BYTES]).decode("utf-8", "replace")
+            found = words_of(text) if "html" in kind or "<html" in text[:2000].lower() else {"title": "", "date": "", "text": text[:TEXT_CHARS]}
+            return dict(found, url=url)
+    raise WebError("The link redirected more than {} times.".format(fetch.REDIRECTS))
