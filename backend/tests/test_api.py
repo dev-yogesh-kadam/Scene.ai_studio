@@ -1345,3 +1345,23 @@ def test_the_canvas_gets_every_item_not_the_newest_500(client):
     assert len(client.get("/api/library").json()["items"]) == 500
     every = client.get("/api/library?all=1").json()["items"]
     assert len(every) == 501 and every[-1]["name"] == "Frame 0"
+
+
+def test_a_job_shown_ended_has_its_credits_settled(client, monkeypatch):
+    # Whoever reads the list as a job ends (the tab, a plan waiting on it) never sees it failed with its credits still held.
+    import time
+    register(client)
+    manager = client.app.state.jobs
+    refund = type(manager)._refund
+
+    def slow(self, job):
+        time.sleep(0.5)
+        return refund(self, job)
+    monkeypatch.setattr(type(manager), "_refund", slow)
+    job = post_job(client).json()["id"]   # refused at once: nothing listens at the render server's address
+    for _ in range(300):
+        shown = next(j for j in client.get("/api/jobs").json()["jobs"] if j["id"] == job)
+        if shown["status"] not in ("queued", "running"):
+            break
+        time.sleep(0.02)
+    assert shown["status"] == "failed" and (shown["credits_reserved"], shown["credits_refunded"]) == (0, 100), shown

@@ -171,7 +171,7 @@ class PlanRunner:
                         settings.pop("source_seconds", None)   # not the length the plan says, which may be anything
                     wf = await self.state.catalog.load(str(settings.get("workflow", "")))
                     await offload(studio.switched_on, self.state, wf["id"], user)
-                    studio.fit_resolution(self.state, workflows.describe(wf), settings)
+                    await offload(studio.fit_resolution, self.state, workflows.describe(wf), settings)   # it reads the database
                     total += (await studio.price(self.state, wf, settings, user["id"]))["credits"]
             except HTTPException:
                 raise
@@ -195,7 +195,9 @@ class PlanRunner:
             if again:   # what failed is tried again: a step not queued, or whose job failed or was cancelled
                 for p in progress:
                     job = p.get("job") and await self.db.aone("SELECT status FROM jobs WHERE id = ?", (p["job"],))
-                    if p.get("error") and not p.get("made") and (not job or job["status"] in ("failed", "cancelled")):
+                    # its job's end may not have been told to the plan yet (job_ended runs after the job is shown ended)
+                    ended = bool(job) and job["status"] in ("failed", "cancelled")
+                    if not p.get("made") and (ended or (p.get("error") and not job)):
                         p.update(error="", job=None)
             total = await self.price(user, steps, progress)
             problem = await offload(guardrails.plan_problem, self.db, user, total)   # the studio's stop, the plan limit

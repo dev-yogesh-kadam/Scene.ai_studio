@@ -271,3 +271,22 @@ def test_a_plan_approved_at_the_same_moment_elsewhere_is_answered_as_it_is(studi
     monkeypatch.setattr(db, "achange", lost_the_race)
     answered = studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
     assert answered.status_code == 200 and answered.json()["id"] == plan["id"] and answered.json()["state"] == "waiting"
+
+
+def test_a_resume_the_moment_a_step_failed_tries_it_again_before_the_plan_was_told(studio, monkeypatch):
+    # The queue tells the plan a job ended (job_ended) only after the job is shown failed, while a step waiting on it
+    # sees it fail at once and ends the plan. A resume in between (a quick user, a busy machine) must still try the
+    # failed step again, not end the plan failed at once.
+    told = PlanRunner._job_ended
+
+    def late(self, job, status):
+        time.sleep(0.5)
+        return told(self, job, status)
+    monkeypatch.setattr(PlanRunner, "_job_ended", late)
+    studio.failing.add("one")
+    plan = studio.post("/api/agent/plans", json={"steps": [step("one"), step("two", after={"step": 0, "slot": "x"})]}).json()
+    studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    assert wait_for(studio, plan["id"])["state"] == "failed"
+    studio.failing.discard("one")
+    studio.post("/api/agent/plans/{}/resume".format(plan["id"]))
+    assert wait_for(studio, plan["id"])["state"] == "done"

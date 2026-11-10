@@ -289,14 +289,17 @@ class JobManager:
             self.notify(job["user_id"])
             await offload(self._notify_all_waiting, None)
             return
-        await self.db.arun("UPDATE jobs SET status = ?, error = ?, finished = ? WHERE id = ?",
-                    (status, error, time.time(), job["id"]))
-        await offload(self._traced, job, status, error)
+        # Its credits are settled before anyone can see that it ended (the list of jobs, a plan that waits on it): a
+        # job shown done, failed or cancelled has nothing still held for it.
         if status == "done":
-            await self.db.arun("UPDATE jobs SET credits_reserved = 0, credits_consumed = cost, output_size = "
-                        "(SELECT SUM(size) FROM generations WHERE job_id = jobs.id) WHERE id = ?", (job["id"],))
+            await self.db.arun("UPDATE jobs SET status = ?, error = ?, finished = ?, credits_reserved = 0, credits_consumed = cost, "
+                        "output_size = (SELECT SUM(size) FROM generations WHERE job_id = jobs.id) WHERE id = ?",
+                        (status, error, time.time(), job["id"]))
         else:
             await offload(self._refund, job)
+            await self.db.arun("UPDATE jobs SET status = ?, error = ?, finished = ? WHERE id = ?",
+                        (status, error, time.time(), job["id"]))
+        await offload(self._traced, job, status, error)
         self.notify(job["user_id"], library_changed=status == "done")
         if status == "done" and job.get("project_id"):   # the others in a shared project see it on their canvas too
             for person in await offload(sharing.people_of, self.db, job["project_id"]):
