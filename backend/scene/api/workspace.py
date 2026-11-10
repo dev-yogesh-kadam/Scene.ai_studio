@@ -873,10 +873,10 @@ async def _planning(request, user, body, instruction, project):
     chat_pins = [w for w in body.get("workflows") or [] if isinstance(w, str)][:12] if isinstance(body.get("workflows"), list) else []
     pinned_kinds = {w.split("/", 1)[0] for w in chat_pins if w.split("/", 1)[0] in PINNABLE}
     named_here = instruction.lower()
-    every = await state.catalog.listing()
-    on = await offload(state.credits.enabled_of, [w["id"] for w in every], user)   # one query, not one a workflow
-    for listed in every:
-        if listed.get("error") or listed["id"] not in on:
+    every_workflow = await state.catalog.listing()
+    usable_ids = await offload(state.credits.enabled_of, [w["id"] for w in every_workflow], user)   # one query, not one a workflow
+    for listed in every_workflow:
+        if listed.get("error") or listed["id"] not in usable_ids:
             continue
         if listed["kind"] in pinned_kinds and listed["id"] not in chat_pins and listed["title"].lower() not in named_here \
                 and listed["id"].lower() not in named_here:
@@ -1726,13 +1726,19 @@ async def _planning(request, user, body, instruction, project):
         threaded[:] = [thread] if thread is not None else []
         traces.SESSION.set(thread["key"] if thread is not None else "")   # the Agent tab, as Langfuse shows it
 
+        # The answer's shape names the workflows a step may use: every readable one switched on for the user, sorted, not
+        # only those offered to this message. Claude's session is opened again (a new Claude Code process) whenever its shape
+        # changes, and the offered ones change as the conversation goes (a picture attached, a workflow named); which
+        # can run is still checked step by step.
+        answer_ids = sorted({w["id"] for w in every_workflow if not w.get("error") and w["id"] in usable_ids} | {o["id"] for o in offers})
+
         async def asked_with(asking):
             going = {"thread": thread} if thread is not None else {}
             if with_tools:   # the model works in a loop of tool calls, and may search the web
-                return await state.agent.ask_with_tools(system, asking, [o["id"] for o in offers], tools, finishing, rounds=rounds,
+                return await state.agent.ask_with_tools(system, asking, answer_ids, tools, finishing, rounds=rounds,
                                                         **going, **_model(body), **({"web": True} if _hosted_claude(state) else {}),
                                                         **({"reply_chars": agent.RUN_REPLY_CHARS} if long_skill else {}))
-            return await state.agent.ask(system, asking, [o["id"] for o in offers], **going, **_model(body))
+            return await state.agent.ask(system, asking, answer_ids, **going, **_model(body))
 
         if thread is None:
             answer = await asked_with(full)

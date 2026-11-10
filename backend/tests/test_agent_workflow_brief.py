@@ -85,7 +85,7 @@ def _turn(client, monkeypatch, body):
 def test_a_message_about_a_picture_gets_the_picture_workflows_in_full_and_the_rest_on_demand(client, monkeypatch):
     register(client)
     seen, listed, plan = _turn(client, monkeypatch, {"instruction": "Make a picture of a red kite over green hills"})
-    assert set(listed) == set(seen["ids"]) and "video/h3_all_in_one" in listed   # the agent still knows every workflow
+    assert set(listed) <= set(seen["ids"]) and "video/h3_all_in_one" in listed   # the agent still knows every workflow
     assert all("settings" in o or "references" in o or "prompt_tips" in o for wid, o in listed.items() if wid.startswith("image/"))
     assert set(listed["video/h3_all_in_one"]) <= {"id", "title", "makes", "about", "pick_when", "default"}
     assert "(prompt_guide minimax-h3;" not in seen["message"]   # the video model's long prompt guide stays out
@@ -99,5 +99,23 @@ def test_a_message_that_does_not_say_or_has_no_tools_gets_every_workflow_in_full
     register(client)
     for body in ({"instruction": "go ahead"}, {"instruction": "Make a picture of a kite", "tools": False}):
         seen, listed, _ = _turn(client, monkeypatch, body)
-        assert set(listed) == set(seen["ids"])
+        assert set(listed) <= set(seen["ids"])
         assert "settings" in listed["video/h3_all_in_one"] and "(prompt_guide minimax-h3;" in seen["message"]
+
+
+def test_the_answers_shape_names_the_same_workflows_whatever_this_message_is_offered(client, monkeypatch):
+    """The shape of Claude's answer named only the workflows offered to the message, and its session is opened again (a
+    new Claude Code process) whenever that shape changes: a picture attached, or a workflow named, did it."""
+    import asyncio as _asyncio
+    from scene import media as _media
+    me = register(client)
+    plain, listed_plain, _ = _turn(client, monkeypatch, {"instruction": "Make a picture of a red kite"})
+    folder = client.app.state.outputs.folder(me["id"])
+    folder.mkdir(parents=True)
+    _asyncio.run(_media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=blue:s=64x64", "-frames:v", "1", folder / "kite.png"))
+    kite = client.app.state.db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
+                                   "VALUES (?, 'upload/file', 'image', 'kite', 'kite.png', '{}', '{}', 1)", (me["id"],))
+    attached, listed_attached, _ = _turn(client, monkeypatch, {"instruction": "Make a video of this kite", "selection": [kite]})
+    assert set(listed_plain) < set(listed_attached)   # a picture to work from: more workflows are offered...
+    assert plain["ids"] == attached["ids"] == sorted(plain["ids"])   # ...and the answer's shape is the same
+    assert set(listed_plain) | set(listed_attached) <= set(plain["ids"])
