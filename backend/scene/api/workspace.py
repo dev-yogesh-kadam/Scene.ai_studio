@@ -1266,7 +1266,10 @@ async def _planning(request, user, body, instruction, project):
         - and the quality gates, as outside a run. The notes go as one hint, once a message."""
         asked = agent.clean_questions(answer.get("questions")) or [q for q in [agent.clean_question(answer.get("question"))] if q]
         briefed = await kept("/brief") is not None
-        if not briefed and asked:
+        # Only a run's setup card takes the brief: a card of the message that starts the skill, or of a run that has
+        # saved nothing yet. A question further on ("Which take?") is the skill's own, left alone.
+        setup = bool(asked) and (not carried or not await offload(shared.saved_any))
+        if not briefed and setup:
             missing = agent.brief_missing(asked)
             if len(missing) <= 1:
                 await mark_run("brief_asked")
