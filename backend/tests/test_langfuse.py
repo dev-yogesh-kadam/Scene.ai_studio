@@ -195,7 +195,7 @@ def test_renders_join_the_trace_of_the_turn_that_planned_them_and_others_have_th
     _langfuse_row(state.db)
     assert client.put("/api/library/%d" % item, json={"rating": -1}).status_code == 200
     score = state.traces.langfuse.scores[0]["body"]
-    assert score["traceId"] == ours["traceId"] and score["name"] == "user-feedback" and score["value"] == 0
+    assert score["traceId"] == ours["traceId"] and score["name"] == "user-thumb" and score["value"] == 0
 
 
 def test_grading_is_off_unless_an_admin_sets_a_share(client):

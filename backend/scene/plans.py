@@ -225,6 +225,10 @@ class PlanRunner:
                     "progress = ? WHERE id = ?", (total, need, time.time(), json.dumps(progress), plan_id))
         self.run(plan_id)
         await offload(self.tell, plan_id)
+        sender = getattr(getattr(self.state, "traces", None), "langfuse", None)
+        planned = next((s["settings"] for s in steps if isinstance(s.get("settings"), dict) and s["settings"].get("turn")), None)
+        if sender is not None and planned and not again:   # Langfuse: the user approved what the turn planned
+            await offload(sender.turn_score, planned, "approved", 1, "plan-approved-{}".format(plan_id))
         return self.shown(await offload(self._row, plan_id))
 
     def stop(self, user, plan_id):

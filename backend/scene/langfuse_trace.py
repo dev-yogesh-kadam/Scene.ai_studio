@@ -342,6 +342,16 @@ class Sender:
         self._append(self.scores, {"id": os.urandom(16).hex(), "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
                                    "type": "score-create", "body": body})
 
+    def turn_score(self, settings, name, value, key, comment=""):
+        """A score on the trace of the turn a job's settings belong to (job_turn: a plan's step keeps the turn it was
+        planned in): a plan approved. None with no Langfuse in use; it never fails what the user did."""
+        try:
+            turn = job_turn(settings) if self.target() is not None else None
+            if turn:
+                self.score(turn["run"], name, value, comment, key=key)
+        except Exception as problem:   # a score is a help: what the user did stands all the same
+            print("The score could not be readied for Langfuse: {}".format(problem))
+
     def item_score(self, item_id, name, value, key, comment=""):
         """A score on the trace of the turn whose job made a library item (a thumb on it, a still approved or made
         again); none for an item made before jobs kept their turn, or with no Langfuse in use."""

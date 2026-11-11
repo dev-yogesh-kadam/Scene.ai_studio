@@ -189,7 +189,17 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
     answer = await state.agent.review([p for _, p in pictures], [label for label, _ in pictures], prompt, item["kind"], **({"model": model} if model else {}))
     verdict = verdict_from(answer)
     await state.db.arun("UPDATE generations SET review = ? WHERE id = ? AND user_id = ?", (json.dumps(verdict), item["id"], user_id))
+    sender = getattr(getattr(state, "traces", None), "langfuse", None)
+    if sender is not None:   # Langfuse: the verdict on what the turn made (a review again replaces it)
+        await offload(sender.item_score, item["id"], "review", review_value(verdict), "review-{}".format(item["id"]))
     return verdict
+
+
+def review_value(verdict):
+    """A verdict as one number for Langfuse's "review" score: 1 when every check is fine, 0.5 with a minor one, 0 with a
+    major one."""
+    levels = {c.get("level") for c in verdict.get("checks") or []}
+    return 0 if "major" in levels or not verdict.get("passed", True) else 0.5 if "minor" in levels else 1
 
 
 # ---------------------------------------------------------------- sound: music and audio results

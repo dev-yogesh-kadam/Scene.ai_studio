@@ -394,7 +394,7 @@ async def update_item(item_id: int, body: dict, request: Request, user: dict = D
             raise HTTPException(400, "A rating is 1, -1 or 0.")
         await db.arun("UPDATE generations SET rating = ? WHERE id = ?", (body["rating"], item_id))
         if body["rating"]:   # Langfuse: the user's thumb, as a score on the turn that made it (turned over, it is replaced)
-            await offload(request.app.state.traces.langfuse.item_score, item_id, "user-feedback", 1 if body["rating"] > 0 else 0, "rating-{}".format(item_id))
+            await offload(request.app.state.traces.langfuse.item_score, item_id, "user-thumb", 1 if body["rating"] > 0 else 0, "rating-{}".format(item_id))
     if "project_id" in body:
         if body["project_id"] is not None:
             await offload(_own_project, request, user, body["project_id"], "creator")

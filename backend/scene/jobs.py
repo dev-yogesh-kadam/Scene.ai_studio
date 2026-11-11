@@ -153,6 +153,10 @@ class JobManager:
         # The turn it belongs to, for Langfuse: the one the agent planned it in (a plan's step carries it to its
         # approval), else the one queueing it now.
         settings["turn"] = langfuse_trace.job_turn(settings) or traces.mark()
+        shot = settings.get("shot") if isinstance(settings.get("shot"), dict) else {}
+        if self.langfuse is not None and isinstance(settings.get("parent"), int) and int(shot.get("take") or 1) >= 2:
+            # Langfuse: a shot made again (a retake after a failed review, or another take the user asked for)
+            self.langfuse.item_score(settings["parent"], "retaken", 1, "retaken-{}".format(settings["parent"]))
         job_id = uuid.uuid4().hex[:12]
         plan, step = QUEUEING.get() or (None, None)   # a plan's step: recorded in the same write that queues it
         self.db.run(

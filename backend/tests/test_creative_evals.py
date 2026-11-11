@@ -149,14 +149,106 @@ def test_harvest_writes_candidates_from_the_studios_tables_and_never_into_the_li
     assert not any("candidate" in c["tags"] for c in run.load())
 
 
-def test_harvest_reads_scored_traces_from_langfuse():
+def test_harvest_reads_the_studios_scores_from_langfuse_and_a_bad_one_wins():
+    scored = {"user-thumb": [{"traceId": "t1", "value": 1}, {"traceId": "t2", "value": 0}],
+              "approved": [{"traceId": "t1", "value": 1}, {"traceId": "t3", "value": 1}],
+              "retaken": [{"traceId": "t3", "value": 1}], "review": [{"traceId": "t4", "value": 0.5}, {"traceId": "t5", "value": 0}],
+              "user-feedback": []}
+
     def answer(request):
         if request.url.path == "/api/public/v2/scores":
-            return httpx.Response(200, json={"data": [{"traceId": "t1", "value": 1}, {"traceId": "t2", "value": -1}]})
+            return httpx.Response(200, json={"data": scored[request.url.params["name"]]})
         found = {"t1": {"input": {"instruction": "a reel for my bakery"}, "output": {"reply": "Four.", "steps": [{"name": "Crack"}]}},
-                 "t2": {"input": "मेरी चाय की दुकान के लिए एक रील", "output": {}}}
+                 "t2": {"input": "मेरी चाय की दुकान के लिए एक रील", "output": {}},
+                 "t3": {"input": "an ad for my gym"}, "t5": {"input": "a horror scene"}}
         return httpx.Response(200, json=found[request.url.path.rsplit("/", 1)[-1]])
     client = httpx.AsyncClient(transport=httpx.MockTransport(answer))
-    turns = asyncio.run(harvest.langfuse_turns(("http://lf.test", "Basic x"), client=client))
-    assert [(t["verdict"], t["brief"][:12]) for t in turns] == [("up", "a reel for m"), ("down", "मेरी चाय की ")]
-    assert harvest.case_candidate(turns[1])["lang"] == "hi"
+    turns = {t["brief"][:12]: t["verdict"] for t in asyncio.run(harvest.langfuse_turns(("http://lf.test", "Basic x"), client=client))}
+    # liked and approved: up; disliked: down; approved then retaken: retaken (bad wins); a minor review says nothing
+    assert turns == {"a reel for m": "up", "मेरी चाय की ": "down", "an ad for my": "retaken", "a horror sce": "major"}
+    assert harvest.case_candidate({"id": "x", "ref": "r", "source": "langfuse", "brief": "मेरी चाय", "steps": [], "at": ""})["lang"] == "hi"
+
+
+# ---------------------------------------------------------------- real feedback reaches Langfuse
+
+def langfuse_on(client):
+    from test_langfuse import _langfuse_row
+    _langfuse_row(client.app.state.db)
+    client.app.state.traces.langfuse.scores.clear()
+    return client.app.state.traces.langfuse
+
+
+def made_in_a_turn(client, user_id, run="abc123"):
+    """A library item whose job was planned in the turn `run` (what item_score finds the trace by)."""
+    from test_api import JOB
+    job = client.post("/api/jobs", data={"settings": json.dumps(dict(JOB, turn={"run": run, "name": "Agent turn"}))}).json()["id"]
+    return client.app.state.db.run("INSERT INTO generations (user_id, job_id, workflow, kind, name, filename, settings, context, created) "
+                                   "VALUES (?, ?, 'video/h3_all_in_one', 'video', 'Pour', 'p.mp4', '{}', '{}', ?)", (user_id, job, time.time()))
+
+
+def scores_of(sender, name):
+    return [entry["body"] for entry in sender.scores if entry["body"]["name"] == name]
+
+
+def test_a_thumb_is_a_user_thumb_score_and_turned_over_it_replaces_the_old_one(client):
+    from scene import langfuse_trace
+    from test_api import register
+    me = register(client)
+    sender = langfuse_on(client)
+    item = made_in_a_turn(client, me["id"])
+    client.put("/api/library/%d" % item, json={"rating": 1})
+    client.put("/api/library/%d" % item, json={"rating": -1})
+    thumbs = scores_of(sender, "user-thumb")
+    assert [t["value"] for t in thumbs] == [1, 0] and {t["id"] for t in thumbs} == {"rating-%d" % item}   # one key: replaced
+    assert thumbs[0]["traceId"] == langfuse_trace.trace_id("abc123")
+
+
+def test_a_review_verdict_is_a_review_score_fine_minor_or_major(client, monkeypatch):
+    from scene import review
+    from test_api import register
+    me = register(client)
+    sender = langfuse_on(client)
+    item = made_in_a_turn(client, me["id"])
+    row = client.app.state.db.one("SELECT * FROM generations WHERE id = ?", (item,))
+    folder = client.app.state.outputs.folder(me["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "p.mp4").write_bytes(b"x")
+
+    async def frames(path, kind):
+        return [("the result", "jpeg")]
+    monkeypatch.setattr(review, "result_frames", frames)
+    for level, value in (("fine", 1), ("minor", 0.5), ("major", 0)):
+        async def checked(pictures, labels, prompt, kind="video", model=None, level=level):
+            return {"checks": [{"check": "what", "level": level, "note": "n"}], "problem": "", "fix": {"prompt": "p", "why": "w"}}
+        monkeypatch.setattr(client.app.state.agent, "review", checked)
+        asyncio.run(review.review_item(client.app.state, me["id"], row, "a pour"))
+    assert [s["value"] for s in scores_of(sender, "review")] == [1, 0.5, 0]
+    assert {s["id"] for s in scores_of(sender, "review")} == {"review-%d" % item}
+
+
+def test_a_retake_is_a_retaken_score_once_and_a_first_take_is_none(client):
+    from test_api import JOB, register
+    me = register(client)
+    sender = langfuse_on(client)
+    client.app.state.jobs.langfuse = sender
+    item = made_in_a_turn(client, me["id"])
+    assert scores_of(sender, "retaken") == []                       # a first take is no retake
+    client.post("/api/jobs", data={"settings": json.dumps(dict(JOB, parent=item, shot={"id": "s1", "take": 2}))})
+    retaken = scores_of(sender, "retaken")
+    assert len(retaken) == 1 and retaken[0]["value"] == 1 and retaken[0]["id"] == "retaken-%d" % item
+
+
+def test_an_approved_plan_is_an_approved_score_on_the_turn_it_was_planned_in(client, monkeypatch):
+    from scene import langfuse_trace
+    from test_agent_conversation import STEP
+    from test_agent_shots import hosted
+    from test_api import register
+    register(client)
+    sender = langfuse_on(client)
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "One shot.", "steps": [STEP]})
+    step = client.post("/api/agent/plan", json={"instruction": "a dog in a park"}).json()["steps"][0]
+    made = client.post("/api/agent/plans", json={"steps": [step]}).json()
+    assert client.post("/api/agent/plans/{}/approve".format(made["id"])).status_code == 200
+    approved = scores_of(sender, "approved")
+    assert len(approved) == 1 and approved[0]["value"] == 1 and approved[0]["id"] == "plan-approved-{}".format(made["id"])
+    assert approved[0]["traceId"] == langfuse_trace.trace_id(step["settings"]["turn"]["run"])
