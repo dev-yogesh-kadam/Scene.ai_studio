@@ -52,6 +52,7 @@ class PlanRunner:
         self.tasks = {}            # plan id -> its running task
         self.steps_lock = threading.Lock()   # one change of a plan's progress at a time (_set_step)
         self.ended = asyncio.Event()   # set whenever a job ends: the plans waiting on one look again
+        self.woken = 0                 # ...and counted: a waiter that looked at the count before it looked misses none (_pause)
         try:   # the loop the plans wait on: stop() and choose() may be called from a database thread (db.offload)
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -64,9 +65,13 @@ class PlanRunner:
         except RuntimeError:
             here = None
         if self.loop is not None and here is not self.loop:
-            self.loop.call_soon_threadsafe(self.ended.set)
+            self.loop.call_soon_threadsafe(self._woke)
         else:
-            self.ended.set()
+            self._woke()
+
+    def _woke(self):
+        self.woken += 1
+        self.ended.set()
 
     # ------------------------------------------------------------ the plan as stored and answered
 
@@ -292,12 +297,21 @@ class PlanRunner:
                             "ORDER BY created DESC LIMIT 1", (plan_id, step))
         return found["id"] if found else None
 
-    async def _pause(self):
-        self.ended.clear()
-        try:
-            await asyncio.wait_for(self.ended.wait(), LOOK_EVERY)
-        except asyncio.TimeoutError:
-            pass
+    async def _pause(self, seen):
+        """Wait until a job ends after the count `seen` (self.woken, read before the caller looked at the jobs), or
+        LOOK_EVERY. The event is cleared only while nothing was woken since then: a job that ended between the caller's
+        look and this wait, or another plan's clear, can no longer be lost (it was, and cost a plan LOOK_EVERY)."""
+        loop = asyncio.get_running_loop()
+        until = loop.time() + LOOK_EVERY
+        while self.woken == seen:
+            self.ended.clear()
+            left = until - loop.time()
+            if left <= 0:
+                return
+            try:
+                await asyncio.wait_for(self.ended.wait(), left)
+            except asyncio.TimeoutError:
+                return
 
     async def _run(self, plan_id):
         try:
@@ -334,6 +348,7 @@ class PlanRunner:
             await offload(self._set_step, plan_id, i, job=job, error="", waiting=False)
         # Every queued step ends before the plan does.
         while True:
+            seen = self.woken   # before the look: a job that ends after it wakes the pause below
             row = await offload(self._row, plan_id)
             progress = json.loads(row["progress"])
             jobs = [p["job"] for p in progress if p.get("job")]
@@ -342,7 +357,7 @@ class PlanRunner:
                                     tuple(jobs)))["n"] if jobs else 0
             if not open_jobs:
                 break
-            await self._pause()
+            await self._pause(seen)
         for i, p in enumerate(progress):   # a step made while no one was told (a restart)
             if p.get("job") and not p.get("made"):
                 p["made"] = await offload(self._made, p["job"])
@@ -425,6 +440,7 @@ class PlanRunner:
         await offload(self._mark_waiting, plan_id, waiting_step, True)
         try:
             while True:
+                seen = self.woken
                 row = await offload(self._row, plan_id)
                 if row["state"] != "running":
                     raise _Stopping()
@@ -442,7 +458,7 @@ class PlanRunner:
                     if made:
                         return p.get("chosen") or made
                     raise Refused("The step this one starts on has no result in the library.")
-                await self._pause()
+                await self._pause(seen)
         finally:
             await offload(self._mark_waiting, plan_id, waiting_step, False)
 

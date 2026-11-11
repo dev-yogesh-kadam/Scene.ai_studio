@@ -290,3 +290,33 @@ def test_a_resume_the_moment_a_step_failed_tries_it_again_before_the_plan_was_to
     studio.failing.discard("one")
     studio.post("/api/agent/plans/{}/resume".format(plan["id"]))
     assert wait_for(studio, plan["id"])["state"] == "done"
+
+
+def test_a_job_that_ends_between_the_plans_look_and_its_wait_is_not_missed(studio, monkeypatch):
+    """The race in the plan's wait: the worker counted the open jobs (one left), the job ended and woke the plans, and
+    only then did the worker start waiting, clearing the wake. It waited LOOK_EVERY (5 s) for nothing; with several such
+    waits a plan could run past the tests' 20 s. Here the job's end is made to land exactly in that gap: the look says
+    the job is open, and before the worker waits, the job ends and its wake is delivered. No other wake comes after."""
+    from scene import plans
+    runner = studio.app.state.plans
+    db = runner.db
+    real = db.aone
+    landed = []
+
+    async def look(sql, params=()):
+        found = await real(sql, params)
+        if "COUNT(*) AS n FROM jobs WHERE id IN" in sql and not landed:
+            landed.append(True)
+            # the job ends now, after the look and before the wait, and its wake (from a thread) is delivered
+            while (await real("SELECT status FROM jobs WHERE id = ?", (params[0],)))["status"] != "done":
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.3)
+            return {"n": 1}         # ...while the look saw it still open
+        return found
+    monkeypatch.setattr(db, "aone", look)
+    monkeypatch.setattr(plans, "LOOK_EVERY", 30)   # a lost wake would now cost 30 s, past the wait below
+    plan = studio.post("/api/agent/plans", json={"steps": [step("one")]}).json()
+    started = time.time()
+    studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    done = wait_for(studio, plan["id"], seconds=10)
+    assert landed and done["state"] == "done" and time.time() - started < 10
