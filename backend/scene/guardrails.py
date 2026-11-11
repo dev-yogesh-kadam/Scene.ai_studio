@@ -375,7 +375,11 @@ DESCRIBED = re.compile(r"\b(?:a|an|the)\s+((?:[\w'-]+\s+){0,3}?(?:" + "|".join(s
 LOOK = frozenset("""black white grey gray silver red orange yellow gold golden green blue navy teal purple pink brown beige
 cream maroon striped checked denim leather linen silk wool braid braids bun ponytail curls curly beard moustache mustache
 bald hair fringe raincoat coat jacket hoodie sweater jumper shirt t-shirt kurta sari saree dupatta dress skirt jeans trousers
-suit uniform apron scarf hat cap turban hijab glasses spectacles boots sneakers sandals backpack""".split())
+suit uniform apron scarf hat cap turban hijab glasses spectacles boots sneakers sandals backpack cardigan blazer
+overalls vest tie bandana shawl lehenga""".split())
+# where the next person's own words begin inside a description: "... and a girl of about sixteen"
+NEXT_PERSON = re.compile(r"\s*(?:,|\band\b|\bwhile\b|\bas\b|\bbeside\b|\bnext to\b)\s+(?:a|an|the|his|her|their)\s+(?:[\w'-]+\s+){0,3}?(?:"
+                         + "|".join(sorted(PEOPLE, key=len, reverse=True)) + r")\b", re.IGNORECASE)
 WIDE = ("WS", "EWS", "")
 STILL = ("static", "")
 HOOK_WORDS = re.compile(r"\b(hook|close on|close-up|extreme close|macro|toward (?:the )?(?:camera|lens)|at (?:the )?(?:camera|lens)|"
@@ -426,6 +430,7 @@ def continuity_gate(steps, book=()):
     described = {}   # the person's noun -> [(the words of their look, as written)]
     for step in [] if carried else shots:
         for who, how in DESCRIBED.findall(str(step.get("prompt") or "")):
+            how = NEXT_PERSON.split(how)[0]   # "... in a grey cardigan and a girl of about sixteen ...": his words only
             said = re.findall(r"[\w'-]+", how.lower())
             look = [w for w in said if w in LOOK]
             if look:   # shown up to its last word of a look: "with a black braid and a yellow raincoat"

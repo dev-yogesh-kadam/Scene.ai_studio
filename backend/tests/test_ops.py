@@ -174,7 +174,7 @@ def test_ffmpeg_or_hyperframes_missing_is_a_problem(client, monkeypatch):
 def test_every_check_in_one_answer(client):
     register(client)
     found = asyncio.run(health.checks(client.app.state))
-    assert set(found) == {"database", "render", "model", "programs", "disk", "backup", "langfuse"}
+    assert set(found) == {"database", "render", "model", "programs", "disk", "backup", "langfuse", "creative"}
     assert found["database"]["online"] is True and found["render"]["online"] is False
     assert set(found["programs"]) == {"ffmpeg", "motion"} and found["langfuse"]["in_use"] is False
     assert found["disk"]["free"] > 0 and "last" in found["backup"]
