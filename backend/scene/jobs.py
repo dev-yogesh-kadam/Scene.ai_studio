@@ -79,6 +79,7 @@ class JobManager:
         self.langfuse = None      # each finished job, as a span of its turn's trace (langfuse_trace.Sender; main.py sets it)
         self.finished = []        # functions(job, status) told when a job ends (aftercare.install: the agent checks its shots)
         self.wake = asyncio.Event()
+        self.woken = 0   # wakes counted: a worker that read the count before it looked misses none (_idle)
         try:   # the loop the workers wait on: add() and pause() may be called from a database thread (db.offload)
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -191,18 +192,14 @@ class JobManager:
         so never wait behind a render."""
         mine = "workflow LIKE 'edit/%'" if local else "workflow NOT LIKE 'edit/%'"
         while True:
+            seen = self.woken   # before the looks below: a wake after them is never lost
             # An admin can pause the renders (while the render server is being restarted, say). Edits keep running.
             if not local and await offload(self.paused):
-                self.wake.clear()
-                try:
-                    await asyncio.wait_for(self.wake.wait(), 5)
-                except asyncio.TimeoutError:
-                    pass
+                await self._idle(seen, 5)
                 continue
             job = await self.db.aone("SELECT * FROM jobs WHERE status = 'queued' AND {} ORDER BY priority DESC, created LIMIT 1".format(mine))
             if job is None:
-                self.wake.clear()
-                await self.wake.wait()
+                await self._idle(seen)
                 continue
             # Each render goes to a ComfyUI server that is free. When none is (all are busy), it waits for one to finish.
             # When none answers (turned off, restarting, its network gone), the renders wait for one, and their owners
@@ -215,11 +212,7 @@ class JobManager:
                     self.server_down = down
                     await offload(self._notify_all_waiting, None)
                 if server is None:
-                    self.wake.clear()
-                    try:
-                        await asyncio.wait_for(self.wake.wait(), OFFLINE_CHECK)
-                    except asyncio.TimeoutError:
-                        pass
+                    await self._idle(seen, OFFLINE_CHECK)
                     continue
             job["settings"] = json.loads(job["settings"])
             job["started"] = time.time()
@@ -266,7 +259,7 @@ class JobManager:
         finally:
             if url is not None and self.pool:
                 self.pool.busy.pop(url, None)
-            self.wake.set()   # its server is free again
+            self._woke()   # its server is free again
 
     async def _finish(self, job, local):
         status, error = "done", None
@@ -333,9 +326,30 @@ class JobManager:
         except RuntimeError:
             here = None
         if self.loop is not None and here is not self.loop:
-            self.loop.call_soon_threadsafe(self.wake.set)
+            self.loop.call_soon_threadsafe(self._woke)
         else:
-            self.wake.set()
+            self._woke()
+
+    def _woke(self):
+        self.woken += 1
+        self.wake.set()
+
+    async def _idle(self, seen, seconds=None):
+        """Wait until a wake after the count `seen` (self.woken, read before the worker looked at the queue), or
+        `seconds`. The event is cleared only while nothing was woken since then: a job added between the worker's look
+        and this wait, or the other lane's clear, can no longer be lost. (It was: with no job found the worker waited
+        with no time limit, and a job added in that gap stayed queued until another one came.)"""
+        loop = asyncio.get_running_loop()
+        until = None if seconds is None else loop.time() + seconds
+        while self.woken == seen:
+            self.wake.clear()
+            left = None if until is None else until - loop.time()
+            if left is not None and left <= 0:
+                return
+            try:
+                await asyncio.wait_for(self.wake.wait(), left)
+            except asyncio.TimeoutError:
+                return
 
     def paused(self):
         return self.db.setting("queue_paused", "0") == "1" or guardrails.stopped(self.db) is not None
