@@ -1,5 +1,5 @@
-// The console's Servers section: the ComfyUI servers the renders run on, and Langfuse, which is sent every call of the
-// agent's models. Each can be added, switched off or removed while the studio runs; a waiting render goes to the first
+// The console's Servers section: the Claude connection (how the agent reaches Claude Code: ClaudeConnection.tsx), the
+// ComfyUI servers the renders run on, and Langfuse, which is sent every call of the agent's models. Each can be added, switched off or removed while the studio runs; a waiting render goes to the first
 // one that is free. See backend/scene/endpoints.py and langfuse_trace.py.
 
 import { useRef, useState } from 'react';
@@ -8,6 +8,7 @@ import { Field } from '../../../common/components/AuthForm';
 import { useConsole, useSection } from '../shared/context';
 import { Loaded, failed, sure } from '../shared/ui';
 import { classesOf } from '../../../common/cx';
+import { ClaudeConnectionCard, type ConnectionData } from './ClaudeConnection';
 import css0 from '../../../common/components/Shared.module.css';
 import css1 from '../../../common/components/Shared2.module.css';
 import css2 from '../../../common/components/Shared3.module.css';
@@ -35,7 +36,7 @@ type Endpoint = {
   has_key?: boolean;
 };
 type Row = Partial<Endpoint> & { kind: string };
-type Data = { kinds: Record<string, string>; endpoints: Endpoint[] };
+type Data = { kinds: Record<string, string>; endpoints: Endpoint[]; claude: ConnectionData };
 
 /** The form for one: a new one (`row` without an id) or an existing one. */
 function Form({ kinds, row, close }: { kinds: Record<string, string>; row: Row; close: () => void }) {
@@ -205,10 +206,14 @@ export default function Servers() {
   const fresh = useRef(false); // Check again: every server is asked now, not what was found a few seconds ago
   const { refresh } = useConsole();
   const [adding, setAdding] = useState<string | null>(null); // a new one is added in its own group
-  const query = useSection('endpoints', [], () => {
-    const ask = api<Data>('/api/admin/endpoints' + (fresh.current ? '?fresh=1' : ''));
+  const query = useSection('endpoints', [], async () => {
+    const again = fresh.current ? '?fresh=1' : '';
     fresh.current = false;
-    return ask;
+    const [servers, claude] = await Promise.all([
+      api<Omit<Data, 'claude'>>('/api/admin/endpoints' + again),
+      api<ConnectionData>('/api/admin/claude-connection' + again),
+    ]);
+    return { ...servers, claude };
   });
   return (
     <Loaded query={query}>
@@ -228,6 +233,7 @@ export default function Servers() {
               Check again
             </button>
           </div>
+          <ClaudeConnectionCard data={d.claude} refresh={refresh} />
           {Object.entries(d.kinds).map(([kind, label]) => (
             <div key={kind}>
               <div className={css('card-head')} style={{ marginTop: 18 }}>

@@ -6,7 +6,6 @@ import io
 import json
 import os
 import re
-import sys
 
 import pytest
 
@@ -93,60 +92,38 @@ def test_the_database_check_says_how_long_it_took(client):
     assert found["online"] is True and found["seconds"] < health.DATABASE_WAIT and found["detail"] == ""
 
 
-# ---------------------------------------------------------------- health: Claude Code signed in
+# ---------------------------------------------------------------- health: the Claude connection works
 
-@pytest.fixture
-def no_sign_in_cache():
-    health._signed_in.clear()
-    yield
-    health._signed_in.clear()
-
-
-def test_claude_code_signed_out_is_a_problem_that_says_how_to_sign_in(client, monkeypatch, no_sign_in_cache):
+def test_a_claude_connection_that_does_not_work_is_a_problem_that_says_why(client, monkeypatch):
+    """The model's check is the connection's (claude_connection.status: the bridge's /health, or the API key), faked
+    here; test_claude_connection.py tests the check itself."""
+    from scene import claude_connection
     register(client)
     state = client.app.state
-    asked = []
 
-    async def status(program):
-        asked.append(program)
-        return {"signed_in": answer["signed_in"], "plan": "max"}
-    answer = {"signed_in": False}
-    monkeypatch.setattr(health, "_auth_status", status)
+    async def status(run_claude=False):
+        return dict(answer)
+    answer = {"mode": "lufi_bridge", "online": False, "detail": "Claude on LUFI is signed out: sign Claude Code in again on LUFI.",
+              "claude_version": "2.1.310", "signed_in": False, "key_works": None, "running": 0, "limit": 4, "testing": "x"}
+    monkeypatch.setattr(claude_connection, "status", status)
     health.forget(state, "model")
     found = asyncio.run(health.problems(state))
     model = [p for p in found if p["key"] == "model"]
-    assert model and "not signed in" in model[0]["text"] and "/login" in model[0]["text"]
+    assert model and "Claude on LUFI is signed out" in model[0]["text"]
     shown = console(client).get("/api/admin/system").json()["model_server"]
-    assert shown["online"] is False and shown["signed_in"] is False and shown["plan"] == "max"
-    assert len(asked) == 1                                                    # asked once in SIGN_IN_EVERY seconds
+    assert shown["online"] is False and shown["signed_in"] is False and shown["models"] == ["claude/sonnet", "claude/haiku"]
 
-    answer["signed_in"] = True
-    health._signed_in.clear()
+    answer.update(online=True, detail="", signed_in=True)
     health.forget(state, "model")
     assert not [p for p in asyncio.run(health.problems(state)) if p["key"] == "model"]
 
 
-def test_claude_code_that_cannot_say_whether_it_is_signed_in_is_not_called_signed_out(client, no_sign_in_cache):
-    """The tests' Claude Code is a program that is not there: nothing is known, so nothing is claimed."""
+def test_without_a_claude_or_a_key_the_model_says_what_to_do(client):
+    """The tests' studio has no `claude` (conftest) and no key: nothing is run, and the problem says what is missing."""
     register(client)
     health.forget(client.app.state, "model")
     shown = console(client).get("/api/admin/system").json()["model_server"]
-    assert shown["online"] is True and shown["signed_in"] is None
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="a .cmd stands in for claude.exe on Windows")
-def test_the_sign_in_is_read_from_claude_auth_status(tmp_path, no_sign_in_cache):
-    def fake(name, said):
-        program = tmp_path / name
-        program.write_text("@echo off\r\nif \"%1 %2 %3\"==\"auth status --json\" echo {}\r\n".format(said), encoding="ascii")
-        return str(program)
-    out = fake("out.cmd", '{"loggedIn": false, "authMethod": "none"}')
-    assert asyncio.run(health.signed_in(out)) == {"signed_in": False, "plan": ""}
-    inn = fake("in.cmd", '{"loggedIn": true, "subscriptionType": "max", "email": "someone@example.com"}')
-    assert asyncio.run(health.signed_in(inn)) == {"signed_in": True, "plan": "max"}   # no email kept
-    odd = fake("odd.cmd", "Unknown command auth")
-    assert asyncio.run(health.signed_in(odd)) == {"signed_in": None, "plan": ""}
-    assert asyncio.run(health.signed_in(str(tmp_path / "none.exe"))) == {"signed_in": None, "plan": ""}
+    assert shown["online"] is False and "not installed with the studio" in shown["detail"] and shown["mode"] == "api_key"
 
 
 # ---------------------------------------------------------------- health: FFmpeg and HyperFrames

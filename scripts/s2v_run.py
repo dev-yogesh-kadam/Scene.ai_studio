@@ -76,7 +76,7 @@ def main():
                                            capture_output=True, text=True, check=True).stdout.strip()
         store()
     settings = Settings(database_url=state["database"], comfy_url=config["comfy_url"], storage_dir=str(HERE / "storage"),
-                        claude_home=str(HERE / "claude-home"), signup_credits=1_000_000, first_account_local=False,
+                        signup_credits=1_000_000, first_account_local=False,
                         workflows_dir=str(ROOT / "workflows"))
     with TestClient(create_app(settings)) as c:
         if not state.get("project"):

@@ -1,5 +1,6 @@
 # Scene.ai in one image: the web studio and admin console (apps/web) and the phone site (apps/mobile) built with Node,
-# HyperFrames (motion graphics) with the Chrome it renders in, then served by the Python backend from a slim image.
+# HyperFrames (motion graphics) with the Chrome it renders in, and Claude Code for the agent, then served by the Python
+# backend from a slim image.
 # Every setting comes from SCENE_* environment variables (docs/azure.md); nothing is read from a config.json inside the
 # image.
 #
@@ -36,7 +37,16 @@ RUN node node_modules/hyperframes/bin/hyperframes.mjs browser ensure \
  && test -x /opt/hyperframes/chrome-headless-shell
 COPY motion/templates templates
 
-# ---------------------------------------------------------------- 3. the backend
+# ---------------------------------------------------------------- 3. Claude Code
+# The `claude` the agent runs with the "api_key" Claude connection (backend/scene/claude_connection.py), so switching to
+# an API key needs nothing but the key. Pinned to the version the Claude Agent SDK of backend/requirements.txt was made
+# with (its _cli_version.py): change both together. It never updates itself in the image (DISABLE_AUTOUPDATER below).
+FROM node:24.11-bookworm-slim AS claude
+ARG CLAUDE_CODE_VERSION=2.1.310
+RUN npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe --version
+
+# ---------------------------------------------------------------- 4. the backend
 FROM python:3.14-slim-bookworm AS app
 # pg_dump and pg_restore of the server's major version (backups, the weekly restore test), from PostgreSQL's own
 # repository: Debian's are older than 18 and refuse a newer server. Then what Node.js and Chrome need to run
@@ -58,7 +68,8 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 \
     SCENE_HOST=0.0.0.0 SCENE_PORT=8080 SCENE_CONSOLE_HOST=0.0.0.0 SCENE_CONSOLE_PORT=8090 \
     SCENE_STORAGE_DIR=/data/storage SCENE_BACKUP_DIR=/data/backups SCENE_LOG_FORMAT=json \
     SCENE_SECRET_KEY_FILE=/data/secret.key \
-    HYPERFRAMES_BROWSER_PATH=/opt/hyperframes/chrome-headless-shell HYPERFRAMES_CACHE_DIR=/tmp/hyperframes
+    HYPERFRAMES_BROWSER_PATH=/opt/hyperframes/chrome-headless-shell HYPERFRAMES_CACHE_DIR=/tmp/hyperframes \
+    CLAUDE_CONFIG_DIR=/data/claude DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install -r backend/requirements.txt
@@ -71,12 +82,15 @@ COPY apps/web/public/fonts apps/web/public/fonts
 COPY --from=motion /usr/local/bin/node /usr/local/bin/node
 COPY --from=motion /app/motion motion
 COPY --from=motion /opt/hyperframes /opt/hyperframes
+# The npm package carries Claude Code as one native program (it needs only libc): that alone is kept.
+COPY --from=claude /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude
 
 # The app runs as an account of its own, never root; /data is its only writable place (a volume, or Azure Files), with
-# the folder HyperFrames keeps the Google Fonts a page names in. The build stops here when Node.js or Chrome could not
-# start (a library missing).
+# the folder HyperFrames keeps the Google Fonts a page names in, and Claude Code's own (CLAUDE_CONFIG_DIR: its sessions,
+# kept across restarts). The build stops here when Node.js, Claude Code or Chrome could not start (a library missing).
 RUN useradd --create-home --uid 10001 scene && mkdir -p /data /app/motion/.fonts && chown scene /data /app/motion/.fonts \
  && node --version \
+ && claude --version \
  && ! ldd /opt/hyperframes/chrome-headless-shell | grep "not found"
 USER scene
 EXPOSE 8080 8090

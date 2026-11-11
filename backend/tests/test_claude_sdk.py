@@ -70,7 +70,7 @@ class FakeSDKClient:
 def fake_sdk(monkeypatch):
     """Claude Code through the faked client: returns (the clients made, the scripts to answer with: append lists)."""
     made, scripts = [], []
-    monkeypatch.setattr(sdk, "ClaudeSDKClient", lambda options: FakeSDKClient(options, made, scripts))
+    monkeypatch.setattr(sdk, "ClaudeSDKClient", lambda options, transport=None: FakeSDKClient(options, made, scripts))
     claude.live.clear()
     claude.held.clear()
     yield made, scripts
@@ -125,7 +125,7 @@ def test_the_options_claude_code_is_started_with(fake_sdk):
     finally:
         claude.EFFORT.reset(token)
     options = made[0].options
-    assert options.cli_path == "claude.exe" and options.model == "sonnet" and options.cwd == b.services["claude"]["home"]
+    assert options.cli_path == "claude" and options.model == "sonnet" and options.cwd == b.services["claude"]["home"]
     assert options.system_prompt["type"] == "file"
     system = Path(options.system_prompt["path"]).read_text(encoding="utf-8")
     assert system.startswith("You plan.") and "call them as you need" in system
@@ -239,7 +239,7 @@ def test_a_compaction_in_the_middle_of_a_turn_is_told(fake_sdk):
     (sdk.ProcessError("Command failed", exit_code=1, stderr="Invalid API key · Please run /login"), AgentError, "not signed in"),
     (Exception("No conversation found with session ID: s-1"), ContextLost, "gone"),
     (RuntimeError("the pipe broke"), AgentError, "Claude Code stopped: the pipe broke"),
-    (sdk.CLINotFoundError(cli_path="claude.exe"), AgentError, "Set claude_path"),
+    (sdk.CLINotFoundError(cli_path="claude.exe"), AgentError, "not installed with the studio"),
 ])
 def test_an_error_in_the_middle_of_the_stream_closes_the_program_and_says_what_it_means(fake_sdk, error, raised, words):
     made, scripts = fake_sdk

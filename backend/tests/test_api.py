@@ -91,6 +91,17 @@ def register(client, **extra):
     return client.post("/api/auth/register", json={**ADMIN, **extra}).json()
 
 
+def claude_works(monkeypatch):
+    """The Claude connection's check says it works (the tests' studio has no `claude` and no key: conftest), as on a
+    studio that is set up; test_claude_connection.py tests the check itself."""
+    from scene import claude_connection
+
+    async def status(run_claude=False):
+        return {"mode": "api_key", "online": True, "detail": "", "claude_version": "2.1.3", "signed_in": None,
+                "key_works": True, "running": 0, "limit": None, "bridge_version": "", "testing": ""}
+    monkeypatch.setattr(claude_connection, "status", status)
+
+
 def console(client, who=ADMIN):
     """The admin console, signed in as `who` (the admin, unless said otherwise). It has its own sign-in: the studio's
     does not open it."""
@@ -720,7 +731,7 @@ def test_agent_says_so_when_claude_is_not_set_up(client):
     client.app.state.agent.services = {}
     assert client.get("/api/agent/status").json()["online"] is False
     refused = client.post("/api/agent/plan", json={"instruction": "Make a street shot"})
-    assert refused.status_code == 400 and "Claude Code" in refused.json()["detail"]
+    assert refused.status_code == 400 and "claude_models" in refused.json()["detail"]
 
 
 def test_an_upload_over_the_size_limit_is_refused(client, monkeypatch):

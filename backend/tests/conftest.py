@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -21,19 +22,28 @@ def quick_hashes(monkeypatch):
     monkeypatch.setattr(security, "SCRYPT", {"n": 2 ** 10, "r": 8, "p": 1, "dklen": 32})
 
 
-from scene import claude as _claude  # noqa: E402
+from scene import claude as _claude, claude_connection as _claude_connection  # noqa: E402
 
 # What claude.py keeps between calls, as it is when no test has run: each test starts from it, and it is put back after
 # each test, so one file's tests never meet another's (a test that swaps the live loop or the program's runner, a live
 # session, a semaphore made in another test's event loop). Run in either order, test_claude_sdk.py and test_claude.py
 # must both pass (test_harness.py checks it).
 _CLAUDE_FUNCTIONS = {name: getattr(_claude, name) for name in ("converse", "ask", "_run", "_open", "forget", "find", "sdk")}
+_CLAUDE_CONNECTION = dict(_claude.CONNECTION)
 
 
 def _claude_fresh():
     for name, value in _CLAUDE_FUNCTIONS.items():
         if getattr(_claude, name) is not value:
             setattr(_claude, name, value)
+    # No test runs this machine's own `claude`, nor asks Anthropic's API for its key: there is none on PATH here, and
+    # the connection is the "api_key" one with no key (test_claude_connection.py puts a fake `claude` in its place).
+    _claude.find = lambda: ""
+    _claude.RUN_WITH = ()
+    _claude.CONNECTION = dict(_CLAUDE_CONNECTION)
+    _claude.GUARD = None
+    _claude.RUNNING.clear()
+    _claude_connection._versions.clear()
     _claude.live.clear()
     _claude.held.clear()
     _claude._slots_of.clear()
@@ -144,7 +154,8 @@ def database():
 
 
 TEST_CLAUDE = {"id": "claude", "name": "Claude", "url": "claude-code", "key": "", "models": ["sonnet", "haiku"], "only": "",
-               "cli": str(ROOT / "no-such-claude.exe"), "timeout": 30, "fast": "", "home": "", "window": 1_000_000}
+               "cli": "claude", "timeout": 30, "fast": "", "home": str(Path(tempfile.gettempdir()) / "scene-claude-tests"),
+               "window": 1_000_000}
 
 
 CALLED_FIELDS = ("query", "item", "asset", "text", "path", "value", "against", "offset", "op", "settings")   # a call, as told back
@@ -231,7 +242,8 @@ def client(tmp_path):
     """The app with empty storage and a render server address nothing listens on."""
     empty_postgres()
     # Claude Code is never run by a test: the real one is switched off, and the agent is given a Claude of its own
-    # whose program does not exist (a test that reaches it fails), as faked by each test (fake_claude, hosted, model).
+    # with no `claude` to run (a test that reaches it fails, fresh_claude), as faked by each test (fake_claude, hosted,
+    # model).
     settings = Settings(database_url=POSTGRES, database_loop_guard=LOOP_GUARD, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
                         storage_dir=str(tmp_path), allow_signup=True, signup_credits=500, first_account_local=False,
                         workflows_dir=str(ROOT / "workflows"), web_dist_dir=str(built(tmp_path / "web")))

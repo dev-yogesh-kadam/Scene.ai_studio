@@ -25,15 +25,17 @@ CALIBRATION = run.HERE / "calibration.json"
 
 
 def judge_brain():
-    """An Agent with this machine's Claude Code (an Opus offered), for the judge."""
+    """An Agent with the `claude` on this machine (an Opus offered), for the judge: signed in, or with
+    SCENE_ANTHROPIC_API_KEY set."""
+    import os
     from scene import claude
     from scene.agent import Agent
     from scene.config import Settings
     settings = Settings()
-    found = claude.service("sonnet, opus, haiku", settings.claude_path, settings.claude_timeout, "haiku")
-    if found is None:
-        raise SystemExit("The judge needs Claude Code on this machine, signed in (claude_path in config.json).")
-    return Agent("claude/opus", services=[found])
+    claude.CONNECTION = dict(claude.CONNECTION, api_key=os.environ.get("SCENE_ANTHROPIC_API_KEY", ""))
+    if not claude.find():
+        raise SystemExit("The judge needs Claude Code on this machine (`claude` on PATH), signed in or with SCENE_ANTHROPIC_API_KEY.")
+    return Agent("claude/opus", services=[claude.service("sonnet, opus, haiku", settings.claude_timeout, "haiku")])
 
 
 def kept(path=CALIBRATION):

@@ -12,17 +12,20 @@ ROOT = Path(__file__).resolve().parents[2]
 class Settings:
     comfy_url: str = "http://127.0.0.1:8188"
     agent_model: str = ""         # the model the agent uses unless the user picks another ("sonnet"); empty = the first one
-    # The agent's models are Anthropic's Claude, and only Claude: through Claude Code on this machine (the CLI or the VS
-    # Code extension), signed in with its owner's Claude account, so no API key, and its usage limits are that account's.
-    # Offered as "claude/<name>" in the model picker.
+    # The agent's models are Anthropic's Claude, and only Claude, through Claude Code. Offered as "claude/<name>" in the
+    # model picker.
     claude_models: str = "sonnet, opus, haiku"   # the models to offer, as Claude Code names them
     claude_fast_model: str = "haiku"   # one of claude_models for the small jobs (captions, notes, checks); empty = the one in use
-    claude_path: str = ""         # the claude program; empty = the one on PATH, else the VS Code extension's
     claude_timeout: int = 600     # seconds one call to Claude may take
-    # The folder the agent tabs' Claude sessions run in: VS Code lists them with this folder's sessions. Empty = the
-    # studio's own folder.
-    claude_home: str = ""
     claude_context: int = 1000000   # tokens of context the Claude models have; a session is compacted at 90% of it
+    # How the studio reaches Claude Code (claude_connection.py), set in the admin console's Servers & APIs, which then
+    # wins over config.json; SCENE_* environment variables win over both. "api_key": the `claude` installed with the
+    # studio runs here with anthropic_api_key. "lufi_bridge": the bridge on the PC LUFI runs the Claude Code signed in
+    # there, at claude_bridge_url with claude_bridge_key; for testing only (sign-up closed, the agent for admins).
+    claude_connection: str = "api_key"
+    claude_bridge_url: str = ""
+    claude_bridge_key: str = ""
+    anthropic_api_key: str = ""
     host: str = "0.0.0.0"
     port: int = 8080
     # The admin console is a site of its own, on its own port, with its own sign-in. It listens only where console_host
@@ -115,7 +118,7 @@ class Settings:
 # Settings that hold a password or a key: they belong in the environment (SCENE_*, an env file, Key Vault on Azure),
 # not in config.json. One there is still read, for one more release, with a warning at start.
 SECRETS = ("database_url", "database_owner_url", "restore_test_url", "azure_storage_connection_string", "redis_url",
-           "embedding_api_key")
+           "embedding_api_key", "claude_bridge_key", "anthropic_api_key")
 
 
 def read_env_file(path):
@@ -136,7 +139,10 @@ def load_settings(config_file=None):
     env_file = Path(os.environ.get("SCENE_ENV_FILE") or config_file.with_name("scene.env"))
     environment = {**(read_env_file(env_file) if env_file.is_file() else {}), **os.environ}   # the real environment wins
     settings.warnings = []
+    settings.from_environment = set()   # the settings an environment variable gave: the console can't change those
     for field in fields(Settings):
+        if "SCENE_" + field.name.upper() in environment:
+            settings.from_environment.add(field.name)
         value = environment.get("SCENE_" + field.name.upper(), saved.get(field.name))
         if field.name in SECRETS and saved.get(field.name) and "SCENE_" + field.name.upper() not in environment:
             settings.warnings.append(

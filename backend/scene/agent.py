@@ -1089,8 +1089,9 @@ def _unfenced(text):
 
 
 class Agent:
-    """The language model behind the agent: Anthropic's Claude, through Claude Code on this machine (claude.py), signed
-    in with its owner's account. A model is named "claude/<name>" ("claude/sonnet"); the user picks one by name."""
+    """The language model behind the agent: Anthropic's Claude, through Claude Code (claude.py), by the connection an
+    admin picked (an API key, or the LUFI bridge). A model is named "claude/<name>" ("claude/sonnet"); the user picks
+    one by name."""
 
     def __init__(self, model="", services=()):
         self.model = model
@@ -1121,8 +1122,7 @@ class Agent:
         """The names of the models there are, as "claude/<name>"."""
         names = ["{}/{}".format(s["id"], name) for s in self.services.values() for name in s["models"]]
         if not names:
-            raise AgentError("The agent has no model: Claude Code is not installed and signed in on the studio's PC, or "
-                             "claude_models is empty in config.json.")
+            raise AgentError("The agent has no model: claude_models is empty in config.json.")
         return names
 
     async def pick_model(self, wanted=None):
@@ -1181,7 +1181,7 @@ class Agent:
         return answer
 
     async def _ask_claude(self, s, model, messages, answer_format, images=(), thread=None, web=False):
-        """Ask Claude through Claude Code on this machine (claude.py). A usage limit is AgentBusy: the user is told when
+        """Ask Claude through Claude Code, by the connection in use (claude.py). A usage limit is AgentBusy: the user is told when
         it lifts. A thread whose session is gone is ContextLost: the caller starts the conversation again whole."""
         try:
             content, usage, limits = await claude.ask(s, model, messages, answer_format, images, thread, **({"web": True} if web else {}))

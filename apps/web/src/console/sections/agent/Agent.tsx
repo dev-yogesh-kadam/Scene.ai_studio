@@ -87,7 +87,7 @@ function RolesCard({ report }: { report: Report }) {
       <p className="muted small">
         {report.models.length
           ? `Any of the ${report.models.length} Claude models set up now. Empty follows config.json.`
-          : 'Claude Code is not set up on the studio PC, so no list: a model can still be named. Empty follows config.json.'}
+          : 'No Claude models are named (claude_models in config.json), so no list: a model can still be named. Empty follows config.json.'}
       </p>
       <datalist id="agent-models">
         {report.models.map((m) => (

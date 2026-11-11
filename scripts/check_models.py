@@ -1,12 +1,13 @@
-"""Check the agent's models: Claude, through Claude Code on this machine (the only models the agent uses).
+"""Check the agent's models: Claude, through Claude Code by the Claude connection the studio uses (the only models the
+agent uses): the one picked in the admin console, as the studio reads it from its database.
 
 Run it from the repo root with the project's Python:
 
     .venv\\Scripts\\python.exe scripts\\check_models.py        (Windows)
     .venv/bin/python scripts/check_models.py                   (macOS, Linux)
 
-It asks each Claude model named in claude_models for a one-line JSON answer. Claude Code must be installed and
-signed in with the Claude account whose usage the studio spends.
+It checks the connection (as the console's Test does), then asks each Claude model named in claude_models for a
+one-line JSON answer. It never prints a key.
 """
 
 import asyncio
@@ -17,17 +18,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from scene import claude  # noqa: E402
+from scene import claude, claude_connection  # noqa: E402
 from scene.agent import Agent, AgentError  # noqa: E402
 from scene.config import load_settings  # noqa: E402
+from scene.db import as_everyone, open_database  # noqa: E402
 
 
 async def main():
     s = load_settings()
-    found = claude.find(s.claude_path)
-    print("Claude Code:", found or "NOT FOUND (install it and sign in, or set claude_path in config.json)")
-    service = claude.service(s.claude_models, s.claude_path, s.claude_timeout, s.claude_fast_model, str(ROOT), s.claude_context)
-    if service is None:
+    db = open_database(s)
+    with as_everyone():
+        claude_connection.apply(db, s)
+    found = await claude_connection.status(run_claude=True)
+    print("Claude connection:", claude_connection.MODES[found["mode"]], "works" if found["online"] else "FAILS: " + found["detail"])
+    print("Claude Code:", found["claude_version"] or "(no version)")
+    service = claude.service(s.claude_models, s.claude_timeout, s.claude_fast_model, s.path("storage_dir") / "claude-home",
+                             s.claude_context)
+    if service is None or not found["online"]:
         return
     brain = Agent(s.agent_model, [service])
     question = [{"role": "system", "content": "You are a helpful assistant."},

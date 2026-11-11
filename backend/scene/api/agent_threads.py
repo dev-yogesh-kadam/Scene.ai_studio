@@ -157,7 +157,7 @@ async def forget_sessions(state, user, run):
     await claude.close_all("{}:{}:".format(user["id"], run))
     hosted = _hosted_claude(state)
     for thread in await offload(runs.threads_of, state.db, user["id"], run):
-        claude.forget(hosted, thread.get("id"))
+        await asyncio.to_thread(claude.forget, hosted, thread.get("id"))
     await offload(runs.delete, state.db, user["id"], run, runs.THREADS, trusted=True)
     with as_everyone():
         rows = await state.db.aall("SELECT id FROM claude_sessions WHERE user_id = ? AND run = ?", (user["id"], run))

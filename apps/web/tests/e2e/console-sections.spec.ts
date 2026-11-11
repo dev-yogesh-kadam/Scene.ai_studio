@@ -141,6 +141,19 @@ test('Servers: a form opens to add one, and Cancel leaves it', async ({ page }) 
   await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeHidden();
 });
 
+test('Servers: the Claude connection card, and the bridge refused without its key', async ({ page }) => {
+  await open(page, 'endpoints');
+  const claude = card(page, 'Claude connection');
+  // the test studio has no `claude` and no key: it says so, and nothing reaches Anthropic or LUFI
+  await expect(claude.getByTestId('claude-status')).toContainText('Not working');
+  await expect(claude.getByLabel('Anthropic API key')).toHaveValue('');
+  await claude.getByRole('button', { name: 'LUFI bridge' }).click();
+  await claude.getByLabel('Bridge address').fill('http://127.0.0.1:9');
+  await claude.getByRole('button', { name: 'Save' }).click();
+  await expect(claude.getByText('The LUFI bridge needs its address and its key.')).toBeVisible();
+  await expect(main(page).getByText('Testing on a personal Claude subscription')).toHaveCount(0); // nothing changed
+});
+
 test('Moderation: what is made is listed, and the words are saved', async ({ page }) => {
   await open(page, 'moderation');
   await expect(main(page).getByRole('heading', { name: /To review/ })).toBeVisible();
@@ -192,7 +205,15 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
       checks: {
         database: { online: true, seconds: 0.002, detail: '' },
         render: { online: false, url: 'http://render:8188', since: now - 600, detail: '' },
-        model: { online: true, detail: '', signed_in: true, plan: 'Max' },
+        model: {
+          mode: 'lufi_bridge',
+          online: true,
+          detail: '',
+          claude_version: '2.1.3',
+          signed_in: true,
+          running: 1,
+          limit: 4,
+        },
         programs: {
           ffmpeg: { ready: true, detail: '' },
           motion: { ready: false, detail: 'Run npm install in motion/' },
@@ -214,7 +235,9 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
   await expect(checks.getByText('2 problems')).toBeVisible();
   await expect(checks.getByRole('row', { name: /Render server.*Problem.*http:\/\/render:8188/ })).toBeVisible();
   await expect(checks.getByRole('row', { name: /Motion pages.*Run npm install in motion/ })).toBeVisible();
-  await expect(checks.getByRole('row', { name: /Agent model.*OK.*signed in · Max/ })).toBeVisible();
+  await expect(
+    checks.getByRole('row', { name: /Agent model.*OK.*LUFI bridge · Claude Code 2\.1\.3 · signed in · 1 of 4/ }),
+  ).toBeVisible();
   await expect(checks.getByRole('row', { name: /Restore test.*Not run yet/ })).toBeVisible();
   await page.waitForLoadState('networkidle');
   expect(await axe(page, 'console system, checks')).toEqual([]);

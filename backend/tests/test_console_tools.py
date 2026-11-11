@@ -4,7 +4,7 @@ the sealed audit log, the health strip and the queue counts the console is sent.
 import json
 
 from scene import audit, backup
-from test_api import ADMIN, console, post_job, register
+from test_api import ADMIN, claude_works, console, post_job, register
 
 BOB = {"email": "bob@example.com", "password": "another one"}
 
@@ -88,7 +88,8 @@ def test_the_audit_log_is_sealed(client):
     assert audit.verify(db)["missing"] == 1
 
 
-def test_the_overview_has_a_health_summary_and_the_console_hears_the_queue(client):
+def test_the_overview_has_a_health_summary_and_the_console_hears_the_queue(client, monkeypatch):
+    claude_works(monkeypatch)
     register(client)
     desk = console(client)
     desk.put("/api/admin/queue", json={"paused": True})

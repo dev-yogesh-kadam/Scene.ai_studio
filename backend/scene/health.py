@@ -1,6 +1,7 @@
 """Whether the studio is well: its database, its render server (ComfyUI), the agent's model (Claude, through Claude Code
-on this machine, installed and signed in), the programs it renders and edits with (FFmpeg, HyperFrames for motion
-graphics), its disk, its backups, its queue and the sending of the agent's calls to Langfuse (`langfuse`).
+by the connection in use: the API key works, or the LUFI bridge answers and is signed in; claude_connection.py), the
+programs it renders and edits with (FFmpeg, HyperFrames for motion graphics), its disk, its backups, its queue and the
+sending of the agent's calls to Langfuse (`langfuse`).
 
 `problems` says what is wrong right now; the admin console's Overview lists it. The `Watcher` asks it every minute
 while the app runs, so nobody has to have the console open: a problem found twice in a row becomes an alert (the
@@ -12,14 +13,12 @@ phone settings it read last, and keeps the alert (already ended) once the databa
 
 import asyncio
 import json
-import os
 import shutil
-import subprocess
 import time
 
 import httpx
 
-from . import backup, langfuse_trace, media, motion, phone, retention, versions
+from . import backup, claude, claude_connection, langfuse_trace, media, motion, phone, retention, versions
 from .db import offload
 
 CHECK_EVERY = 60     # seconds between checks
@@ -44,7 +43,6 @@ RESOLVED = {
 }
 LANGFUSE_DOWN = 300  # seconds Langfuse may not take the calls before it is a problem (a restart of it takes a minute or two)
 DATABASE_WAIT = 10   # seconds the database has to answer `SELECT 1`
-SIGN_IN_EVERY = 300  # seconds between two asks of Claude Code whether it is signed in (`claude auth status`: no message, no usage)
 
 
 def clock(timestamp):
@@ -126,47 +124,6 @@ async def database(state):
         return {"online": False, "seconds": round(time.time() - started, 3), "detail": langfuse_trace.redact(said)[:300]}
 
 
-_signed_in = {}   # the claude program -> (when it was asked, what it said)
-UNKNOWN = {"signed_in": None, "plan": ""}
-
-
-async def signed_in(program):
-    """Whether Claude Code is signed in, by `claude auth status --json` (it reads its own files: no message, no usage):
-    {"signed_in": True, False, or None when it can't be told (an older Claude Code, no answer), "plan": the account's
-    subscription}. Asked again at most every SIGN_IN_EVERY seconds."""
-    if not program:
-        return dict(UNKNOWN)
-    hit = _signed_in.get(program)
-    if hit and time.time() - hit[0] < SIGN_IN_EVERY:
-        return dict(hit[1])
-    found = await _auth_status(program)
-    _signed_in[program] = (time.time(), found)
-    return dict(found)
-
-
-async def _auth_status(program):
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}   # the studio may itself be started from Claude Code
-    try:
-        process = await asyncio.create_subprocess_exec(
-            program, "auth", "status", "--json", stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except (OSError, ValueError):
-        return dict(UNKNOWN)
-    try:
-        output, _ = await asyncio.wait_for(process.communicate(), 20)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        return dict(UNKNOWN)
-    try:
-        said = json.loads(output.decode("utf-8", "replace"))
-    except ValueError:
-        return dict(UNKNOWN)
-    if not isinstance(said, dict) or not isinstance(said.get("loggedIn"), bool):
-        return dict(UNKNOWN)
-    return {"signed_in": said["loggedIn"], "plan": str(said.get("subscriptionType") or "")[:40]}
-
-
 def programs(state):
     """The programs the studio renders and edits with: {"ffmpeg": {"ready", "detail"}, "motion": {"ready", "detail"}}
     (motion: Node.js and HyperFrames, for motion graphics). Sync: it looks at files."""
@@ -210,22 +167,24 @@ def creative(state):
 
 
 async def model_server(state, fresh=False):
-    """The agent's model: Claude, through Claude Code on this machine. {"online": whether Claude Code is there and models
-    are named for it, "url": the claude program, "models", "limits": its usage as last reported, "detail", "since"}."""
+    """The agent's model: Claude, through Claude Code by the connection in use. claude_connection.status() ({"mode",
+    "online", "detail", "claude_version", "signed_in", "key_works", "running", "limit", ...}) with "url": where Claude
+    Code runs (the bridge's address, or the claude program here), "models", "limits": its usage as last reported,
+    "since"."""
     return dict(await remembered(state, "model", lambda: _model_server(state), fresh))
 
 
 async def _model_server(state):
     agent = state.agent
     s = agent.services.get("claude")
-    online = bool(s and s.get("models"))
-    account = await signed_in(s.get("cli", "")) if online else dict(UNKNOWN)
-    detail = "" if online else "Claude Code isn't installed on the studio's PC, or claude_models is empty in config.json."
-    if online and account["signed_in"] is False:
-        online, detail = False, "Claude Code on the studio's PC is not signed in: run claude in a terminal there and type /login."
-    _mark(state.model_seen, online)
-    return {"online": online, "url": (s or {}).get("cli", ""), "models": ["claude/" + m for m in (s or {}).get("models", [])],
-            "limits": agent.claude_limits, "detail": detail, "since": state.model_seen["since"], **account}
+    if s and s.get("models"):
+        found = await claude_connection.status()
+    else:
+        found = {"mode": claude.CONNECTION.get("mode"), "online": False, "detail": "claude_models is empty in config.json: the agent has no model."}
+    _mark(state.model_seen, found["online"])
+    where = claude.CONNECTION.get("bridge_url") if found["mode"] == claude.LUFI_BRIDGE else claude.find()
+    return dict(found, url=where or "", models=["claude/" + m for m in (s or {}).get("models", [])], limits=agent.claude_limits,
+                since=state.model_seen["since"])
 
 
 async def langfuse(state):

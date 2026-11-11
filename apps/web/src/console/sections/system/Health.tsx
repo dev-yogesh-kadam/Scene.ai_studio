@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { api } from '../../../common/api';
 import { Field } from '../../../common/components/AuthForm';
+import { claudeWords, type ClaudeStatus } from '../servers/claude';
 import { useConsole, useNotice } from '../shared/context';
 import { Facts, Notice, Table, ago, span, stamp } from '../shared/ui';
 import { classesOf } from '../../../common/cx';
@@ -16,7 +17,7 @@ const css = classesOf(css0, css1, css2, css3, css4);
 
 const LEVEL: Record<string, string> = { critical: 'Critical', serious: 'Serious', warning: 'Warning' };
 
-export type ModelServer = { online: boolean; models?: string[]; url?: string; detail?: string; limits?: unknown };
+export type ModelServer = ClaudeStatus & { online: boolean; models?: string[]; url?: string; limits?: unknown };
 
 export function ModelServerCard({ m }: { m: ModelServer }) {
   const limits = m.limits && typeof m.limits === 'object' ? Object.entries(m.limits) : [];
@@ -25,21 +26,17 @@ export function ModelServerCard({ m }: { m: ModelServer }) {
       <div className={css('card-head')}>
         <h2>Agent model</h2>
         <span className={css('pill ' + (m.online ? 'done' : 'failed'))}>
-          {m.online ? 'Claude ready' : 'Not set up'}
+          {m.online ? 'Claude ready' : 'Not working'}
         </span>
       </div>
       <Facts
         pairs={[
           ['Models', (m.models || []).join(', ') || 'none'],
-          ['Claude Code', m.url || 'not found'],
+          ['Connection', claudeWords(m)],
+          ['Claude Code runs', m.url || 'nowhere yet'],
         ]}
       />
-      {!m.online && (
-        <p className="muted">
-          {m.detail ||
-            "Install Claude Code on the studio's PC and sign in, and name the models in claude_models in config.json."}
-        </p>
-      )}
+      {!m.online && <p className="muted">{m.detail || 'Set the Claude connection in Servers & APIs.'}</p>}
       {limits.length > 0 && <h3>Usage as Claude last reported it</h3>}
       {limits.length > 0 && (
         <Table

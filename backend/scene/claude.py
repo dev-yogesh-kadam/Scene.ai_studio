@@ -1,25 +1,31 @@
-"""Claude as a model of the agent, through Claude Code on this machine: the `claude` program the CLI and the VS Code
-extension share, signed in with its owner's Claude account, so no API key is needed. Each call runs `claude -p` once
-with Claude Code's own tools, settings, MCP servers and skills off (but its web search, when the agent may research:
-WEB_TOOLS): Claude only answers. The agent's tools, skills,
-questions and Approve all stay in the studio (agent.py), the same as with any other model.
+"""Claude as a model of the agent, through Claude Code: the `claude` program, run one of two ways, as an admin picks in
+the console ("Claude connection", claude_connection.py), and switched on the next call with no restart:
 
-Calls draw on the account's usage limits (a five-hour and a seven-day window), shared with everything else its owner
-does with Claude. A call refused at the limit is AgentBusy in agent.py: the user is told when the limit lifts.
+- "api_key": the `claude` installed with the studio (in its image; on a developer's PC, the one on PATH) runs here,
+  with an Anthropic API key in its environment (LocalProgram).
+- "lufi_bridge": the bridge on the PC LUFI runs the Claude Code signed in there, and the studio speaks to it over
+  Tailscale (BridgeProgram, docs/servers.md). For testing only, while its owner is the one user.
+
+Each call runs `claude -p` once with Claude Code's own tools, settings, MCP servers and skills off (but its web search,
+when the agent may research: WEB_TOOLS): Claude only answers. The agent's tools, skills, questions and Approve all stay
+in the studio (agent.py), the same as with any other model.
+
+On the bridge, calls draw on its Claude account's usage limits (a five-hour and a seven-day window); with a key, on the
+key's rate limits. A call refused at a limit is AgentBusy in agent.py: the user is told when the limit lifts.
 
 A conversation of the studio is one session of Claude Code's (a thread, see agent.py): its first message carries
 everything, and each later one only what is new; Claude Code keeps the rest and its cache holds it, so the turns
 before are neither sent again by the studio nor read again at the full rate.
 
-A conversation's session runs in the studio's own folder (`home`), so it is listed with the sessions of the folder in
-Claude Code's other places (VS Code, `claude --resume`), titled "Studio · tab · project · user". Its owner's memory is
-off in it, and it is compacted, still the same session, when its context is COMPACT full (sessions.py)."""
+A conversation's session runs in one folder that never changes (`home` here; the bridge's own folder on LUFI), since
+Claude Code finds a session by its folder. Its owner's memory is off in it, and it is compacted, still the same
+session, when its context is COMPACT full (sessions.py)."""
 
 import asyncio
+import codecs
 import collections
 import contextlib
 import contextvars
-import glob
 import hashlib
 import json
 import os
@@ -30,6 +36,8 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+
+import httpx
 
 from . import guardrails
 
@@ -57,7 +65,25 @@ NO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}   # the owner's own notes o
 # status, a rate limit event, the error of an assistant message).
 LIMITED = re.compile(r"usage limit|rate.?limit|limit reached|out of (extra )?usage|overloaded|try again later|\b(429|529)\b", re.IGNORECASE)
 SIGNED_OUT = re.compile(r"\blog ?in\b|logged out|not signed|authenticat|oauth|invalid api key|\b401\b", re.IGNORECASE)
-SIGNED_OUT_SAID = "Claude Code on this machine is not signed in. Run claude in a terminal and type /login."
+API_KEY, LUFI_BRIDGE = "api_key", "lufi_bridge"   # the two connections (claude_connection.MODES)
+# How the studio reaches Claude now: claude_connection.apply() sets it from the console's choice (keys included, so it
+# is never sent to a page), read afresh by every call. The default: the studio's own `claude`, with no key.
+CONNECTION = {"mode": API_KEY, "api_key": "", "bridge_url": "", "bridge_key": ""}
+# Called before every call that runs Claude Code, or None: raises Failed when the user of the request may not use the
+# agent now (claude_connection.guard: only admins, while the studio tests on a personal subscription).
+GUARD = None
+NOT_INSTALLED = ("Claude Code is not installed with the studio: it is in the studio's image (Dockerfile); on a "
+                 "developer's PC, install it so `claude` is on PATH.")
+BRIDGE_UNREACHABLE = "The LUFI bridge is not reachable. Check that it runs on LUFI, and its address in Servers & APIs."
+BRIDGE_KEY_WRONG = "The bridge key is wrong. Paste the key the LUFI bridge shows in Servers & APIs, Claude connection."
+
+
+def signed_out_said():
+    """What the user is told when Claude Code is not signed in, by the connection in use."""
+    if CONNECTION.get("mode") == LUFI_BRIDGE:
+        return "Claude on LUFI is signed out: sign Claude Code in again on LUFI."
+    return ("Claude Code is not signed in: the Anthropic API key is missing or was refused. Check it in Servers & APIs, "
+            "Claude connection.")
 
 
 class Busy(Exception):
@@ -86,51 +112,38 @@ def failure(said="", limits=None, status=None, kind=None, default="Claude could 
     if "no conversation found" in said.lower():
         return Lost("The conversation's Claude session is gone.")
     if kind == "authentication_failed" or status == 401:
-        return Failed(SIGNED_OUT_SAID)
+        return Failed(signed_out_said())
     if kind == "billing_error":
-        return Failed("Claude Code's account could not pay for this message: check its plan and extra usage on claude.ai.")
+        return Failed("Claude Code's account could not pay for this message: check its plan and extra usage on claude.ai."
+                      if CONNECTION.get("mode") == LUFI_BRIDGE else
+                      "The Anthropic API key's account could not pay for this message: check its credit on console.anthropic.com.")
     if LIMITED.search(said):
         return Busy("Claude is at its usage limit{}".format(resets(limits)))
     if SIGNED_OUT.search(said):
-        return Failed(SIGNED_OUT_SAID)
+        return Failed(signed_out_said())
     return Failed(default.format(said[:300] or "Claude Code stopped without an answer."))
 
 
-def find(path=""):
-    """The claude program: `path` when it is set, else the one on PATH, else the native installer's, else the newest
-    one a VS Code extension carries. "" when there is none."""
-    if path:
-        return path if Path(path).is_file() else ""
-    found = shutil.which("claude")
-    if found:
-        return found
-    home = Path.home()
-    native = [home / ".local" / "bin" / name for name in ("claude.exe", "claude")]
-    carried = glob.glob(str(home / ".vscode" / "extensions" / "anthropic.claude-code-*" / "resources" / "native-binary" / "claude*"))
-    for candidate in [*(str(n) for n in native), *sorted(carried, key=os.path.getmtime, reverse=True)]:
-        if Path(candidate).is_file():
-            return candidate
-    return ""
+def find():
+    """The claude program the "api_key" connection runs: the one on PATH (installed in the studio's image; on a
+    developer's PC, theirs). "" when there is none."""
+    return shutil.which("claude") or ""
 
 
-def service(models, path="", timeout=600, fast="", home="", window=WINDOW):
-    """The Claude service for Agent(services=...), or None when it is off (no models named) or Claude Code isn't here.
+def service(models, timeout=600, fast="", home="", window=WINDOW):
+    """The Claude service for Agent(services=...), or None when it is off (no models named). Whether Claude Code can be
+    reached is the connection's, asked at each call (CONNECTION), not here: it may be switched while the studio runs.
     models: the names to offer, comma separated, as Claude Code takes them ("sonnet, opus, haiku", or full model ids).
     fast: the one for the agent's small jobs (captions, notes, checks); empty = the one in use.
-    home: the folder its sessions run in (Claude Code files a session by that folder, and lists it with the folder's
-    others). window: the tokens of context its models have."""
+    home: the folder its sessions run in with the "api_key" connection (Claude Code files a session by that folder).
+    window: the tokens of context its models have."""
     names = [m.strip() for m in str(models or "").split(",") if m.strip()]
     if not names or names[0].lower() in ("off", "none"):
         return None
     if sdk is None:   # the agent's every message runs in a live session (converse): there is no other way
         raise RuntimeError("Claude is offered to the agent (claude_models), but the Claude Agent SDK is not installed: "
                            "pip install claude-agent-sdk (it is in backend/requirements.txt).")
-    program = find(path)
-    if not program:
-        print("Claude is not offered to the agent: Claude Code isn't installed on this machine{}.".format(
-            " at " + path if path else ""))
-        return None
-    return {"id": "claude", "name": "Claude", "url": "claude-code", "key": "", "models": names, "only": "", "cli": program,
+    return {"id": "claude", "name": "Claude", "url": "claude-code", "key": "", "models": names, "only": "", "cli": "claude",
             "timeout": max(30, int(timeout or 600)), "fast": str(fast or "").strip(),
             "home": str(home or Path(tempfile.gettempdir()) / "scene-claude"), "window": int(window or WINDOW)}
 
@@ -189,6 +202,7 @@ async def ask(s, model, messages, schema, images=(), thread=None, web=False):
     are kept up to date here. web: Claude may search the web (WEB_TOOLS) before it answers."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
+    await guarded()
     going_on = bool(thread and thread.get("id"))
     if going_on:
         system = str(messages[0].get("content") or "") if messages and messages[0].get("role") == "system" else ""
@@ -199,7 +213,7 @@ async def ask(s, model, messages, schema, images=(), thread=None, web=False):
     content = [*({"type": "text", "text": text} for text in blocks), *({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                                                 "data": picture}} for picture in images)]
     line = json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False)
-    args = [s["cli"], "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", model,
+    args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", model,
             "--tools", ",".join(WEB_TOOLS) if web else "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
             "--max-turns", str(MAX_TURNS + (WEB_TURNS if web else 0)), "--settings", session_settings(s)]
     if web:
@@ -214,33 +228,47 @@ async def ask(s, model, messages, schema, images=(), thread=None, web=False):
         args += ["--json-schema", json.dumps(schema)]
     else:
         system += "\n\nAnswer with one JSON object and nothing else."
-    # An empty folder to run in, so no CLAUDE.md, settings or memory of this project's reach it: a call of its own gets
-    # one that is thrown away; a thread runs in `home`, always the same, where Claude Code keeps its sessions. The
-    # system prompt goes in a file, since a long one does not fit on a Windows command line.
-    with tempfile.TemporaryDirectory(prefix="scene-claude-") as room:
-        (Path(room) / "system.txt").write_text(system, encoding="utf-8")
-        args += ["--system-prompt-file", str(Path(room) / "system.txt")]
-        where = room
-        if thread is not None:
-            Path(s["home"]).mkdir(parents=True, exist_ok=True)
-            where = s["home"]
-        async with gate:
-            run = await asyncio.to_thread(_run, args, line, where, s["timeout"])
+    # The system prompt goes as a file, since a long one does not fit on a Windows command line (files of _run). A call
+    # of its own runs in an empty folder thrown away after, so no CLAUDE.md, settings or memory reach it; a thread runs
+    # in `home`, always the same, where Claude Code keeps its sessions. On the bridge, the bridge's folder is used.
+    args += ["--system-prompt-file", "@system_prompt"]
+    where = s["home"] if thread is not None else None
+    async with gate:
+        run = await _run(args, line, where, s["timeout"], {"system_prompt": system})
     got = read(run.stdout, run.stderr)
     if thread is not None:
         thread.update(id=got["session"] or thread.get("id"), sent=len(messages), size=got["size"])
     return got["answer"], got["tokens"], got["limits"]
 
 
-def _run(args, line, room, timeout):
-    env = {**{k: v for k, v in os.environ.items() if k != "CLAUDECODE"}, **NO_MEMORY}   # the studio may itself be started from Claude Code
-    try:
-        return subprocess.run(args, input=line + "\n", capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              cwd=room, env=env, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        raise Failed("Claude took longer than {} s to answer. Raise claude_timeout in config.json.".format(timeout))
-    except OSError as error:
-        raise Failed("Claude Code can't be started ({}). Set claude_path in config.json.".format(error))
+Ran = collections.namedtuple("Ran", "stdout stderr code")
+
+
+async def _run(args, line, room, timeout, files=None):
+    """One run of Claude Code to its end, through the connection in use: `line` on its stdin, which is then closed.
+    Returns what it printed (Ran). args: claude's arguments, without the program; files: {name: text} for the
+    arguments "@name" (_placed); room: the folder it runs in with the "api_key" connection (None: an empty one, thrown
+    away after). Raises Busy or Failed, also when it takes longer than `timeout` seconds."""
+    with tempfile.TemporaryDirectory(prefix="scene-claude-") as spare:
+        if room:
+            Path(room).mkdir(parents=True, exist_ok=True)
+        program = connected()
+        out, err = [], []
+
+        async def whole():
+            await program.start(args, files, NO_MEMORY, room or spare)
+            if line:
+                await program.write(line + "\n")
+            await program.end_input()
+            async for stream, text in program.output():
+                (out if stream == "stdout" else err).append(text)
+        try:
+            await asyncio.wait_for(whole(), timeout)
+        except asyncio.TimeoutError:
+            raise Failed("Claude took longer than {} s to answer. Raise claude_timeout in config.json.".format(timeout))
+        finally:
+            await program.stop()
+    return Ran("".join(out), "".join(err), program.code)
 
 
 def read(stdout, stderr=""):
@@ -279,6 +307,277 @@ def judged(result, limits, printed="", kind=None):
     size = sum(number(last.get(k)) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
     return {"answer": json.dumps(answer, ensure_ascii=False) if isinstance(answer, dict) else str(result.get("result") or ""),
             "tokens": tokens, "limits": limits, "session": result.get("session_id"), "size": size}
+
+
+# ---------------------------------------------------------------- one run of `claude`, whichever way it is reached
+#
+# Every run of Claude Code goes through a program of the connection in use (connected()): a call of its own (ask), a
+# command (command) and a live session (the SDK's Transport, _Through). A program is started with claude's arguments,
+# without the program's name, and with files given as text ({"system_prompt": ...}, named "@system_prompt" in the
+# arguments); it is written to, its stdin closed, and its output read, a piece at a time, as ("stdout" | "stderr", text),
+# until it ends with its exit code (`code`). stop() lets it go: its stdin closed, a moment to end, then it is ended.
+
+PIECE = 65536      # bytes of its output read at a time
+LET_GO = 5         # seconds a program has to end once its stdin is closed (it writes its session's file), before it is ended
+BRIDGE_WAIT = 10   # seconds the bridge has to answer an HTTP call or open a run
+RUNNING = collections.Counter()   # "now": the programs running for this studio (the console's Claude connection card)
+RUN_WITH = ()      # what runs the claude program: nothing, it is one (the tests' fake claude is a Python script: Python)
+
+
+async def guarded():
+    """Raises Failed when this request's user may not use the agent now (GUARD)."""
+    if GUARD is not None:
+        await GUARD()
+
+
+def connection_mark():
+    """A short mark of the connection in use, keys included: it changes whenever the connection does."""
+    return hashlib.sha1(json.dumps(CONNECTION, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def connected():
+    """A program of the connection in use (CONNECTION), not started yet."""
+    if CONNECTION.get("mode") == LUFI_BRIDGE:
+        if not CONNECTION.get("bridge_url"):
+            raise Failed("The LUFI bridge has no address yet: set it in Servers & APIs, Claude connection.")
+        return BridgeProgram(CONNECTION["bridge_url"], CONNECTION.get("bridge_key") or "")
+    return LocalProgram(CONNECTION.get("api_key") or "")
+
+
+def split_flags(args):
+    """The arguments with each "--flag=value" made two, "--flag" and "value" (the SDK's own form for --resume and
+    --setting-sources), as the bridge takes them."""
+    found = []
+    for arg in args:
+        if arg.startswith("--") and "=" in arg:
+            found += arg.split("=", 1)
+        else:
+            found.append(arg)
+    return found
+
+
+def _placed(args, files, folder):
+    """The arguments with each "@name" of `files` made the path of a file in `folder` that holds its text."""
+    placed = []
+    for arg in args:
+        name = arg[1:] if arg.startswith("@") else None
+        if name in (files or {}):
+            path = Path(folder) / (name + ".txt")
+            path.write_text(files[name], encoding="utf-8")
+            arg = str(path)
+        placed.append(arg)
+    return placed
+
+
+class LocalProgram:
+    """Claude Code run here: the `claude` on PATH (find), with the connection's API key, when it has one, in its
+    environment. Without one (a developer's PC), it uses whatever account that Claude Code is signed in with."""
+
+    def __init__(self, api_key=""):
+        self.api_key, self.process, self.code, self.folder, self.readers = api_key, None, None, None, []
+        self.pieces = asyncio.Queue()
+
+    async def start(self, args, files=None, env=None, cwd=None):
+        program = find()
+        if not program:
+            raise Failed(NOT_INSTALLED)
+        self.folder = tempfile.mkdtemp(prefix="scene-claude-files-")
+        environment = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}   # the studio may itself be started from Claude Code
+        environment.update(env or {})
+        if self.api_key:
+            environment["ANTHROPIC_API_KEY"] = self.api_key
+        try:
+            self.process = await asyncio.create_subprocess_exec(
+                *RUN_WITH, program, *_placed(args, files, self.folder), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, cwd=cwd or None, env=environment,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError as error:
+            shutil.rmtree(self.folder, ignore_errors=True)
+            raise Failed("Claude Code can't be started ({}). {}".format(error, NOT_INSTALLED))
+        RUNNING["now"] += 1
+        self.readers = [asyncio.ensure_future(self._pump(name, getattr(self.process, name))) for name in ("stdout", "stderr")]
+
+    async def _pump(self, name, stream):
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        while True:
+            chunk = await stream.read(PIECE)
+            text = decoder.decode(chunk, final=not chunk)
+            if text:
+                await self.pieces.put((name, text))
+            if not chunk:
+                await self.pieces.put((name, None))
+                return
+
+    async def write(self, text):
+        try:
+            self.process.stdin.write(text.encode("utf-8"))
+            await self.process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):   # it has ended: its output says why
+            pass
+
+    async def end_input(self):
+        if self.process is not None and not self.process.stdin.is_closing():
+            self.process.stdin.close()
+
+    async def output(self):
+        ended = 0
+        while ended < 2:
+            name, text = await self.pieces.get()
+            if text is None:
+                ended += 1
+            else:
+                yield name, text
+        self.code = await self.process.wait()
+
+    async def stop(self):
+        process, self.process = self.process, None
+        if process is None:
+            return
+        try:
+            if process.returncode is None:
+                with contextlib.suppress(OSError):
+                    process.stdin.close()
+                try:
+                    await asyncio.wait_for(process.wait(), LET_GO)
+                except asyncio.TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        process.kill()
+                    await process.wait()
+        finally:
+            RUNNING["now"] -= 1
+            for reader in self.readers:
+                reader.cancel()
+            shutil.rmtree(self.folder, ignore_errors=True)
+
+
+def bridge_refused(code, message=""):
+    """The exception for a refusal of the bridge (its error frame's code, docs/servers.md), in the studio's words."""
+    said = " ".join(str(message or "").split())[:300]
+    if code == "busy":
+        return Busy("Claude on LUFI is running as many calls as it takes at once. Try again in a moment.")
+    if code == "not_signed_in":
+        return Failed("Claude on LUFI is signed out: sign Claude Code in again on LUFI.")
+    if code in ("bad_key", "locked"):
+        return Failed(BRIDGE_KEY_WRONG)
+    if code == "off":
+        return Failed("The LUFI bridge is switched off. Switch it on on LUFI, or pick the API key connection.")
+    if code == "timeout":
+        return Failed("The LUFI bridge stopped Claude Code: it ran longer than the bridge allows.")
+    if code == "refused_flag":
+        return Failed("The LUFI bridge refused how the studio starts Claude Code ({}). The studio and the bridge must "
+                      "follow the same contract: update the older one.".format(said or "a flag"))
+    return Failed("The LUFI bridge could not run Claude Code: {}".format(said or code or "no reason given"))
+
+
+def bridge_address(url, path):
+    """The bridge's address for `path`: http(s) as given, ws(s) for /run."""
+    url = str(url or "").strip().rstrip("/")
+    if "://" not in url:
+        url = "http://" + url
+    if path == "/run":
+        url = "ws" + url[len("http"):] if url.startswith("http") else url
+    return url + path
+
+
+def bridge_headers(key):
+    return {"Authorization": "Bearer " + str(key or "")}
+
+
+class BridgeProgram:
+    """Claude Code on LUFI, run by its bridge: one WebSocket to /run for each run (the protocol of docs/servers.md).
+    Arguments go as the bridge takes them (split_flags), files as text, and only the "no memory" variables (NO_MEMORY):
+    never a key. Closing the socket ends the run on LUFI."""
+
+    def __init__(self, url, key):
+        self.url, self.key, self.socket, self.code = url, key, None, None
+        self.exited = asyncio.Event()
+
+    async def start(self, args, files=None, env=None, cwd=None):
+        from websockets.asyncio.client import connect
+        from websockets.exceptions import InvalidHandshake, InvalidStatus, InvalidURI
+        try:
+            self.socket = await connect(bridge_address(self.url, "/run"), additional_headers=bridge_headers(self.key), proxy=None,
+                                        open_timeout=BRIDGE_WAIT, max_size=None, ping_interval=20, ping_timeout=60)
+        except InvalidStatus as error:
+            raise Failed(BRIDGE_KEY_WRONG if error.response.status_code in (401, 403) else BRIDGE_UNREACHABLE)
+        except (OSError, asyncio.TimeoutError, InvalidHandshake, InvalidURI, ValueError):
+            raise Failed(BRIDGE_UNREACHABLE)
+        RUNNING["now"] += 1
+        await self._send({"type": "start", "args": split_flags(args), "files": dict(files or {}), "env": dict(env or {})})
+
+    async def _send(self, frame):
+        from websockets.exceptions import ConnectionClosed
+        try:
+            await self.socket.send(json.dumps(frame, ensure_ascii=False))
+        except ConnectionClosed:   # the bridge ended the run: its last frames say why
+            pass
+
+    async def write(self, text):
+        await self._send({"type": "stdin", "data": text})
+
+    async def end_input(self):
+        if self.socket is not None and not self.exited.is_set():
+            await self._send({"type": "stdin_close"})
+
+    async def output(self):
+        from websockets.exceptions import ConnectionClosed
+        try:
+            async for raw in self.socket:
+                try:
+                    frame = json.loads(raw)
+                except ValueError:
+                    continue
+                kind = frame.get("type") if isinstance(frame, dict) else None
+                if kind in ("stdout", "stderr"):
+                    yield kind, str(frame.get("data") or "")
+                elif kind == "exit":
+                    self.code = frame.get("code") if isinstance(frame.get("code"), int) else -1
+                    self.exited.set()
+                    return
+                elif kind == "error":
+                    self.exited.set()
+                    raise bridge_refused(frame.get("code"), frame.get("message"))
+        except ConnectionClosed:
+            pass
+        self.exited.set()
+        raise Failed("The LUFI bridge ended the run before Claude Code finished. " + BRIDGE_UNREACHABLE)
+
+    async def stop(self):
+        socket, self.socket = self.socket, None
+        if socket is None:
+            return
+        try:
+            if not self.exited.is_set():   # its session's file is written as it ends: a moment for that, then it is ended
+                with contextlib.suppress(Exception):
+                    await socket.send(json.dumps({"type": "stdin_close"}))
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self.exited.wait(), LET_GO)
+        finally:
+            RUNNING["now"] -= 1
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(socket.close(), LET_GO)
+
+
+def bridge_call(method, path, json_body=None):
+    """An HTTP call to the bridge (/health, /forget) with its key: the answer's JSON. Raises Failed when it can't be
+    reached or refuses the key."""
+    try:
+        with httpx.Client(timeout=BRIDGE_WAIT, trust_env=False) as http:
+            answer = http.request(method, bridge_address(CONNECTION.get("bridge_url"), path),
+                                  headers=bridge_headers(CONNECTION.get("bridge_key")), json=json_body)
+    except httpx.HTTPError:
+        raise Failed(BRIDGE_UNREACHABLE)
+    if answer.status_code in (401, 403):
+        raise Failed(BRIDGE_KEY_WRONG)
+    try:
+        found = answer.json()
+    except ValueError:
+        found = None
+    if not isinstance(found, dict):
+        raise Failed(BRIDGE_UNREACHABLE)
+    if found.get("type") == "error":
+        raise bridge_refused(found.get("code"), found.get("message"))
+    return found
 
 
 # ---------------------------------------------------------------- live sessions
@@ -393,7 +692,7 @@ def _options(s, settings):
     tools = [sdk.tool(name, about, shape)(settings["handlers"][name]) for name, (about, shape) in settings["tools"].items()]
     web = list(WEB_TOOLS) if settings.get("web") else []
     return sdk.ClaudeAgentOptions(
-        cli_path=s["cli"], model=settings["model"], system_prompt={"type": "file", "path": prompt_file(settings["system"])}, tools=web,
+        cli_path="claude", model=settings["model"], system_prompt={"type": "file", "path": prompt_file(settings["system"])}, tools=web,
         allowed_tools=["mcp__{}__{}".format(TOOLS_SERVER, name) for name in settings["tools"]] + web,
         mcp_servers={TOOLS_SERVER: sdk.create_sdk_mcp_server(TOOLS_SERVER, tools=tools)} if tools else {},
         strict_mcp_config=True, setting_sources=[], cwd=s["home"], resume=settings["resume"] or None,
@@ -401,10 +700,74 @@ def _options(s, settings):
         settings=session_settings(s), env=dict(NO_MEMORY), effort=settings.get("effort") or None)
 
 
+def sdk_arguments(options):
+    """claude's arguments for a live session, as the SDK itself builds them from its options, without the program's
+    name; and its files: the system prompt, as text ({"system_prompt": ...}, "@system_prompt" in the arguments)."""
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+    args, files = SubprocessCLITransport(prompt="", options=options)._build_command()[1:], {}
+    if "--system-prompt-file" in args:
+        at = args.index("--system-prompt-file") + 1
+        files["system_prompt"] = Path(args[at]).read_text(encoding="utf-8")
+        args[at] = "@system_prompt"
+    return args, files
+
+
+if sdk is not None:
+    class _Through(sdk.Transport):
+        """The SDK's way to Claude Code for one live session: a program of the connection in use (connected()),
+        started with the arguments the SDK builds (sdk_arguments) and its options' env (NO_MEMORY), in its cwd."""
+
+        def __init__(self, options):
+            self.options, self.program, self.ready = options, None, False
+
+        async def connect(self):
+            args, files = sdk_arguments(self.options)
+            self.program = connected()
+            await self.program.start(args, files, dict(self.options.env or {}), str(self.options.cwd or "") or None)
+            self.ready = True
+
+        async def write(self, data):
+            await self.program.write(data)
+
+        def read_messages(self):
+            return self._messages()
+
+        async def _messages(self):
+            pending, said = "", []
+            async for stream, text in self.program.output():
+                if stream == "stderr":
+                    said.append(text)
+                    continue
+                pending += text
+                *lines, pending = pending.split("\n")
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("{"):
+                        yield json.loads(line)
+            if pending.strip().startswith("{"):
+                with contextlib.suppress(ValueError):
+                    yield json.loads(pending)
+            if self.program.code not in (0, None):
+                raise sdk.ProcessError("Claude Code stopped", exit_code=self.program.code, stderr="".join(said)[-1000:] or None)
+
+        async def close(self):
+            self.ready = False
+            if self.program is not None:
+                await self.program.stop()
+
+        def is_ready(self):
+            return self.ready
+
+        async def end_input(self):
+            if self.program is not None:
+                await self.program.end_input()
+
+
 async def _open(s, settings):
-    """A connected client for one conversation (settings: see _options)."""
+    """A connected client for one conversation (settings: see _options), through the connection in use (_Through)."""
     Path(s["home"]).mkdir(parents=True, exist_ok=True)
-    client = sdk.ClaudeSDKClient(_options(s, settings))
+    options = _options(s, settings)
+    client = sdk.ClaudeSDKClient(options, transport=_Through(options))
     await asyncio.wait_for(client.connect(), 60)
     return client
 
@@ -563,10 +926,12 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
     says nothing for the service's timeout (claude_timeout) while no tool runs is stopped (Failed)."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
+    await guarded()
     key = key_of(thread)
     effort = EFFORT.get()
     # A session opened with another effort is opened again (going on with the same conversation): it is set as it starts.
-    signature = json.dumps([model, system, schema, sorted(about), max_turns, bool(web), effort], sort_keys=True)
+    # So is one opened by another connection (switched in the console): its program runs that way.
+    signature = json.dumps([model, system, schema, sorted(about), max_turns, bool(web), effort, connection_mark()], sort_keys=True)
     if text.lstrip().startswith("/"):   # a message is never taken for a command of Claude Code's (/compact): command() runs those
         text = "Message:\n" + text
     quiet = int(s.get("timeout") or 0)
@@ -612,7 +977,7 @@ async def converse(s, model, system, text, schema, thread, tools, about, finish_
                 except Exception as error:   # the SDK's own errors: the program could not be started, or stopped
                     await _let_go(key, entry)
                     if sdk is not None and isinstance(error, getattr(sdk, "CLINotFoundError", ())):
-                        raise Failed("Claude Code can't be started ({}). Set claude_path in config.json.".format(error)) from error
+                        raise Failed("Claude Code can't be started ({}). {}".format(error, NOT_INSTALLED)) from error
                     raise failure(str(error), kind=entry.error_kind, default="Claude Code stopped: {}") from error
                 finally:
                     entry.used = time.monotonic()
@@ -652,7 +1017,7 @@ async def _discard(s, thread):
     for session in dict.fromkeys([thread.get("id"), *(thread.get("opened") or [])]):
         if session:
             try:
-                forget(s, session)
+                await asyncio.to_thread(forget, s, session)
             except OSError as error:   # a file in use stays: nothing reads it again
                 print("A one-off Claude session's file was not removed: {}".format(error))
 
@@ -663,6 +1028,7 @@ async def command(s, thread, text):
     compaction (pre_tokens, post_tokens) or None, "session": its id}."""
     global gate
     gate = gate or asyncio.Semaphore(PARALLEL)
+    await guarded()
     key, name = key_of(thread), text.split()[0]
     entry = live.get(key)
     if entry is not None and entry.client is not None and entry.session == thread.get("id"):
@@ -692,11 +1058,13 @@ async def command(s, thread, text):
                 entry.users -= 1
     if not thread.get("id"):
         raise Failed("This conversation has no Claude session yet.")
-    args = [s["cli"], "-p", text, "--resume", thread["id"], "--output-format", "stream-json", "--verbose", "--tools", "",
-            "--strict-mcp-config", "--setting-sources", "", "--settings", session_settings(s)]
-    Path(s["home"]).mkdir(parents=True, exist_ok=True)
+    # The command goes on stdin, as a message of the session, never as an argument: the bridge takes flags only.
+    args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", thread["id"],
+            "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--settings", session_settings(s)]
+    # As the SDK sends one to a live session (query("/compact")): a message whose content is the command's text.
+    line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}, ensure_ascii=False)
     async with gate:
-        run = await asyncio.to_thread(_run, args, "", s["home"], s["timeout"])
+        run = await _run(args, line, s["home"], s["timeout"])
     done, session = None, thread["id"]
     for raw in str(run.stdout or "").splitlines():
         try:
@@ -736,9 +1104,17 @@ async def rename(s, thread, title):
 
 
 def forget(s, session):
-    """Remove the file Claude Code keeps a thread's session in (the conversation was deleted). It files a session under
-    its folder's path, every character but letters and digits made a dash, in its own home (~/.claude)."""
+    """Remove the file Claude Code keeps a thread's session in (the conversation was deleted): on the bridge, by its
+    /forget; here, from where Claude Code files a session: under its folder's path, every character but letters and
+    digits made a dash, in its own home (~/.claude, or CLAUDE_CONFIG_DIR). It waits on the network or the disk: run it
+    off the event loop (asyncio.to_thread)."""
     if not s or not re.fullmatch(r"[0-9A-Za-z-]{8,64}", str(session or "")):
+        return
+    if CONNECTION.get("mode") == LUFI_BRIDGE:
+        try:
+            bridge_call("POST", "/forget", {"session_id": session})
+        except (Busy, Failed) as error:   # it stays on LUFI: nothing reads it again
+            print("A Claude session on LUFI was not forgotten: {}".format(error))
         return
     kept = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects" / re.sub(
         r"[^A-Za-z0-9]", "-", str(Path(s["home"]).resolve()))

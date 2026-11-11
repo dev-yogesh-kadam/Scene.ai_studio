@@ -15,15 +15,14 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, edits, endpoints, errors, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
+from .. import __version__, audit, backup, claude, claude_connection, edits, endpoints, errors, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
-from ..config import ROOT
 from ..comfy import workflows
 from ..comfy.workflows import WorkflowError
 from .. import credits as credits_module
 from ..credits import MOTION, OVERLAY, PER_JOB, RATES
-from .auth import new_hash, password_problem, signup_open
+from .auth import new_hash, password_problem, signup_chosen, signup_open
 from ..security import new_token, token_hash
 from .deps import CONSOLE_COOKIE, admin_user
 from .library import poster_response
@@ -39,7 +38,8 @@ DONE_FAILED = COUNT_IF.format("status = 'done'") + " AS done, " + COUNT_IF.forma
 
 
 def _settings(state):
-    return {"comfy_url": state.comfy.url, "allow_signup": signup_open(state),
+    # allow_signup: the admin's choice, kept while the LUFI bridge closes sign-up anyway (signup_testing)
+    return {"comfy_url": state.comfy.url, "allow_signup": signup_chosen(state), "signup_testing": claude_connection.testing(),
             "signup_credits": state.credits.signup, "daily_cap": state.credits.daily_cap,
             "admin_mfa": state.db.setting("admin_mfa", "0") == "1",
             # Langfuse (docs/langfuse.md): whether the words are sent with the numbers, and the share of the agent's turns
@@ -1045,6 +1045,44 @@ async def remove_endpoint(endpoint_id: int, request: Request, user: dict = Depen
     return {}
 
 
+# ---------------------------------------------------------------- the Claude connection (claude_connection.py)
+
+async def _claude_connection(state, fresh=False):
+    """The Servers section's Claude connection card: what is picked (never a key) and how it is now."""
+    return {"connection": await offload(claude_connection.public, state.db, state.settings),
+            "status": await health.model_server(state, fresh)}
+
+
+@router.get("/claude-connection")
+async def get_claude_connection(request: Request, fresh: bool = False, user: dict = Depends(admin_user)):
+    return await _claude_connection(request.app.state, fresh)
+
+
+@router.put("/claude-connection")
+async def put_claude_connection(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """Pick the connection and paste its key; a key left blank keeps the one there is. In use from the next call to
+    Claude, here and in the app's other processes, with no restart."""
+    state = request.app.state
+    try:
+        said = await offload(claude_connection.save, state.db, state.settings, body)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    health.forget(state, "model")   # the card and the Overview show the new one at once
+    if said:
+        await offload(audit.record, request, user, "Changed the Claude connection", "", "; ".join(said))
+    return await _claude_connection(state, fresh=True)
+
+
+@router.post("/claude-connection/test")
+async def test_claude_connection(request: Request, user: dict = Depends(admin_user)):
+    """The connection in use, checked now: on the bridge, its /health and a run of `claude -v` through it; with a key,
+    the key asked of Anthropic's API and `claude -v` here."""
+    state = request.app.state
+    found = await claude_connection.status(run_claude=True)
+    health.forget(state, "model")
+    return dict(await _claude_connection(state, fresh=True), test=found)
+
+
 # ---------------------------------------------------------------- settings
 
 @router.get("/settings")
@@ -2034,14 +2072,13 @@ def _session_state(row):
 
 
 def _session_out(request, row):
-    """A session row as the console shows it, with what it is doing now, how full it is, and the command that opens it
-    in a terminal: from the folder its sessions run in (Claude Code finds a session by its folder)."""
+    """A session row as the console shows it, with what it is doing now, how full it is, and, while Claude Code runs
+    here (the "api_key" connection), the command that opens it in a terminal: from the folder its sessions run in
+    (Claude Code finds a session by its folder). On the LUFI bridge, it runs in the bridge's folder there."""
     hosted = (getattr(request.app.state.agent, "services", None) or {}).get("claude") or {}
-    settings = request.app.state.settings
-    home = hosted.get("home") or (settings.path("claude_home") if settings.claude_home else ROOT)
     out = dict(row, state=_session_state(row), percent=round(100 * sessions.fullness(row["context_tokens"], row["context_window"])))
-    if row["claude_id"]:
-        out["resume"] = 'cd "{}" && claude --resume {}'.format(home, row["claude_id"])
+    if row["claude_id"] and hosted.get("home") and not claude_connection.testing():
+        out["resume"] = 'cd "{}" && claude --resume {}'.format(hosted["home"], row["claude_id"])
     return out
 
 

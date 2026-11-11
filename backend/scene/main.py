@@ -16,13 +16,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import aftercare, backup, claude, endpoints, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
+from . import aftercare, backup, claude, claude_connection, endpoints, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
 from .agent import Agent, AgentError
 from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
 from .catalog import Catalog
 from .comfy import workflows
 from .comfy.client import ComfyError
-from .config import ROOT, load_settings
+from .config import load_settings
 from .credits import Credits
 from .db import as_everyone, open_database
 from .jobs import JobManager
@@ -226,9 +226,13 @@ def create_app(settings=None):
     staff.configure(db)   # the console's roles as an admin last saved them
     catalog = Catalog(settings.path("workflows_dir"), comfy, storage / "cache" / "node_definitions.json")
     credits = Credits(db, settings)
+    # The agent tabs' Claude sessions run in a folder of the studio's storage that never changes (Claude Code finds a
+    # session by its folder), with the "api_key" connection; the LUFI bridge runs them in a folder of its own.
     agent = Agent(settings.agent_model, services=list(filter(None, [
-        claude.service(settings.claude_models, settings.claude_path, settings.claude_timeout, settings.claude_fast_model,
-                       settings.path("claude_home") if settings.claude_home else ROOT, settings.claude_context)])))
+        claude.service(settings.claude_models, settings.claude_timeout, settings.claude_fast_model, storage / "claude-home",
+                       settings.claude_context)])))
+    claude_connection.apply(db, settings)   # how the studio reaches Claude Code, as an admin picked it in the console
+    claude.GUARD = claude_connection.guard_for(db)
     hub = Hub()
 
     def queue_counts():
@@ -355,8 +359,10 @@ def create_app(settings=None):
                                                    settings.embedding_endpoint, settings.embedding_model)
         else:
             print("semantic_search is on, but the database has no embeddings table (pgvector, migration 0011): it stays off.")
-    # Settings an admin changes in another process: the console's roles and the agent's models, read again here.
-    app.state.shared.on_changed("settings", lambda: (staff.configure(db), roles.apply(db, agent)))
+    # Settings an admin changes in another process: the console's roles, the agent's models and the Claude connection,
+    # read again here.
+    app.state.shared.on_changed("settings", lambda: (staff.configure(db), roles.apply(db, agent),
+                                                     claude_connection.apply(db, settings)))
     app.state.view_codes = {}   # one-time codes to view the studio as a user (api/admin.start_view), by their hash
     app.state.started = time.time()
     app.state.storage_dir = storage

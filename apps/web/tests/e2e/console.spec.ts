@@ -45,7 +45,9 @@ test('an admin signs in, lands on the section asked for, and every section opens
   await expect(page.getByTitle('People with the studio open right now. Several tabs count once.')).toBeVisible();
 
   for (const [id, label] of SECTIONS) {
-    await page.getByRole('navigation', { name: 'Sections' }).getByRole('link', { name: label, exact: true }).click();
+    // a link's name may end in its count: System's open alerts (the test studio's Claude connection has no key), Jobs' queue
+    const link = new RegExp(`^${label}(\\s|$)`);
+    await page.getByRole('navigation', { name: 'Sections' }).getByRole('link', { name: link }).click();
     await expect(page).toHaveURL(new RegExp(`/${id}$`));
     await expect(page.getByRole('heading', { name: label, level: 1 })).toBeVisible();
     await expect(page.locator('main.view .error')).toHaveCount(0);

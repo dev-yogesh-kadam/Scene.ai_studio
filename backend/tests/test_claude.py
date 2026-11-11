@@ -1,5 +1,6 @@
-"""Claude as a model of the agent, through Claude Code on this machine (claude.py). Claude Code is faked: each test says
-what its run prints, and what it was started with is recorded."""
+"""Claude as a model of the agent, through Claude Code (claude.py). Claude Code is faked at the run of it (_run): each
+test says what its run prints, and what it was started with is recorded. The two connections themselves, with a fake
+`claude` and a fake LUFI bridge, are test_claude_connection.py's."""
 
 import asyncio
 import json
@@ -33,9 +34,9 @@ def fake_claude(monkeypatch, *outputs):
     """Claude Code prints `outputs` in turn; returns the runs it was started for: {"args", "message", "system"}."""
     runs, left = [], list(outputs)
 
-    def run(args, line, room, timeout):
-        system = Path(args[args.index("--system-prompt-file") + 1]).read_text(encoding="utf-8")
-        runs.append({"args": args, "message": json.loads(line)["message"], "system": system, "room": room})
+    async def run(args, line, room, timeout, files=None):
+        assert args[args.index("--system-prompt-file") + 1] == "@system_prompt"   # the prompt goes as a file's text
+        runs.append({"args": args, "message": json.loads(line)["message"], "system": files["system_prompt"], "room": room})
         out = left.pop(0)
         return out if isinstance(out, Run) else Run(out)
 
@@ -50,17 +51,15 @@ def brain_with_claude(models="sonnet, haiku", fast="haiku"):
     return Agent("", [s])
 
 
-def test_claude_is_offered_only_when_named_and_installed(monkeypatch):
+def test_claude_is_offered_when_named_whichever_way_it_is_reached():
     assert claude.service("") is None and claude.service("off") is None
-    monkeypatch.setattr(claude, "find", lambda path="": "")
-    assert claude.service("sonnet") is None                                         # Claude Code isn't on this machine
-    monkeypatch.setattr(claude, "find", lambda path="": "C:/bin/claude.exe")
+    # whether Claude Code can be reached is asked at each call (the connection may be switched): it is offered anyway
     s = claude.service("sonnet, opus ,haiku", fast="haiku")
-    assert s["models"] == ["sonnet", "opus", "haiku"] and s["cli"] == "C:/bin/claude.exe" and s["key"] == ""
+    assert s["models"] == ["sonnet", "opus", "haiku"] and s["cli"] == "claude" and s["key"] == ""
     brain = Agent("", [s])                                                          # no key, and still offered
     assert asyncio.run(brain.models()) == ["claude/sonnet", "claude/opus", "claude/haiku"]
     assert brain.helper("claude/opus") == "claude/haiku" and brain.helper(None) == "claude/haiku"
-    with pytest.raises(AgentError, match="Claude Code"):
+    with pytest.raises(AgentError, match="claude_models"):
         asyncio.run(Agent("", []).models())                                         # no Claude: no model at all
 
 
@@ -134,7 +133,6 @@ def test_a_message_with_no_tab_runs_in_a_session_of_its_own_that_is_then_forgott
 
 
 def test_claude_is_not_offered_without_the_agent_sdk(monkeypatch):
-    monkeypatch.setattr(claude, "find", lambda path="": "C:/bin/claude.exe")
     monkeypatch.setattr(claude, "sdk", None)
     with pytest.raises(RuntimeError, match="pip install claude-agent-sdk"):
         claude.service("sonnet")
@@ -505,19 +503,23 @@ def test_compact_now_goes_on_in_the_same_session(monkeypatch):
     claude.live.clear()
     started = []
 
-    def run(args, line, room, timeout):
-        started.append(args)
+    async def run(args, line, room, timeout, files=None):
+        started.append((args, line))
         return Run(printed({"type": "system", "subtype": "compact_boundary", "compact_metadata": {"trigger": "manual", "post_tokens": 9_000}},
                            {"type": "result", "subtype": "success", "is_error": False, "session_id": "s-1", "result": ""}))
     monkeypatch.setattr(claude, "_run", run)
     told = []
     thread = {"key": "k2", "id": "s-1", "record": lambda kind, text="", data=None: told.append(kind)}
     assert asyncio.run(claude.compact(dict(s, window=1_000_000), thread)) == 9_000
-    args = started[0]
-    assert args[args.index("-p") + 1] == "/compact" and args[args.index("--resume") + 1] == "s-1" and told == ["compact"]
+    args, line = started[0]
+    assert args[args.index("--resume") + 1] == "s-1" and told == ["compact"]
+    # the command goes on stdin, as the session's message, never as an argument (the bridge takes flags only)
+    assert "/compact" not in args and json.loads(line)["message"] == {"role": "user", "content": "/compact"}
 
-    monkeypatch.setattr(claude, "_run", lambda *a: Run(printed({"type": "result", "subtype": "error_during_execution", "is_error": True,
-                                                                  "result": "No conversation found with session ID: s-1"})))
+    async def lost(*a, **k):
+        return Run(printed({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                            "result": "No conversation found with session ID: s-1"}))
+    monkeypatch.setattr(claude, "_run", lost)
     with pytest.raises(claude.Lost):
         asyncio.run(claude.compact(s, {"key": "k3", "id": "s-1"}))
     with pytest.raises(claude.Failed):

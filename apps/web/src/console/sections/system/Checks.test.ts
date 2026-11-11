@@ -8,7 +8,15 @@ describe('the checks card', () => {
     const rows = rowsOf({
       database: { online: true, seconds: 0.002, detail: '' },
       render: { online: false, url: 'http://render:8188', detail: '' },
-      model: { online: true, detail: '', signed_in: true, plan: 'Max' },
+      model: {
+        mode: 'lufi_bridge',
+        online: true,
+        detail: '',
+        claude_version: '2.1.3',
+        signed_in: true,
+        running: 1,
+        limit: 4,
+      },
       programs: { ffmpeg: { ready: true, detail: '' }, motion: { ready: false, detail: 'npm install in motion/' } },
       disk: { folder: 'C:/Scene/Outputs', free: 5, total: 100 },
       backup: {
@@ -23,7 +31,10 @@ describe('the checks card', () => {
     expect(by['Database'].state).toBe('ok');
     expect(by['Render server']).toMatchObject({ state: 'problem' });
     expect(String(by['Render server'].words)).toContain('http://render:8188');
-    expect(by['Agent model']).toMatchObject({ state: 'ok', words: 'Claude Code ready · signed in · Max' });
+    expect(by['Agent model']).toMatchObject({
+      state: 'ok',
+      words: 'LUFI bridge · Claude Code 2.1.3 · signed in · 1 of 4 calls running',
+    });
     expect(by['Motion pages (HyperFrames)']).toMatchObject({ state: 'problem', words: 'npm install in motion/' });
     expect(by['Disk'].state).toBe('problem'); // 5% free
     expect(by['Last backup'].state).toBe('ok');

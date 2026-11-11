@@ -10,7 +10,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from .. import audit, staff, vault
+from .. import audit, claude_connection, staff, vault
 from ..security import (ACCOUNT_FAILURES, ACCOUNT_SECONDS, DUMMY_HASH, MAX_PASSWORD, check_totp, client_address, hash_password,
                         is_https, needs_rehash, new_recovery_codes, new_token, new_totp_secret, recovery_hash, token_hash,
                         totp_uri, verify_password)
@@ -46,10 +46,16 @@ def password_problem(password):
     return None
 
 
-def signup_open(state):
-    """Whether strangers may make accounts: the admin console's Settings when an admin has set it there, else
+def signup_chosen(state):
+    """Whether an admin lets strangers make accounts: the admin console's Settings when an admin has set it there, else
     allow_signup (closed by default, config.py)."""
     return state.db.setting("allow_signup", "1" if state.settings.allow_signup else "0") == "1"
+
+
+def signup_open(state):
+    """Whether strangers may make accounts now: as chosen (signup_chosen), but never while the studio is tested on the
+    LUFI bridge, a personal Claude subscription (claude_connection.py). The choice is kept for when that ends."""
+    return signup_chosen(state) and not claude_connection.testing()
 
 
 def invite_fits(state, body):

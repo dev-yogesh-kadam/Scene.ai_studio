@@ -18,6 +18,7 @@ const css = classesOf(css0, css1, css2, css3, css4);
 
 type Current = {
   allow_signup: boolean;
+  signup_testing?: boolean; // the LUFI bridge is in use: sign-up is closed whatever is chosen here
   signup_credits: number;
   daily_cap: number;
   admin_mfa: boolean;
@@ -59,6 +60,12 @@ function Accounts({
           ? 'When config.json sets an invite code (signup_invite), the sign-up form also asks for it; a link with ?invite=CODE fills it in.'
           : 'Closed (as on a new studio): nobody can make an account, and the sign-in page says so.'}
       </p>
+      {current.signup_testing && (
+        <p className="notice error" style={{ margin: '6px 0 0 25px' }}>
+          Closed for now whatever is chosen here: the studio is testing on a personal Claude subscription (the LUFI
+          bridge, Servers &amp; APIs). This choice is used again once the API key is picked.
+        </p>
+      )}
       <label className="check">
         <input type="checkbox" checked={mfa} onChange={(e) => setMfa(e.target.checked)} />
         Admins must use two-step sign-in to open the admin console

@@ -3,6 +3,7 @@
 // (an older backend) shows no card. Every field is read defensively: a check that is missing says "not checked".
 
 import type { ReactNode } from 'react';
+import { claudeWords, type ClaudeStatus } from '../servers/claude';
 import { Table, ago, bytes } from '../shared/ui';
 import { classesOf } from '../../../common/cx';
 import css0 from '../../../common/components/Shared2.module.css';
@@ -15,7 +16,7 @@ type Outcome = { ok?: boolean; detail?: string; when?: number } | null;
 export type Checks = {
   database?: { online?: boolean; seconds?: number; detail?: string };
   render?: { online?: boolean; url?: string; since?: number; detail?: string };
-  model?: { online?: boolean; detail?: string; signed_in?: boolean | null; plan?: string };
+  model?: ClaudeStatus;
   programs?: { ffmpeg?: Ready; motion?: Ready };
   disk?: { folder?: string; free?: number; total?: number };
   backup?: { folder?: string; last?: number | null; check?: Outcome; restore_test?: Outcome };
@@ -74,11 +75,7 @@ export function rowsOf(c: Checks): Row[] {
     !m
       ? { name: 'Agent model', state: 'off', words: 'Not checked' }
       : m.online
-        ? {
-            name: 'Agent model',
-            state: 'ok',
-            words: ['Claude Code ready', m.signed_in ? 'signed in' : '', m.plan].filter(Boolean).join(' · '),
-          }
+        ? { name: 'Agent model', state: 'ok', words: claudeWords(m) }
         : { name: 'Agent model', state: 'problem', words: m.detail || 'Not ready' },
   );
   for (const [key, name] of [

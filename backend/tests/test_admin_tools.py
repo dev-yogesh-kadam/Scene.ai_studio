@@ -3,7 +3,7 @@ credits for everyone, backups, storage, and what the Overview adds."""
 
 import json
 
-from test_api import ADMIN, console, post_job, register
+from test_api import ADMIN, claude_works, console, post_job, register
 
 BOB = {"email": "bob@example.com", "password": "another one"}
 
@@ -231,20 +231,21 @@ def test_maintenance_refuses_new_jobs_gives_their_credits_back_and_shows_its_mes
     assert "Turned on maintenance mode" in actions and "Turned off maintenance mode" in actions
 
 
-def test_the_servers_that_do_not_answer_are_problems(client):
+def test_the_servers_that_do_not_answer_are_problems(client, monkeypatch):
     import asyncio
     from scene import health
+    claude_works(monkeypatch)
     register(client)
     found = asyncio.run(health.problems(client.app.state))   # the render server is at an address nothing listens on
     assert [p["key"] for p in found][:1] == ["render"] and found[0]["level"] == "critical"
     model = console(client).get("/api/admin/system").json()["model_server"]
     assert model["online"] is True and model["models"] == ["claude/sonnet", "claude/haiku"]
-    client.app.state.agent.services = {}   # Claude Code not set up: the agent can't plan
+    client.app.state.agent.services = {}   # no models named: the agent can't plan
     health.forget(client.app.state, "model")
     found = asyncio.run(health.problems(client.app.state))
-    assert [p["key"] for p in found][:2] == ["render", "model"] and "Claude Code" in found[1]["text"]
+    assert [p["key"] for p in found][:2] == ["render", "model"] and "claude_models" in found[1]["text"]
     attention = console(client).get("/api/admin/overview").json()["attention"]
-    assert attention[0]["text"].startswith("The render server") and "Claude Code" in attention[1]["text"]
+    assert attention[0]["text"].startswith("The render server") and "claude_models" in attention[1]["text"]
 
 
 def test_the_watcher_sends_a_problem_found_twice_and_says_when_it_is_gone(client, monkeypatch):
