@@ -57,7 +57,8 @@ class Recorder:
         if sender is not None:
             sender.on_delivered = self.forget_words   # told which calls' words Langfuse took
 
-    def record(self, purpose, model, asked, started, messages, answer_format, content=None, usage=None, error=None, tool=None):
+    def record(self, purpose, model, asked, started, messages, answer_format, content=None, usage=None, error=None, tool=None,
+               metadata=None):
         acting = ACTING.get()
         usage = usage or {}
         user_id = int(acting) if acting not in (EVERYONE, None) and str(acting).isdigit() else None
@@ -78,7 +79,8 @@ class Recorder:
         if self.langfuse is not None:
             try:
                 self.langfuse.add(purpose, model, asked, started, ended, shown, content, usage, error, tool,
-                                  RUN.get(), SESSION.get(), user_id, TURN.get(), call=call_id, answer_format=answer_format)
+                                  RUN.get(), SESSION.get(), user_id, TURN.get(), call=call_id, answer_format=answer_format,
+                                  **({"metadata": metadata} if metadata else {}))
             except Exception as problem:   # Langfuse is a help: the call is written down here all the same
                 print("The agent's call could not be readied for Langfuse: {}".format(problem))
         return call_id

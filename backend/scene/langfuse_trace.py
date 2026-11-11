@@ -255,11 +255,12 @@ class Sender:
         return self.db is None or self.db.setting("langfuse_words", "1") != "0"
 
     def add(self, purpose, model, asked, started, ended, messages, content=None, usage=None, error=None, tool=None,
-            run="", session="", user=None, turn=None, call=None, answer_format=None):
+            run="", session="", user=None, turn=None, call=None, answer_format=None, metadata=None):
         """One call, as traces.Recorder wrote it down, made into a generation waiting to be sent. turn: what the turn
         it was made in is (traces.TURN): its name, tags and metadata. call: its agent_calls id (its span is then always
         the same, call_span); answer_format is sent with it when Langfuse keeps the words alone (owns_words), for a
-        replay read back from there."""
+        replay read back from there. metadata: names and numbers of the call ({"charged": False, "run"} for one the
+        studio pays for), sent whatever langfuse_words says."""
         tokens, dollars = _usage(model or asked, usage)
         words = self.words()
         attributes = [_text("gen_ai.request.model", model or asked or ""),
@@ -283,6 +284,9 @@ class Sender:
             attributes.append(_text("langfuse.observation.metadata.asked", asked))
         if call is not None:
             attributes.append(_text("langfuse.observation.metadata.call", call))
+        for key, value in (metadata or {}).items():
+            if value not in (None, ""):
+                attributes.append(_text("langfuse.observation.metadata." + str(key), json.dumps(value) if isinstance(value, (bool, list, dict)) else value))
         span = self._build("generation", purpose, started, ended, attributes, run, session, user, turn, purpose, error, words,
                            span_id=call_span(call) if call is not None else None)
         self._append(self.waiting, span, call if words and call is not None else None)

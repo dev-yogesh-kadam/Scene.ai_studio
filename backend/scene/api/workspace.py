@@ -1311,6 +1311,9 @@ async def _planning(request, user, body, instruction, project):
         if opinions:
             return None
         opinions.append(True)
+        if await offload(guardrails.choice, state.db, "creative_auto_review") == "off":
+            noted("skip", "The automatic review is switched off (Guardrails)")
+            return None
         shot_plan = None
         if plan_path:
             try:
@@ -1805,9 +1808,11 @@ async def _planning(request, user, body, instruction, project):
         return json.dumps({"draft": draft["id"], "title": draft["title"], "waits_for": "an admin to publish it in the console"}, ensure_ascii=False)
 
     async def ask_opinion(about, item=None, purpose="second_opinion"):
-        """A second opinion on `about` (and the frames of library item `item`), charged to the user as a message to
-        that model is: the second_opinion tool's, and the studio's own on a big job (purpose agent.AUTO_OPINION).
-        Returns agent.second_opinion's answer; raises agent.AgentError."""
+        """A second opinion on `about` (and the frames of library item `item`). The second_opinion tool's is charged to
+        the user as a message to that model is; the studio's own (purpose agent.AUTO_OPINION) never is: its tokens are
+        written down with "charged": False and the run, and left out of the user's count. Returns
+        agent.second_opinion's answer; raises agent.AgentError."""
+        auto = purpose == agent.AUTO_OPINION
         pictures, labels = [], []
         row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ?", (item, user["id"])) \
             if isinstance(item, int) and item else None
@@ -1818,13 +1823,15 @@ async def _planning(request, user, body, instruction, project):
                     labels.append(label)
             except (review.ReviewError, media.MediaError):
                 pass
-        found = await state.agent.second_opinion(about, pictures, labels, **({"purpose": purpose} if purpose != "second_opinion" else {}),
-                                                 **_model(body))
+        found = await state.agent.second_opinion(about, pictures, labels, **({"purpose": purpose, "metadata": {"charged": False, "run": run or ""}}
+                                                                            if auto else {}), **_model(body))
+        if auto:   # the studio's own review: the studio pays
+            return found
         # Asked on the user's behalf in their turn: charged as a message to that model is, by its tokens.
         cost = await offload(state.credits.message_cost, found["model"], found["tokens"])
         if cost:
-            charged["credits"] += await offload(state.credits.charge_up_to, user["id"], cost, "agent", note="{} · second opinion{}".format(
-                found["model"], " (auto)" if purpose == agent.AUTO_OPINION else ""), project_id=project or None)
+            charged["credits"] += await offload(state.credits.charge_up_to, user["id"], cost, "agent", note="{} · second opinion".format(
+                found["model"]), project_id=project or None)
         agent.add_tokens(tokens, found["tokens"])
         return found
 

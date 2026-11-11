@@ -20,6 +20,8 @@ with no restart):
   stills first and the automatic second opinion (600). 0: a big job by its number of shots alone.
 - content_check_mode: what the content check (content_check.py) does with a plan it flags: off, warn (a note on the
   plan card; the default) or block (a "block" flag refuses the plan). One of CHOICES, not a number.
+- creative_auto_review: on (the default) or off: the automatic second opinion of a big job's plan and of a long run's
+  shot plan. The studio pays for it (never the user's credits); off saves that Claude usage.
 
 The quality gates at the end (continuity_gate, variety_gate, hook_gate, video_text_gate) are not limits: each is a
 hint the model gets once before the user sees the plan (quality_hints), never a block.
@@ -99,8 +101,8 @@ def known(key):
 
 # The settings that are one of a few words, not a number: {key: (the words it may be)}, the first listed in
 # CHOICE_DEFAULTS when an admin set nothing.
-CHOICES = {"content_check_mode": ("off", "warn", "block")}
-CHOICE_DEFAULTS = {"content_check_mode": "warn"}
+CHOICES = {"content_check_mode": ("off", "warn", "block"), "creative_auto_review": ("on", "off")}
+CHOICE_DEFAULTS = {"content_check_mode": "warn", "creative_auto_review": "on"}
 
 
 def choice(db, key):

@@ -34,6 +34,10 @@ const CHOICES: Record<string, { label: string; words: Record<string, string> }> 
       block: 'Block: refuse what it blocks, note the rest',
     },
   },
+  creative_auto_review: {
+    label: "Automatic review of big plans (a stronger model; the studio pays, not the user)",
+    words: { on: 'On', off: 'Off: save the Claude usage' },
+  },
 };
 
 /** What each limit is, in words; a limit the console does not know yet is shown by its name. */

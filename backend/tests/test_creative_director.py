@@ -83,7 +83,7 @@ def test_a_briefed_big_job_gets_the_studios_notes_once_and_keeps_its_concept(cli
     core.Core(client.app.state.db, me["id"], "", project).write("/brief", {"audience": "students", "platform": "Reels"})
     asked = []
 
-    async def opinion(about, pictures=(), labels=(), model=None, purpose="second_opinion"):
+    async def opinion(about, pictures=(), labels=(), model=None, purpose="second_opinion", **more):
         asked.append((about, purpose))
         return {"critique": "Open on the face, not the street.", "model": "claude/opus", "tokens": {}}
     monkeypatch.setattr(client.app.state.agent, "second_opinion", opinion)
@@ -250,7 +250,7 @@ def test_the_check_fails_open_and_is_off_when_switched_off(client, monkeypatch):
 def test_the_content_check_mode_is_a_choice_of_three_words(client):
     db = client.app.state.db
     shown = guardrails.shown(db)
-    assert shown["choices"] == {"content_check_mode": "warn"} and shown["options"]["content_check_mode"] == ["off", "warn", "block"]
+    assert shown["choices"] == {"content_check_mode": "warn", "creative_auto_review": "on"} and shown["options"]["content_check_mode"] == ["off", "warn", "block"]
     for wrong in ({"content_check_mode": "loud"}, {"nope": "warn"}):
         try:
             guardrails.save(db, {"choices": wrong})
@@ -407,7 +407,7 @@ def test_a_runs_shot_plan_is_reviewed_once_a_run(client, monkeypatch):
     project = in_a_run(client, monkeypatch, me, brief={"audience": "festival"})
     asked = []
 
-    async def opinion(about, pictures=(), labels=(), model=None, purpose="second_opinion"):
+    async def opinion(about, pictures=(), labels=(), model=None, purpose="second_opinion", **more):
         asked.append((about, purpose))
         return {"critique": "Open on the beam, not the sea.", "model": "claude/opus", "tokens": {}}
     monkeypatch.setattr(client.app.state.agent, "second_opinion", opinion)
@@ -420,3 +420,51 @@ def test_a_runs_shot_plan_is_reviewed_once_a_run(client, monkeypatch):
     hosted(monkeypatch, client, {"tool": "finish", "reply": "Next scene."})
     ask_run(client, project, "go on")
     assert len(asked) == 1   # never twice in one run
+
+
+# ---------------------------------------------------------------- the studio pays for its own review
+
+def test_the_automatic_review_is_never_charged_to_the_user_and_can_be_switched_off(client, monkeypatch):
+    me = register(client)
+    project = film(client)
+    core.Core(client.app.state.db, me["id"], "", project).write("/brief", {"audience": "students"})
+    used = {"prompt": 40_000, "cached": 0, "written": 0, "answer": 3_000}   # an Opus review that would cost credits
+    asked = []
+
+    async def opinion(about, pictures=(), labels=(), model=None, purpose="second_opinion", metadata=None):
+        asked.append((purpose, metadata))
+        return {"critique": "Tighter.", "model": "claude/opus", "tokens": used}
+    monkeypatch.setattr(client.app.state.agent, "second_opinion", opinion)
+    assert client.app.state.credits.message_cost("claude/opus", used) > 0
+    before = client.get("/api/auth/me").json()["credits"]
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "Five.", "steps": shots(5), "concept": "One idea."})
+    plan = client.post("/api/agent/plan", json={"instruction": "an ad for my cafe", "project_id": project}).json()
+    assert asked == [(agent.AUTO_OPINION, {"charged": False, "run": ""})]
+    assert client.get("/api/auth/me").json()["credits"] == before and plan["llm"]["credits"] == 0
+    # switched off in the console's Guardrails: no review at all
+    guardrails.save(client.app.state.db, {"choices": {"creative_auto_review": "off"}})
+    plan = client.post("/api/agent/plan", json={"instruction": "an ad for my cafe", "project_id": project}).json()
+    assert len(asked) == 1 and any("automatic review is switched off" in e["text"] for e in plan["activity"] if e["type"] == "activity")
+
+
+def test_the_second_opinion_tool_the_agent_asks_for_is_still_charged(client, monkeypatch):
+    register(client)
+    used = {"prompt": 40_000, "cached": 0, "written": 0, "answer": 3_000}
+
+    async def opinion(about, pictures=(), labels=(), model=None, **more):
+        assert not more   # no purpose, no metadata: the user's own call, as before
+        return {"critique": "Tighter.", "model": "claude/opus", "tokens": used}
+    monkeypatch.setattr(client.app.state.agent, "second_opinion", opinion)
+    hosted(monkeypatch, client, {"tool": "second_opinion", "text": "my plan"}, {"tool": "finish", "reply": "ok"})
+    plan = client.post("/api/agent/plan", json={"instruction": "what would a director say?"}).json()
+    assert plan["llm"]["credits"] == client.app.state.credits.message_cost("claude/opus", used) > 0
+
+
+def test_a_calls_metadata_reaches_langfuse_with_charged_false():
+    from scene import langfuse_trace
+    sender = langfuse_trace.Sender(None)
+    sender.add(agent.AUTO_OPINION, "claude/opus", "claude/opus", 1.0, 2.0, [{"role": "user", "content": "x"}], {"critique": "y"},
+               {"prompt": 10, "answer": 2}, metadata={"charged": False, "run": "s2v-1"})
+    attributes = {a["key"]: a["value"] for a in sender.waiting[-1]["attributes"]}
+    assert attributes["langfuse.observation.metadata.charged"] == {"stringValue": "false"}
+    assert attributes["langfuse.observation.metadata.run"] == {"stringValue": "s2v-1"}

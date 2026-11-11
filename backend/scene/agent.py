@@ -1136,19 +1136,22 @@ class Agent:
                 return "claude/" + str(name)
         return names[0]
 
-    async def chat(self, messages, answer_format, model=None, images=(), purpose="plan", thread=None, web=False):
+    async def chat(self, messages, answer_format, model=None, images=(), purpose="plan", thread=None, web=False, metadata=None):
         """_chat, written down (traces.py) as a call made for `purpose`: how long it took, what it cost, what it chose.
         thread: a conversation that goes on in one session of Claude's ({"id", "sent", "full"}, made by the caller, kept
         up to date by claude.py): only the messages after the first `sent` are sent to it. web: Claude may search the
-        web before it answers (claude.WEB_TOOLS)."""
+        web before it answers (claude.WEB_TOOLS). metadata: names and numbers written down with the call (Langfuse's
+        metadata: "charged": False for a call the studio pays for, "run")."""
+        meta = {"metadata": metadata} if metadata else {}
         started = time.time()
         try:
             answer = await self._chat(messages, answer_format, model, images, thread, **({"web": True} if web else {}))
         except Exception as error:
-            await offload(self._record, purpose, None, model, started, messages, answer_format, images, error=str(error) or type(error).__name__)
+            await offload(self._record, purpose, None, model, started, messages, answer_format, images, error=str(error) or type(error).__name__,
+                          **meta)
             raise
         await offload(self._record, purpose, answer.get("_model"), model, started, messages, answer_format, images, content=answer,
-                     usage=answer.get("_usage"), tool=answer.get("tool"))
+                     usage=answer.get("_usage"), tool=answer.get("tool"), **meta)
         return answer
 
     def _record(self, purpose, model, asked, started, messages, answer_format, images, **found):
@@ -1262,15 +1265,17 @@ class Agent:
         names = await self.models()
         return next((n for n in names if "opus" in n.lower()), None) or await self.pick_model(model)
 
-    async def second_opinion(self, about, pictures=(), labels=(), model=None, purpose="second_opinion"):
+    async def second_opinion(self, about, pictures=(), labels=(), model=None, purpose="second_opinion", metadata=None):
         """A short critique of a plan or a result by the strongest model there is (stronger()). about: what is to be
         judged, in words. pictures: JPEGs (base64) of the result, named by labels. Returns {"critique", "model", "tokens"};
-        the call is written down as `purpose`: "second_opinion", or AUTO_OPINION when the studio asked it itself."""
+        the call is written down as `purpose`: "second_opinion", or AUTO_OPINION when the studio asked it itself, with
+        `metadata` ({"charged": False, "run"} for the studio's own)."""
         named = "\n".join("Picture {}: {}".format(n, label) for n, label in enumerate(labels, start=1))
         message = "{}{}".format(about, "\n\nThe pictures, in order:\n" + named if named else "")
         answer = await self.chat([{"role": "system", "content": SECOND_OPINION}, {"role": "user", "content": message}],
                                  {"type": "object", "required": ["critique"], "properties": {"critique": {"type": "string"}}},
-                                 model=await self.stronger(model), images=list(pictures), purpose=purpose)
+                                 model=await self.stronger(model), images=list(pictures), purpose=purpose,
+                                 **({"metadata": metadata} if metadata else {}))
         critique = str(answer.get("critique") or "").strip()[:2000]
         if not critique:
             raise AgentError("The second opinion came back empty.")
