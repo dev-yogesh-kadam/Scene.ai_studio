@@ -943,9 +943,40 @@ given the user's message, the opening of the skills the assistant was told to fo
 - "clear": is the reply clear and plain for the user, saying what will be made or what is needed?
 - "steps": are the steps sensible for what was asked (the right kind of work, no missing or needless step)? 1 when the
   turn rightly made no steps (it asked a question or only talked).
+And each mark of the creative rubric below, from 1 to 5, in its own field.
 "why": one or two short sentences on the weakest part. Judge only what is shown.
 
 """ + CRAFT_VALUES
+
+RUBRIC_MARKS = ("idea", "hook", "craft", "fit", "prompt_quality", "honesty")   # docs/creative-rubric.md
+CREATIVE_RUBRIC = """The creative rubric (docs/creative-rubric.md), each mark from 1 to 5 (2 and 4 lie between):
+- "idea": 1 no idea, only a list of shots; 3 an idea is there but generic or blurred; 5 one clear concept, sayable in
+  one sentence, that every shot serves.
+- "hook": 1 it opens slowly (an empty wide, a logo, a title); 3 a decent opening a scroller might pass; 5 the first one
+  or two seconds stop the scroll (motion, a face close, a surprise, the product at its most striking). Judged for any
+  piece, strictest for social video.
+- "craft": 1 every shot the same size, moves without motive, no light named, continuity broken; 3 some variety and
+  continuity, light named here and there; 5 coverage that moves with the story, motivated camera, light and colour that
+  serve the mood, the same people and places written the same way.
+- "fit": 1 the wrong shape, length or language for the platform, the audience ignored; 3 the right shape, generic for
+  the audience; 5 shape, length, tone and language made for this audience on this platform.
+- "prompt_quality": 1 vague prompts; 3 concrete, but missing the camera, the light or the model's structure; 5
+  concrete, complete prompts in the model's own structure, asking nothing the model does badly.
+- "honesty": 1 promises what the models cannot do (readable words in a video, crowds, fine hand work) or invents
+  claims; 3 avoids the worst but says nothing of the limits; 5 says plainly what will not work and plans the better way,
+  inventing no facts.
+When the turn rightly asked a question instead of planning (a brief, directions for an open brief), judge the question:
+"idea" and "fit" by whether its options lead to a strong, well-aimed piece, the rest 3."""
+
+def rubric_marks(answer):
+    """The creative rubric's marks in a judge's answer: {mark: a whole number 1 to 5}, of RUBRIC_MARKS, each it gave."""
+    found = {}
+    for key in RUBRIC_MARKS:
+        value = (answer or {}).get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            found[key] = int(min(5, max(1, round(value))))
+    return found
+
 
 PREFLIGHT_CHARS = 40_000   # how much of a skill the check reads: the inputs and the rules come first in a skill
 
@@ -1399,25 +1430,28 @@ class Agent:
                 "message": str(answer.get("message") or "").strip()[:1500]}
 
     async def grade(self, instruction, skills, reply, steps, question=None, model=None):
-        """How a turn did, by the fast model: {"score" (0 to 1, the mean of its three marks), "why", "marks"}. skills:
-        the skills the turn followed, as skills.load() gives them. For Langfuse (the score "claude-grade"); never charged."""
+        """How a turn did, by the fast model: {"score" (0 to 1, the mean of its three marks), "why", "marks", "rubric"}.
+        "rubric" is the creative rubric's marks, {mark: 1 to 5} of RUBRIC_MARKS (those the model gave). skills: the
+        skills the turn followed, as skills.load() gives them. For Langfuse (the scores "claude-grade" and
+        "creative-<mark>"); never charged."""
         planned = "\n".join("- {} ({}): {}".format(s.get("name") or "step", s.get("workflow_title") or "", " ".join(str(s.get("prompt") or "").split())[:300])
                             for s in steps or []) or "(none)"
         guides = "\n\n".join("{}:\n{}".format(s["title"], s["text"][:GRADE_CHARS]) for s in skills or []) or "(none)"
         message = "The user's message:\n{}\n\nThe skills:\n{}\n\nThe reply:\n{}\n\nThe steps:\n{}{}".format(
             instruction, guides, reply or "(empty)", planned, "\n\nThe question it asked:\n{}".format(question) if question else "")
         mark = {"type": "number", "minimum": 0, "maximum": 1}
-        shape = {"type": "object", "required": ["skill", "clear", "steps", "why"],
-                 "properties": {"skill": mark, "clear": mark, "steps": mark, "why": {"type": "string"}}}
-        answer = await self.chat([{"role": "system", "content": GRADE}, {"role": "user", "content": message}], shape,
-                                 purpose="grade", **({"model": self.helper(model)} if self.helper(model) else {}))
+        five = {"type": "integer", "minimum": 1, "maximum": 5}
+        shape = {"type": "object", "required": ["skill", "clear", "steps", *RUBRIC_MARKS, "why"],
+                 "properties": {"skill": mark, "clear": mark, "steps": mark, **{k: five for k in RUBRIC_MARKS}, "why": {"type": "string"}}}
+        answer = await self.chat([{"role": "system", "content": GRADE + "\n\n" + CREATIVE_RUBRIC}, {"role": "user", "content": message}],
+                                 shape, purpose="grade", **({"model": self.helper(model)} if self.helper(model) else {}))
         marks = {}
         for key in ("skill", "clear", "steps"):
             try:
                 marks[key] = min(1.0, max(0.0, float(answer.get(key))))
             except (TypeError, ValueError):
                 raise AgentError("The grading model gave no mark for {}.".format(key))
-        return {"score": round(sum(marks.values()) / 3, 3), "marks": marks,
+        return {"score": round(sum(marks.values()) / 3, 3), "marks": marks, "rubric": rubric_marks(answer),
                 "why": "{} (skill {skill}, clear {clear}, steps {steps})".format(" ".join(str(answer.get("why") or "").split())[:600], **marks)}
 
     async def compact(self, turns, direction="", model=None):
@@ -1955,6 +1989,10 @@ AUTO_OPINION = "second_opinion (auto)"   # the purpose a second opinion the stud
 # The words of work that is usually a big job before any plan says so: an ad, a campaign, a film, a music video...
 BIG_WORDS = re.compile(r"\b(ads?|advert\w*|commercials?|campaigns?|promos?|brand (film|video|story)|music video|trailers?|"
                        r"short films?|films?|movies?|episodes?|series|reels?|explainers?|launch|teasers?)\b", re.IGNORECASE)
+# ...in Hindi and Spanish too (no \b: Devanagari's vowel signs are not word letters to the regex)
+BIG_WORDS_OTHER = re.compile(r"विज्ञापन|रील|फ़िल्म|फिल्म|टीज़र|टीजर|प्रोमो|म्यूज़िक वीडियो|"
+                             r"\b(anuncios?|comerciales?|campañas?|películas?|cortometrajes?|lanzamientos?|video musical|"
+                             r"promoción|tráiler)\b", re.IGNORECASE)
 
 
 def looks_big(instruction, history=()):
@@ -1965,7 +2003,7 @@ def looks_big(instruction, history=()):
     last = history[-1] if isinstance(history, list) and history and isinstance(history[-1], dict) else {}
     if len(said) < 60 and last.get("instruction"):
         said += "\n" + str(last["instruction"])
-    return big_job([], said) or bool(BIG_WORDS.search(said))
+    return big_job([], said) or bool(BIG_WORDS.search(said)) or bool(BIG_WORDS_OTHER.search(said))
 
 
 def generated(steps):

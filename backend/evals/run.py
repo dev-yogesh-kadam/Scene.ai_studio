@@ -29,8 +29,11 @@ USER = {"name": "Eval", "email": "eval@example.com", "password": "correct horse 
 LANGS = ("en", "hi", "es")
 # What a case may say must be true (expect); the checks read only these keys, and a key they do not know is an error.
 CHECKS = ("steps", "kinds", "workflows", "names", "priced", "question", "questions", "reply_has", "reply_lacks", "reply_is",
-          "told", "not_told", "framed", "not_in_steps", "over_budget", "asked", "sound", "schema", "status", "error_has")
-REPLAY_ONLY = ("asked", "framed", "told", "not_told", "schema", "reply_is")   # they read what the model was given or answered
+          "told", "not_told", "framed", "not_in_steps", "over_budget", "asked", "sound", "schema", "status", "error_has",
+          "brief_asked", "concept", "examples", "creative")
+REPLAY_ONLY = ("asked", "framed", "told", "not_told", "schema", "reply_is", "examples")   # they read what the model was given or answered
+# ...and the opposite: the creative judge (evals/creative.py) marks a plan Claude made; a replayed plan is the case's own
+LIVE_ONLY = ("creative",)
 
 
 class CaseError(ValueError):
@@ -134,8 +137,9 @@ def make_items(client, user_id, items):
     return ids
 
 
-def run_case(case, folder, live=False):
-    """Run one case on a fresh studio. Returns {"id", "ok", "checks": [(name, ok, said)], "plan", "seconds"}."""
+def run_case(case, folder, live=False, keep_plan=False):
+    """Run one case on a fresh studio. Returns {"id", "ok", "checks": [(name, ok, said)], "plan", "seconds"}, and with
+    keep_plan the whole plan the studio answered too ("full": what evals.calibrate shows and has judged)."""
     import pytest
     from scene import web
     from scene.api import workspace
@@ -171,16 +175,18 @@ def run_case(case, folder, live=False):
             ask["project_id"] = project
         answered = client.post("/api/agent/plan", json=ask)
         plan = answered.json() if answered.headers.get("content-type", "").startswith("application/json") else {}
-        context = {"client": client, "user": me, "played": played, "status": answered.status_code, "plan": plan, "live": live}
+        context = {"client": client, "user": me, "played": played, "status": answered.status_code, "plan": plan, "live": live,
+                   "case": case}
         checks = check(case.get("expect") or {}, context)
     return {"id": case["id"], "lang": case["lang"], "tags": case.get("tags") or [], "ok": all(ok for _, ok, _ in checks),
             "checks": checks, "plan": _short(plan), "status": context["status"], "seconds": round(time.time() - started, 2),
-            "asked": len(played.answers), "other_calls": played.other}
+            "asked": len(played.answers), "other_calls": played.other, **({"judged": context["judged"]} if context.get("judged") else {}),
+            **({"full": plan} if keep_plan else {})}
 
 
 def _short(plan):
     return {"reply": (plan.get("reply") or "")[:400], "total": plan.get("total"), "balance": plan.get("balance"),
-            "question": plan.get("question"), "steps": [{"name": s.get("name"), "kind": s.get("kind"), "credits": s.get("credits"),
+            "question": plan.get("question"), "questions": plan.get("questions") or [], "concept": plan.get("concept") or "", "steps": [{"name": s.get("name"), "kind": s.get("kind"), "credits": s.get("credits"),
                                                          "workflow": (s.get("settings") or {}).get("workflow")}
                                                         for s in plan.get("steps") or []]}
 
@@ -203,7 +209,7 @@ def check(expect, c):
                 said("error_has", str(expect["error_has"]).lower() in str(plan.get("detail") or "").lower(), plan.get("detail"))
             return out
     for name in expect:
-        if name in ("status", "error_has") or (c["live"] and name in REPLAY_ONLY):
+        if name in ("status", "error_has") or (c["live"] and name in REPLAY_ONLY) or (not c["live"] and name in LIVE_ONLY):
             continue
         want = expect[name]
         if name == "steps":
@@ -266,7 +272,32 @@ def check(expect, c):
         elif name == "schema":
             problems = [p for a in c["played"].answers if "tool" not in a for p in schema_problems(a)]
             said(name, (not problems) == bool(want), problems[:3])
+        elif name == "brief_asked":   # a big job's brief card: questions (or one question) and no steps yet
+            asked = bool(plan.get("questions") or (plan.get("question") or {}).get("text")) and not steps
+            said(name, asked == bool(want), "{} questions, {} steps".format(len(plan.get("questions") or []), len(steps)))
+        elif name == "concept":
+            got = str(plan.get("concept") or "")
+            said(name, bool(got) == bool(want), "concept {!r}".format(got[:120]))
+        elif name == "examples":   # the craft note and the gold examples a big job's message carries
+            from scene import craft_library
+            given = json.dumps(c["played"].given, ensure_ascii=False)
+            found = craft_library.EXAMPLES_HEAD.strip() in given and "Craft note that fits this job" in given
+            said(name, found == bool(want), "examples {}given".format("" if found else "not "))
+        elif name == "creative":
+            said(name, *_judged(c, want))
     return out
+
+
+def _judged(c, want):
+    """The creative judge's marks of a live plan against the thresholds (evals/creative.py)."""
+    from evals import creative
+    try:
+        found = c["client"].portal.call(creative.judge, c["client"].app.state.agent, c["case"], c["plan"])
+    except Exception as error:   # no judge, no pass: a case is not passed on a mark nobody gave
+        return False, "the judge could not mark it: {}".format(error)
+    c["judged"] = found
+    low = creative.below(found["marks"], want)
+    return not low, "{} ({})".format(", ".join("{} {} < {}".format(m, g, t) for m, g, t in low), found["why"][:200])
 
 
 def _many(value):

@@ -2105,9 +2105,14 @@ def _grading(state):
 
 async def _grade(state, instruction, picked, reply, steps, question, model):
     """The fast model's grade of one turn (did it follow its skill, is the reply clear, are the steps sensible), sent to
-    Langfuse as the score "claude-grade" on the turn's trace. The call is written down as a "grade" like any other."""
+    Langfuse as the score "claude-grade" on the turn's trace, and the creative rubric's marks beside it as
+    "creative-idea", "creative-hook" ... (1 to 5, docs/creative-rubric.md). The call is written down as a "grade" like
+    any other; it is never charged to the user."""
     found = await state.agent.grade(instruction, picked, reply, steps, question, model)
-    state.traces.langfuse.score(traces.RUN.get(), "claude-grade", found["score"], found["why"])
+    run = traces.RUN.get()
+    state.traces.langfuse.score(run, "claude-grade", found["score"], found["why"])
+    for mark, value in (found.get("rubric") or {}).items():
+        state.traces.langfuse.score(run, "creative-" + mark.replace("_", "-"), value)
 
 
 def _referenced(proposed, shared):
