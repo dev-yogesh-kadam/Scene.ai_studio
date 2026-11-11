@@ -21,7 +21,8 @@ MANY = 2000             # leaves written by one write_many
 SKILL = "/skill"        # the long skill the run follows, kept from the message that named it: set by the studio only
 ATTACHED = "/attached"  # the library ids of every file attached in the run, so later messages still have them: the studio's
 THREADS = "/claude"     # the Claude session of the run's conversation, one for each project and model: the studio's
-PROTECTED = (SKILL, ATTACHED, THREADS)
+MARKS = "/studio"       # what the studio did once in a run (the creative process: the brief asked, the review given): the studio's
+PROTECTED = (SKILL, ATTACHED, THREADS, MARKS)
 MOST_ATTACHED = 64
 
 
@@ -201,6 +202,17 @@ def keep_attached(db, user_id, run, ids):
     more = [i for i in ids if isinstance(i, int) and i not in kept]
     if more:
         write(db, user_id, run, ATTACHED, (kept + more)[-MOST_ATTACHED:], "studio", trusted=True)
+
+
+def marked(db, user_id, run, name):
+    """What the studio marked once in this run under `name` (mark), or None."""
+    found = read(db, user_id, run, "{}/{}".format(MARKS, name))
+    return None if found.get("missing") else found.get("value")
+
+
+def mark(db, user_id, run, name, value=True):
+    """Mark that the studio did something once in this run (the creative process's brief, concept, review)."""
+    write(db, user_id, run, "{}/{}".format(MARKS, name), value, "studio", trusted=True)
 
 
 def keep_skill(db, user_id, run, skill_id):

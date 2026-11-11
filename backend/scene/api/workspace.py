@@ -1203,9 +1203,11 @@ async def _planning(request, user, body, instruction, project):
         """The creative process's hints for a plan whose steps can all run (docs/creative-director.md), each given once
         a message, never a block. A big job (agent.big_job) with no brief is sent back to ask one first. Then, once, the
         studio's notes in one hint: the concept a big job lacks, its stills first, the quality gates of any plan
-        (guardrails.quality_hints), and a senior creative director's review (the automatic second opinion). None while
-        a long skill runs: the skill is the process, with its own questions and stages."""
-        if not built or long_skill:
+        (guardrails.quality_hints), and a senior creative director's review (the automatic second opinion). A long
+        skill's run goes through in_run: the skill keeps its own stages and questions, and the process fits into them."""
+        if long_skill:
+            return await in_run(answer, built)
+        if not built:
             return None
         big = agent.big_job(built, instruction, body.get("history"), big_limit)
         if big and "brief" not in hinted:
@@ -1237,21 +1239,99 @@ async def _planning(request, user, body, instruction, project):
             ", ".join(n.split(":")[0].split(".")[0][:40] for n in notes)))
         return agent.CREATIVE_NOTES.format(notes="\n".join("- " + n for n in notes))
 
-    async def auto_opinion(answer):
-        """The second opinion the studio asks for itself on a big job, at most once a message: the same call as the
-        tool's, written down as agent.AUTO_OPINION and in the session's story. None when it could not be had."""
+    async def run_marked(name):
+        """What the studio marked once in this run (runs.marked), or, in a conversation that keeps no run, this message."""
+        if run:
+            try:
+                return await offload(runs.marked, state.db, user["id"], run, name)
+            except runs.RunError:
+                return None
+        return True if name in hinted else None
+
+    async def mark_run(name, value=True):
+        hinted.add(name)
+        if run:
+            try:
+                await offload(runs.mark, state.db, user["id"], run, name, value)
+            except runs.RunError:
+                pass
+
+    async def in_run(answer, built):
+        """The creative process inside a long skill's run, fitted to the skill's own stages, each hint once a run:
+        - the brief: while /brief is empty, the skill's setup card asks the brief's fields too (folded into that card,
+          never a second one), and once the user answered, the answers go to /brief;
+        - the concept: asked before the shot plan is first written (state_write), and before a plan of shots is offered;
+        - the review: the automatic second opinion of the skill's shot plan, once the run has one (once a run);
+        - stills first only for a big job whose skills make no anchors or key stills themselves;
+        - and the quality gates, as outside a run. The notes go as one hint, once a message."""
+        asked = agent.clean_questions(answer.get("questions")) or [q for q in [agent.clean_question(answer.get("question"))] if q]
+        briefed = await kept("/brief") is not None
+        if not briefed and asked:
+            missing = agent.brief_missing(asked)
+            if len(missing) <= 1:
+                await mark_run("brief_asked")
+            elif not await run_marked("brief_folded"):
+                await mark_run("brief_folded")
+                noted("question", "The run has no brief yet, so the model was asked to fold its fields into the setup card")
+                return agent.BRIEF_IN_SETUP.format(missing=", ".join(missing), most=agent.MAX_QUESTIONS)
+            else:
+                await mark_run("brief_asked")   # it kept its card as it was: the user answers what it asks
+        elif not briefed and await run_marked("brief_asked") and not await run_marked("brief_saved"):
+            await mark_run("brief_saved")
+            noted("book", "The setup card was answered and /brief is empty, so the model was asked to save the brief")
+            return agent.BRIEF_SAVE
+        if "notes" in hinted:
+            return None
+        notes = []
+        shots = [s for s in agent.generated(built) if s.get("kind") == "video"]   # the shots, not a skill's sheets
+        if shots and await kept("/concept") is None and not await run_marked("concept"):
+            await mark_run("concept")
+            notes.append(agent.CONCEPT_MISSING)
+        if built and agent.big_job(built, instruction, body.get("history"), big_limit) and not agent.makes_stills(picked) \
+                and agent.stills_wanted(built, book, instruction, body.get("history")):
+            notes.append(agent.STILLS_FIRST)
+        notes += guardrails.quality_hints(answer.get("steps"), instruction, book)
+        plan_path = await run_marked("shot_plan")
+        if plan_path and not await run_marked("auto_opinion"):
+            critique = await auto_opinion(answer, plan_path)
+            if critique:
+                notes.append(agent.OPINION_HINT.format(critique=critique))
+        if not notes:
+            return None
+        hinted.add("notes")
+        noted("retry", "The studio gave the model its notes on the run's plan, once: {}".format(
+            ", ".join(n.split(":")[0].split(".")[0][:40] for n in notes)))
+        return agent.CREATIVE_NOTES.format(notes="\n".join("- " + n for n in notes))
+
+    async def auto_opinion(answer, plan_path=None):
+        """The second opinion the studio asks for itself, at most once a message: on a big job's plan, or (plan_path) on
+        a long skill's shot plan, once a run (marked "auto_opinion" with its model, so it never runs twice). The same
+        call as the tool's, written down as agent.AUTO_OPINION, with the run, and in the session's story. None when it
+        could not be had."""
         if opinions:
             return None
         opinions.append(True)
-        about = agent.plan_outline(answer.get("steps"), agent.clean_concept(answer.get("concept")), await kept("/brief"))
+        shot_plan = None
+        if plan_path:
+            try:
+                found = await offload(shared.read, plan_path)
+                shot_plan = {leaf["path"]: leaf["value"] for leaf in found["leaves"]} if found.get("folder") else found.get("value")
+            except runs.RunError:
+                shot_plan = None
+        about = agent.plan_outline(answer.get("steps"), agent.clean_concept(answer.get("concept")) or await kept("/concept") or "",
+                                   await kept("/brief"), shot_plan)
         try:
             found = await ask_opinion(about, None, agent.AUTO_OPINION)
         except agent.AgentError as error:
             noted("skip", "No automatic second opinion this time: {}".format(str(error)[:120]))
             return None
-        noted("bulb", "A senior creative director ({}) reviewed the plan".format(str(found["model"] or "a stronger model").split("/")[-1]))
+        if plan_path:
+            await mark_run("auto_opinion", {"model": found["model"], "at": time.time()})
+        noted("bulb", "A senior creative director ({}) reviewed the {}".format(str(found["model"] or "a stronger model").split("/")[-1],
+                                                                               "run's shot plan" if plan_path else "plan"))
         if threaded and threaded[0].get("record"):
-            await offload(threaded[0]["record"], "note", "Second opinion (auto): " + found["critique"], {"model": found["model"], "auto": True})
+            await offload(threaded[0]["record"], "note", "Second opinion (auto): " + found["critique"],
+                          {"model": found["model"], "auto": True, "run": run or None})
         return found["critique"]
 
     def no_run():
@@ -1286,6 +1366,14 @@ async def _planning(request, user, body, instruction, project):
         path = str(call.get("path") or "")
         if not shared.keeps_state and not path.startswith(core.CATALOGUE):
             return no_run()
+        bare = (path[:-2] if path.endswith("/*") else path).strip().lower()
+        plan_path = bare if agent.SHOT_PLAN.match(bare) and runs.PATH.match(bare) else None
+        if plan_path and long_skill and not await run_marked("shot_plan"):
+            # A skill's first shot plan: the concept comes first (sent back once a run), and the run now has a plan to review
+            if await kept("/concept") is None and not await run_marked("concept_first"):
+                await mark_run("concept_first")
+                noted("retry", "The shot plan came before the concept, so the model was asked to write /concept first")
+                return agent.CONCEPT_FIRST.format(path=plan_path)
         try:
             if path.endswith("/*"):   # every leaf of a folder at once
                 written = await offload(shared.write_many, path[:-2], value_of(call), "agent")
@@ -1295,6 +1383,8 @@ async def _planning(request, user, body, instruction, project):
         except (runs.RunError, ValueError) as error:
             return "Not written: {}".format(error)
         noted("book", "Wrote {} of the {}".format(written["path"], written.get("scope") or "run"))
+        if plan_path and long_skill and not await run_marked("shot_plan"):
+            await mark_run("shot_plan", "/" + plan_path.split("/")[1])   # its folder: the whole plan is reviewed
         return "Written: {}".format(written["path"])
 
     async def craft_search(call):

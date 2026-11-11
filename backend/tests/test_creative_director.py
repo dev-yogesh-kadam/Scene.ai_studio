@@ -333,3 +333,90 @@ def test_the_quality_gates_are_one_hint_once_and_never_a_block(client, monkeypat
     notes = told(seen)[-1]
     assert "every shot is WS" in notes and "first one or two seconds" in notes
     assert len(seen) == 2 and len(plan["steps"]) == 3   # the same plan again: the model decided to keep it
+
+
+# ---------------------------------------------------------------- the creative process inside a long skill's run
+
+def in_a_run(client, monkeypatch, me, brief=None):
+    """A script-to-video run in a project, its skill ready (no check), something of it saved already (no reminder)."""
+    import asyncio
+    project = film(client)
+    memory = core.Core(client.app.state.db, me["id"], "s2v-1", project)
+    memory.write("/s2v/input/kind", "idea")
+    if brief:
+        memory.write("/brief", brief)
+    monkeypatch.setattr(client.app.state.agent, "preflight", lambda *a, **k: asyncio.sleep(0, {
+        "ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}))
+    return project
+
+
+def ask_run(client, project, said="/script-to-video a short film about a lighthouse keeper"):
+    return client.post("/api/agent/plan", json={"instruction": said, "project_id": project, "run": "s2v-1"}).json()
+
+
+START = {"text": "What are you starting from?", "options": ["Idea", "Brief", "Script"], "default": "Idea", "details": []}
+SETUP = [START, {"text": "Who is it for, and where will it run?", "options": ["Festival 16:9", "Reels 9:16"], "default": "Festival 16:9",
+                 "details": []},
+         {"text": "What tone?", "options": ["Quiet and warm", "Tense"], "default": "Quiet and warm", "details": []},
+         {"text": "A reference or a must-have?", "options": ["The lighthouse's beam", "Nothing"], "default": "Nothing", "details": []}]
+
+
+def test_a_run_with_no_brief_folds_the_brief_into_its_setup_card(client, monkeypatch):
+    from scene import runs
+    me = register(client)
+    project = in_a_run(client, monkeypatch, me)
+    seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "First:", "questions": [START]},
+                  {"tool": "finish", "reply": "First:", "questions": SETUP})
+    plan = ask_run(client, project)
+    assert any(t.startswith("This run has no brief yet (/brief is empty).") and "audience" in t and "one card" in t for t in told(seen))
+    assert len(seen) == 2 and [q["text"] for q in plan["questions"]] == [q["text"] for q in SETUP]   # one card, four at most
+    assert runs.marked(client.app.state.db, me["id"], "s2v-1", "brief_asked") is True
+    # the user answers the card; a turn that does not save the brief is told to, once
+    seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "On to the story."})
+    ask_run(client, project, "Idea, festival 16:9, quiet and warm, the beam")
+    assert any(t.startswith("The user answered the setup card, and /brief is still empty") for t in told(seen))
+
+
+def test_a_run_with_a_brief_is_not_asked_again(client, monkeypatch):
+    me = register(client)
+    project = in_a_run(client, monkeypatch, me, brief={"audience": "festival", "platform": "cinema", "tone": "quiet"})
+    seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "First:", "questions": [START]})
+    plan = ask_run(client, project)
+    assert len(seen) == 1 and [q["text"] for q in plan["questions"]] == [START["text"]]
+    assert not any("brief" in t.lower() for t in told(seen)[1:])
+
+
+def test_a_runs_concept_comes_before_its_shot_plan_once(client, monkeypatch):
+    from scene import runs
+    me = register(client)
+    project = in_a_run(client, monkeypatch, me, brief={"audience": "festival"})
+
+    async def opinion(*args, **kwargs):
+        raise agent.AgentError("not now")
+    monkeypatch.setattr(client.app.state.agent, "second_opinion", opinion)
+    episode = {"tool": "state_write", "path": "/director/episode", "value": {"story": "A keeper and his last night."}}
+    seen = hosted(monkeypatch, client, episode, episode, {"tool": "finish", "reply": "The episode is planned."})
+    ask_run(client, project)
+    results = [t for t in told(seen) if t.startswith("Result of state_write:")]
+    assert "write the concept to /concept" in results[0] and results[1].endswith("Written: /director/episode")   # once
+    assert runs.marked(client.app.state.db, me["id"], "s2v-1", "shot_plan") == "/director"
+
+
+def test_a_runs_shot_plan_is_reviewed_once_a_run(client, monkeypatch):
+    me = register(client)
+    project = in_a_run(client, monkeypatch, me, brief={"audience": "festival"})
+    asked = []
+
+    async def opinion(about, pictures=(), labels=(), model=None, purpose="second_opinion"):
+        asked.append((about, purpose))
+        return {"critique": "Open on the beam, not the sea.", "model": "claude/opus", "tokens": {}}
+    monkeypatch.setattr(client.app.state.agent, "second_opinion", opinion)
+    seen = hosted(monkeypatch, client, {"tool": "state_write", "path": "/concept", "value": "One last night of light."},
+                  {"tool": "state_write", "path": "/director/scenes/1", "value": {"shots": ["the beam sweeps the rocks"]}},
+                  {"tool": "finish", "reply": "The shot plan is ready."}, {"tool": "finish", "reply": "Revised."})
+    ask_run(client, project)
+    assert len(asked) == 1 and asked[0][1] == agent.AUTO_OPINION and "the beam sweeps the rocks" in asked[0][0]
+    assert any("A senior creative director reviewed your plan: Open on the beam" in t for t in told(seen))
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "Next scene."})
+    ask_run(client, project, "go on")
+    assert len(asked) == 1   # never twice in one run

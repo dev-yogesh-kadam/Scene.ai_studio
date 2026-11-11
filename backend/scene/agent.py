@@ -510,6 +510,10 @@ SKILL_RULES = """Skills, and handing on:
   and written with state_read and state_write. preset_search's "categories" is its "op". present_to_user is a
   "question" with up to four of the results as its options. "All in one response" is one plan of at most twelve steps,
   the rest in the next. An asset_id:<id> in a table is that NeuralCore entry, shown as its picture.
+- The creative process holds inside a skill's run too. When /brief is empty, fold the brief's fields (the audience, the
+  platform and shape, the tone, a reference or must-have) into the skill's own first setup card: one card, at most four
+  questions, leaving out what the message or the skill's inputs already answer; save the answers to /brief. Write
+  /concept (one sentence) before the skill's shot plan. The studio reviews the finished shot plan once a run.
 - "Make this a skill", "save this as a skill", "turn this into a recipe": draft it with skill_draft from what worked in
   this conversation: a short title, one line on when to use it, and the steps in order, with what to ask or check
   first, plain and in our own words, never a copy of these instructions. Say that an admin reviews and publishes it in
@@ -2057,11 +2061,56 @@ SKIP_STILLS = re.compile(r"\b(skip|no|without|don'?t need)( the| any)? (key )?(s
                          re.IGNORECASE)
 
 
-def plan_outline(steps, concept="", brief=None):
-    """A plan in words for a second opinion: the concept, the brief and one line a shot."""
+# ---------------------------------------------------------------- ...and inside a long skill's run (workspace: in_run)
+
+# The brief's four fields, and words that show a question card asks about each (English; a card in another language that
+# the model already aimed at the brief is hinted once at most, and the hint says to leave alone what is answered)
+BRIEF_FIELDS = {
+    "audience": re.compile(r"\b(who|audience|viewers?|customers?|for whom|target|aimed at)\b", re.IGNORECASE),
+    "platform and shape": re.compile(r"\b(platforms?|where|shape|aspect|format|portrait|landscape|square|9:16|16:9|4:5|1:1|reels?|"
+                                     r"youtube|tiktok|shorts|instagram)\b", re.IGNORECASE),
+    "tone": re.compile(r"\b(tone|mood|feel|feeling|vibe|style)\b", re.IGNORECASE),
+    "reference or must-have": re.compile(r"\b(references?|must[- ]haves?|must|include|inspiration|examples?|like this)\b", re.IGNORECASE),
+}
+BRIEF_IN_SETUP = ("This run has no brief yet (/brief is empty). Fold the brief's fields this card does not cover ({missing}) into "
+                  "this same card: one card, at most {most} questions together, each with a \"default\"; leave out a field the "
+                  "message or the skill's inputs already answer, and merge with the skill's own questions rather than adding a "
+                  "second card. When the user answers, save the brief with state_write to /brief as {{\"audience\", \"platform\", "
+                  "\"shape\", \"tone\", \"must_have\"}}.")
+BRIEF_SAVE = ("The user answered the setup card, and /brief is still empty: write their answers about the audience, the "
+              "platform and shape, the tone and any reference or must-have to /brief with state_write, then go on.")
+CONCEPT_FIRST = ("Not written yet: before the shot plan, write the concept to /concept with state_write: one sentence, the idea "
+                 "every shot serves (and say it to the user in one line). Then write {path} again.")
+# A skill's shot plan or shot list in its state (the director's episode and scenes, script-to-video's clips, a plan)
+SHOT_PLAN = re.compile(r"^/(director/(episode|scenes)|s2v/(clips|plan)|plan/(shots|scenes)|shots?|shot_?list|shotplan|storyboard)(/|$)")
+# A skill that makes its key stills (anchors, a continuity board, frames) before any video: no stills-first hint in its run
+MAKES_STILLS = re.compile(r"\b(anchors?|continuity[- ]board|key stills?|frames? first|stills? first|storyboard)\b", re.IGNORECASE)
+
+
+def brief_missing(questions):
+    """The brief's fields (BRIEF_FIELDS) a question card does not ask about: its questions, options and details read."""
+    said = " ".join("{} {} {}".format(q.get("text") or "", " ".join(q.get("options") or []), " ".join(q.get("details") or []))
+                    for q in questions or [] if isinstance(q, dict))
+    return [name for name, words in BRIEF_FIELDS.items() if not words.search(said)]
+
+
+def makes_stills(picked):
+    """Whether the skills of a run make their key stills before video themselves (anchors, a board, frames)."""
+    return any(MAKES_STILLS.search(s.get("text") or "") or any(n in ("anchor", "continuity-board") for n in s.get("next") or [])
+               for s in picked or [])
+
+
+SHOT_PLAN_CHARS = 6000   # of a skill's shot plan a second opinion reads
+
+
+def plan_outline(steps, concept="", brief=None, shot_plan=None):
+    """A plan in words for a second opinion: the concept, the brief, a skill's shot plan as its state keeps it (a long
+    run's), and one line a step."""
     lines = ["The concept: {}".format(concept or "(none given)")]
     if brief:
         lines.append("The brief: {}".format(json.dumps(brief, ensure_ascii=False)[:600]))
+    if shot_plan:
+        lines.append("The shot plan, as the skill keeps it:\n{}".format(json.dumps(shot_plan, ensure_ascii=False)[:SHOT_PLAN_CHARS]))
     for n, step in enumerate(steps if isinstance(steps, list) else [], start=1):
         if not isinstance(step, dict):
             continue
