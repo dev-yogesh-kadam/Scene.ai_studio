@@ -135,7 +135,7 @@ test('Roles: a new role made with what it may see, then deleted', async ({ page 
 
 test('Servers: a form opens to add one, and Cancel leaves it', async ({ page }) => {
   await open(page, 'endpoints');
-  await main(page).getByRole('button', { name: 'Add' }).first().click();
+  await main(page).getByRole('button', { name: 'Add' }).nth(1).click(); // the first is Claude's
   await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeVisible();
   await main(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeHidden();
@@ -143,7 +143,7 @@ test('Servers: a form opens to add one, and Cancel leaves it', async ({ page }) 
 
 test('Servers: the Claude connection card, and the bridge refused without its key', async ({ page }) => {
   await open(page, 'endpoints');
-  const claude = card(page, 'Claude connection');
+  const claude = card(page, 'Anthropic API key'); // the way in use names the card
   // the test studio has no `claude` and no key: it says so, and nothing reaches Anthropic or LUFI
   await expect(claude.getByTestId('claude-status')).toContainText('Not working');
   await expect(claude.getByLabel('Anthropic API key')).toHaveValue('');

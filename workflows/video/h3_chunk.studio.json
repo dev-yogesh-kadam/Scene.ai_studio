@@ -1,7 +1,7 @@
 {
   "title": "H3 Chunk",
   "description": "One 4-15 s MiniMax H3 clip of a scene: the anchor keeps the place and positions, up to 5 character sheets and 2 props keep the faces.",
-  "pick_when": "A clip of a scene built from the place's sheet, up to 5 character sheets and 2 props, so faces and positions hold across clips (the script-to-video skills use it). Not for a single shot from one picture: there H3 All-in-One holds the place and the people better.",
+  "pick_when": "The second MiniMax H3 option, not the default (that is H3 All In One): a clip of a scene built from the place's sheet, up to 5 character sheets and 2 props, so faces and positions hold across clips (the script-to-video skills use it). Not for a single shot made on its own: there H3 All In One holds the place and the people better.",
   "output_name": "16.filename_prefix",
   "labels": {
     "205:image": "Background / location: the scene anchor (<Picture 1>)",

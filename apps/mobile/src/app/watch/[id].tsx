@@ -263,7 +263,7 @@ function Player({ item, onEnded }: { item: LibraryItem; onEnded?: () => void }) 
   }
   return (
     <>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls fullscreenOptions={{ enable: true }} />
+      <VideoView player={player} style={styles.video} contentFit="contain" nativeControls fullscreenOptions={{ enable: true }} />
       {status === 'loading' ? <ActivityIndicator color={colors.textSecondary} style={StyleSheet.absoluteFill} /> : null}
       {status === 'error' ? (
         <View style={styles.errorBox}>
@@ -417,8 +417,14 @@ function Details({ item, open, onClose }: { item: LibraryItem; open: boolean; on
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#000' },
-  stage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  // Nothing in the player may be wider than the screen: a wider video makes the browser zoom the whole page out.
+  page: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
+  // The stage fills the screen (alignSelf: a centred parent would shrink it to its content, and a video placed over
+  // the whole stage has none, so it had no width and the video took its own).
+  stage: { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  // On the web the style lands on the <video> itself, which keeps its own size unless given one: the edges alone
+  // (absoluteFill) don't size it.
+  video: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' },
   top: { position: 'absolute', top: 0, left: 0, right: 0 },
   topBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   titleBox: { flex: 1, alignItems: 'center' },

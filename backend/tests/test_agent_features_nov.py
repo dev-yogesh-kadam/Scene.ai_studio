@@ -399,3 +399,14 @@ def test_book_save_passes_an_entrys_fields_and_says_why_one_is_wrong(client, mon
     assert calls[0]["always"] is True and calls[1] == {"variant": "rain", "look_of": 3, "relations": [{"to": 2, "relation": "mother", "blood": True}]}
     results = [t for t in told(seen) if t.startswith("Result of book_save")]
     assert '"always": true' in results[0] and "relations must be a list" in results[1]
+
+
+def test_a_video_with_no_resolution_picked_is_made_at_480(client, monkeypatch):
+    register(client)
+    unpicked = {k: v for k, v in STEP.items() if k != "resolution"}
+    model(monkeypatch, client, {"thought": "", "reply": "One shot.", "steps": [unpicked]})
+    step = client.post("/api/agent/plan", json={"instruction": "a dog"}).json()["steps"][0]
+    assert step["current"]["resolution"] == 480
+    model(monkeypatch, client, {"thought": "", "reply": "One shot.", "steps": [dict(unpicked, resolution=720)]})
+    step = client.post("/api/agent/plan", json={"instruction": "a dog, sharper"}).json()["steps"][0]
+    assert step["current"]["resolution"] == 720

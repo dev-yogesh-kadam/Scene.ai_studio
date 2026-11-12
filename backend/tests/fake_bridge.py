@@ -3,10 +3,9 @@ this machine, running the fake `claude` (fixtures/fake_claude.py) as the real br
 that never changes, with the system prompt's text written to a file of its own.
 
 Every run is checked against the contract the studio and the bridge share (contract_problem), so a test that runs
-through it also proves the studio keeps to it: a flag or variable the bridge would not take is refused_flag."""
+through it also proves the studio keeps to it: a flag or variable the bridge would not take is refused."""
 
 import asyncio
-import codecs
 import json
 import os
 import re
@@ -23,7 +22,7 @@ from fastapi.responses import JSONResponse
 
 FAKE_CLAUDE = Path(__file__).parent / "fixtures" / "fake_claude.py"
 WITH_VALUE = {"--input-format", "--output-format", "--model", "--tools", "--allowedTools", "--setting-sources", "--max-turns",
-              "--settings", "--effort", "--resume", "--json-schema", "--system-prompt-file", "--mcp-config"}
+              "--settings", "--effort", "--resume", "--json-schema", "--mcp-config"}
 BARE = {"-p", "-v", "--version", "--verbose", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"}
 WEB = {"WebSearch"}
 VARIABLES = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY"}
@@ -31,7 +30,7 @@ SETTINGS = {"autoMemoryEnabled", "autoCompactWindow"}
 
 
 def contract_problem(args, env):
-    """What in a start frame the bridge would refuse (refused_flag), or None: the allowed flags and their values, as
+    """What in a start frame the bridge would refuse ("refused"), or None: the allowed flags and their values, as
     the studio and the bridge agreed them, and only the "no memory" variable."""
     values, at = {}, 0
     while at < len(args):
@@ -47,8 +46,6 @@ def contract_problem(args, env):
         return "the variables {}".format(sorted(set(env) - VARIABLES))
     if any(arg.startswith("--") and "=" in arg for arg in args):
         return "a --flag=value"
-    if values.get("--system-prompt-file", "@system_prompt") != "@system_prompt":
-        return "--system-prompt-file other than @system_prompt"
     if values.get("--tools") and set(values["--tools"].split(",")) - WEB:
         return "--tools " + values["--tools"]
     try:
@@ -73,8 +70,8 @@ class FakeBridge:
 
     def __init__(self, key="bridge-key"):
         self.key, self.refuse, self.starts, self.forgotten = key, None, [], []
-        self.health = {"ok": True, "signed_in": True, "claude_version": "2.1.310", "bridge_version": "0.1.0", "running": 0,
-                       "limit": 4, "last_error": None}
+        self.health = {"up": True, "enabled": True, "signed_in": True, "plan": "max", "claude_version": "2.1.310",
+                       "bridge_version": "0.1.0", "calls_now": 0, "limit": 4, "last_error": "", "uptime_s": 1}
         self.folder = tempfile.mkdtemp(prefix="fake-bridge-")   # the one folder every run is in
         app = FastAPI()
         app.add_api_websocket_route("/run", self._run)
@@ -109,7 +106,7 @@ class FakeBridge:
         await socket.accept()
 
         async def refuse(code, message):
-            await socket.send_text(json.dumps({"type": "error", "code": code, "message": message}))
+            await socket.send_text(json.dumps({"type": "error", "code": code, "error": message}))
             await socket.close()
         if not self._keyed(socket.headers):
             return await refuse("bad_key", "That is not the bridge's key.")
@@ -120,38 +117,41 @@ class FakeBridge:
             return await refuse(code, "Refused for the test: " + code)
         problem = contract_problem(start["args"], start.get("env") or {})
         if problem:
-            return await refuse("refused_flag", "The bridge does not take " + problem)
+            return await refuse("refused", "The bridge does not take " + problem)
         args = list(start["args"])
-        if "@system_prompt" in args:
+        if start.get("system_prompt") is not None:   # the bridge writes it to a file of its own and gives claude that
             prompt = Path(self.folder) / "system-{}.txt".format(len(self.starts))
-            prompt.write_text(start["files"]["system_prompt"], encoding="utf-8")
-            args[args.index("@system_prompt")] = str(prompt)
+            prompt.write_text(start["system_prompt"], encoding="utf-8")
+            args += ["--system-prompt-file", str(prompt)]
+        await socket.send_text(json.dumps({"type": "started"}))
         process = subprocess.Popen([sys.executable, str(FAKE_CLAUDE), *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, cwd=self.folder, env={**os.environ, **(start.get("env") or {})})
         loop, pieces = asyncio.get_running_loop(), asyncio.Queue()
 
         def pump(name, stream):
-            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
             while True:
                 chunk = os.read(stream.fileno(), 65536)
-                text = decoder.decode(chunk, final=not chunk)
-                if text:
-                    loop.call_soon_threadsafe(pieces.put_nowait, (name, text))
-                if not chunk:
+                if chunk:
+                    loop.call_soon_threadsafe(pieces.put_nowait, (name, chunk))
+                else:
                     loop.call_soon_threadsafe(pieces.put_nowait, (name, None))
                     return
         for name in ("stdout", "stderr"):
             threading.Thread(target=pump, args=(name, getattr(process, name)), daemon=True).start()
 
-        async def listen():   # the studio's stdin; a closed socket ends the run
+        async def listen():   # the studio's stdin: binary frames, then {"type": "eof"}; a closed socket ends the run
             try:
                 while True:
-                    frame = json.loads(await socket.receive_text())
-                    if frame["type"] == "stdin":
-                        process.stdin.write(frame["data"].encode("utf-8"))
+                    message = await socket.receive()
+                    if message["type"] == "websocket.disconnect":
+                        raise WebSocketDisconnect()
+                    if message.get("bytes") is not None:
+                        process.stdin.write(message["bytes"])
                         process.stdin.flush()
-                    elif frame["type"] == "stdin_close":
+                    elif json.loads(message["text"]) == {"type": "eof"}:
                         process.stdin.close()
+                    else:
+                        raise ValueError("after start, the only text frame is eof")
             except (WebSocketDisconnect, RuntimeError, OSError, ValueError):
                 if process.poll() is None:
                     process.kill()
@@ -163,7 +163,7 @@ class FakeBridge:
                 if text is None:
                     ended += 1
                 else:
-                    await socket.send_text(json.dumps({"type": name, "data": text}))
+                    await socket.send_bytes((b"" if name == "stdout" else b"") + text)   # bytes, as read
             code = await asyncio.to_thread(process.wait)
             await socket.send_text(json.dumps({"type": "exit", "code": code}))
             await socket.close()

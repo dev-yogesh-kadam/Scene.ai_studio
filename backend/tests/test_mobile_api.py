@@ -297,7 +297,7 @@ def test_a_phone_is_sent_to_the_same_place_on_the_phone_site(client, tmp_path):
         go = lambda path, who=PHONE: site_client.get(path, headers=who, follow_redirects=False)
         assert go("/").headers["location"] == "/m/"
         assert go("/library").headers["location"] == "/m/library"
-        assert go("/canvas/{}/module/{}".format(refs[project["id"]], refs[module["id"]])).headers["location"] == "/m/module/{}".format(module["id"])
+        assert go("/canvas/{}/module/{}".format(refs[project["id"]], refs[module["id"]])).headers["location"] == "/m/canvas/{}".format(module["id"])
         assert go("/project/{}".format(refs[project["id"]])).headers["location"] == "/m/project/{}".format(project["id"])
         assert go("/", TABLET).status_code == 200 and go("/", LAPTOP).status_code == 200   # the full studio
         assert go("/api/auth/me").status_code == 200   # the API is never redirected
@@ -309,11 +309,16 @@ def test_the_phone_site_answers_every_screen_and_keeps_its_scripts(client, tmp_p
     from scene.main import create_app
     built_site(client, tmp_path)
     with TestClient(create_app(client.app.state.settings)) as site_client:
-        for path in ("/m", "/m/", "/m/module/12", "/m/library"):
+        for path in ("/m", "/m/", "/m/canvas/12", "/m/library"):
             page = site_client.get(path, headers=PHONE)
             assert page.status_code == 200 and "<div id=root>" in page.text, path
+        # A module's old address goes to its canvas
+        assert site_client.get("/m/module/12", follow_redirects=False).headers["location"] == "/m/canvas/12"
         script = site_client.get("/m/_expo/static/js/entry-abc.js")
         assert script.status_code == 200 and "immutable" in script.headers["cache-control"]
+        # A script or font of an earlier build is not found, not answered with the page
+        assert site_client.get("/m/_expo/static/js/web/[id]-old.js").status_code == 404
+        assert site_client.get("/m/assets/Ionicons.old.ttf").status_code == 404
         assert site_client.get("/m/../../config.json").status_code in (200, 404) and "secret" not in site_client.get("/m/../../config.json").text
 
 

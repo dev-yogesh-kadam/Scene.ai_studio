@@ -7,7 +7,7 @@ page with ?desktop=1 (the phone site's Account has the link): a cookie remembers
 import re
 
 from fastapi import Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from .db import as_everyone, offload
 
@@ -38,7 +38,7 @@ def _place(db, path):
         return "/projects"
     if kind == "project" and not module_ref:
         return "/project/{}".format(row["id"])
-    return "/module/{}".format(row["id"])   # a canvas: the module, or the project's own canvas
+    return "/canvas/{}".format(row["id"])   # a canvas: the module, or the project's own canvas
 
 
 def install(app, settings):
@@ -74,10 +74,18 @@ def install(app, settings):
 
     @app.get(BASE + "/{path:path}", include_in_schema=False)
     async def phone_file(path: str):
-        """A file of the built site, or, for any other address under /m/ (a screen: /m/module/12), the site itself,
+        """A file of the built site, or, for any other address under /m/ (a screen: /m/canvas/12), the site itself,
         which shows the screen."""
+        # A module's screen was at /m/module/12 once. Expo Router's built site cuts the base "/m" off the front of a
+        # path without looking for the "/" after it, so a screen whose name starts with "m" could not be opened.
+        if path.startswith("module/"):
+            return RedirectResponse(BASE + "/canvas/" + path[len("module/"):], status_code=301)
         target = (site / path).resolve()
         if target.is_relative_to(site) and target.is_file():
             hashed = "/_expo/static/" in "/" + path   # the built scripts have their content's hash in their names
             return FileResponse(target, headers={"Cache-Control": "public, max-age=31536000, immutable"} if hashed else None)
+        # A file that isn't there (a script or font of an earlier build, asked for by a page opened before the site was
+        # built again) is not found: given the site's page instead, the script fails to run and the font draws boxes.
+        if "." in path.rsplit("/", 1)[-1]:
+            return Response(status_code=404)
         return index()

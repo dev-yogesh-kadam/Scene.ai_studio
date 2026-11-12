@@ -37,9 +37,23 @@ type Options = {
 
 /** Opens the viewer on `item`. base: where the files are served from. owner: say who made it (the admin console).
  *  actions: extra buttons, for the item opened. */
+let viewing = false; // one viewer at a time: a quick second double click must not open another over the first
+
 export function openViewer(item: Item, options: Options = {}) {
+  if (viewing) return;
+  viewing = true;
   const source = pressedPicture();
-  const take = showOverlay(<Viewer item={item} source={source} onGone={() => take()} {...options} />);
+  const take = showOverlay(
+    <Viewer
+      item={item}
+      source={source}
+      onGone={() => {
+        viewing = false;
+        take();
+      }}
+      {...options}
+    />,
+  );
 }
 
 function Viewer({
@@ -64,6 +78,12 @@ function Viewer({
   useEffect(() => {
     shownRef.current = shown;
   }, [shown]);
+  useEffect(
+    () => () => {
+      viewing = false; // gone however it went, another may open
+    },
+    [],
+  );
 
   // Esc, the close button and a click outside send the picture back to where it came from before the viewer closes
   // (when another take is shown, it just closes: the picture it came from is not that one).
@@ -78,12 +98,15 @@ function Viewer({
   useEffect(() => {
     const node = dialog.current;
     if (!node) return;
-    node.showModal();
-    // The viewer itself takes the focus, not its close button: the Enter that opened it must not close it again.
-    node.tabIndex = -1;
-    node.focus();
-    if (source && mediaBox.current && flyer.current)
-      trip.current = flyFrom(node, mediaBox.current, source, flyer.current);
+    if (!node.open) {
+      // Once: this runs again when onGone changes, and a second flight on the same flyer left it half way.
+      node.showModal();
+      // The viewer itself takes the focus, not its close button: the Enter that opened it must not close it again.
+      node.tabIndex = -1;
+      node.focus();
+      if (source && mediaBox.current && flyer.current)
+        trip.current = flyFrom(node, mediaBox.current, source, flyer.current);
+    }
     node.addEventListener('close', onGone);
     return () => node.removeEventListener('close', onGone);
   }, [onGone, source]);

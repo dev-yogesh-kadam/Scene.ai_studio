@@ -14,14 +14,24 @@ export type Control = {
   choices?: (string | number)[];
   primary?: boolean;
 };
-export type Option = { id: string; label: string; default: string; choices: Choice[]; top?: boolean };
+type When = Record<string, string | string[]>;
+/** `when`: the choices it is offered under, one set or a list of sets any one of which will do (Best upscale: with
+ *  Upscale video or Sharpen first frame on). Not offered, it is left on its default (workflows.context). */
+export type Option = {
+  id: string;
+  label: string;
+  default: string;
+  choices: Choice[];
+  top?: boolean;
+  when?: When | When[];
+};
 export type Slot = {
   id: string;
   label: string;
   kind: 'image' | 'video' | 'audio';
   optional?: boolean;
   order?: number;
-  when?: Record<string, string | string[]>;
+  when?: When;
   default?: string;
   tag?: string;
   required?: boolean;
@@ -120,8 +130,18 @@ export function newForm(
 
 /** Whether the workflow reads this box with the choices made: some belong to one mode only. A file left in a box
  *  that is out of use stays there for when the mode is switched back, and is not sent. */
-export const inUse = (slot: Slot, options: Record<string, string>) =>
-  Object.entries(slot.when || {}).every(([k, v]) => ([] as string[]).concat(v).includes(options[k]));
+export const inUse = (slot: Slot, options: Record<string, string>) => matches(slot.when || {}, options);
+
+const matches = (when: When, options: Record<string, string>) =>
+  Object.entries(when).every(([k, v]) => ([] as string[]).concat(v).includes(options[k]));
+
+/** Whether an option is offered with the choices made (comfy/workflows.shown). */
+export const offered = (option: Option, options: Record<string, string>) =>
+  !option.when || ([] as When[]).concat(option.when).some((when) => matches(when, options));
+
+/** The options to show, in their order. */
+export const optionsShown = (form: Pick<JobForm, 'wf' | 'options'>) =>
+  form.wf.options.filter((o) => offered(o, form.options));
 
 const usedSlots = (form: JobForm) => new Set(form.wf.refs.filter((s) => inUse(s, form.options)).map((s) => s.id));
 
@@ -165,9 +185,10 @@ export const estimate = (form: JobForm) => api<Quote>('/api/estimate', { method:
 /** The warnings of the workflow that apply to these settings ("a 15 s clip at 1080p takes an hour"). */
 export function warningsOf(form: JobForm) {
   const dur = byRole(form.wf, 'duration');
+  const res = byRole(form.wf, 'resolution'); // a workflow with a RESOLUTION field instead of a size (H3 All In One)
   const ctx: Record<string, unknown> = {
     ...form.options,
-    resolution: form.resolution,
+    resolution: form.resolution ?? (res ? Number(form.values[res.id]) : null),
     orientation: form.orientation,
     clips: form.wf.chain ? form.clips : 1,
     duration: dur ? Number(form.values[dur.id]) : undefined,

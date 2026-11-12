@@ -206,6 +206,7 @@ export default function Servers() {
   const fresh = useRef(false); // Check again: every server is asked now, not what was found a few seconds ago
   const { refresh } = useConsole();
   const [adding, setAdding] = useState<string | null>(null); // a new one is added in its own group
+  const [addingClaude, setAddingClaude] = useState(0); // Add on Claude: the form, on the other way to reach it
   const query = useSection('endpoints', [], async () => {
     const again = fresh.current ? '?fresh=1' : '';
     fresh.current = false;
@@ -233,7 +234,17 @@ export default function Servers() {
               Check again
             </button>
           </div>
-          <ClaudeConnectionCard data={d.claude} refresh={refresh} />
+          <div className={css('card-head')} style={{ marginTop: 18 }}>
+            <h2>Claude</h2>
+            <button className="btn small primary" onClick={() => setAddingClaude((n) => n + 1)}>
+              Add
+            </button>
+          </div>
+          <p className="muted small">
+            How the agent reaches Claude Code: an Anthropic API key or the LUFI bridge, one at a time. Add one, paste
+            its key and save: the next call to Claude goes that way, no restart.
+          </p>
+          <ClaudeConnectionCard data={d.claude} refresh={refresh} adding={addingClaude} />
           {Object.entries(d.kinds).map(([kind, label]) => (
             <div key={kind}>
               <div className={css('card-head')} style={{ marginTop: 18 }}>

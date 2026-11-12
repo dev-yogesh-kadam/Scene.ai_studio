@@ -131,6 +131,14 @@ def test_what_its_presets_file_names_is_in_the_workflow(workflow_id):
         kind, _, name = str(old).partition("/")
         if kind not in catalog.FOLDERS or not name or old in _ids():
             problems.append("replaces: {} is not a workflow that has gone".format(old))
+    for option in profile.get("options", []):   # "when": the choices an option is offered under, one set or a list of them
+        whens = option.get("when") or []
+        for when in whens if isinstance(whens, list) else [whens]:
+            problems += ["options: {} is offered when {}, which is not an option".format(option["id"], k) for k in when if k not in options]
+    for rule in profile.get("checks", []):
+        for key in [rule["if"]] + list(rule["needs"]):
+            if (key not in refs) if ":" in key else not has_input(*key.split(".", 1)):
+                problems.append("checks: nothing named {}".format(key))
     assert not problems, problems
 
 
@@ -182,14 +190,21 @@ def test_it_has_a_price(workflow_id):
 @pytest.mark.parametrize("workflow_id", _ids())
 def test_it_builds_a_job_for_every_choice(workflow_id):
     """Every combination of its presets' choices gives a graph with a node that saves the result, and each node that
-    the node definitions list gets the settings they say it needs (as video_minimax_h3_i2v's save node once did not)."""
+    the node definitions list gets the settings they say it needs (as video_minimax_h3_i2v's save node once did not).
+    A combination its presets' "checks" refuse for a missing file (H3 All In One's Sharpen first frame with no first
+    frame) is refused for that reason only, and builds once every reference box has a file."""
     wf = _load(workflow_id)
     schema = workflows.describe(wf)
     output = (wf["profile"].get("output_name") or "").split(".", 1)[0]
+    checked = {rule["message"] for rule in wf["profile"].get("checks", [])}
     choices = [[c["id"] for c in o["choices"]] for o in schema["options"]]
     for combo in itertools.product(*choices):
         chosen = {o["id"]: c for o, c in zip(schema["options"], combo)}
-        graph, _ = workflows.build_prompt(wf, _settings(schema, chosen))
+        try:
+            graph, _ = workflows.build_prompt(wf, _settings(schema, chosen))
+        except workflows.WorkflowError as refused:
+            assert str(refused) in checked, (chosen, str(refused))
+            graph, _ = workflows.build_prompt(wf, _settings(schema, chosen, every_ref=True))
         assert any("Save" in n["class_type"] or nid == output for nid, n in graph.items()), (chosen, "no node saves the result")
         if output:
             assert graph[output]["inputs"][wf["profile"]["output_name"].split(".", 1)[1]] == "{}/job".format(workflow_id.split("/")[0])
@@ -213,10 +228,10 @@ def test_titles_are_told_apart_within_a_kind():
         seen[key] = workflow_id
 
 
-def _settings(schema, options, seed=None):
+def _settings(schema, options, seed=None, every_ref=False):
     settings = {"values": {c["id"]: "A cat on a wall." for c in schema["controls"] if c["role"] == "prompt"},
                 "options": options, "name": "job", "clips": 1,
-                "refs": {r["id"]: {"comfy_name": "scene_x.png"} for r in schema["refs"] if r.get("required")}}
+                "refs": {r["id"]: {"comfy_name": "scene_x.png"} for r in schema["refs"] if every_ref or r.get("required")}}
     if seed is not None:
         settings.update(seed_mode="fixed", seed=seed)
     return settings

@@ -93,14 +93,6 @@
     display: none;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .la *,
-  .la *::before,
-  .la *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
 :root[data-motion='calm'] .la *,
 :root[data-motion='calm'] .la *::before,
 :root[data-motion='calm'] .la *::after {

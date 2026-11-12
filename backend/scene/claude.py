@@ -356,6 +356,17 @@ def split_flags(args):
     return found
 
 
+def start_frame(args, files=None, env=None):
+    """The bridge's first frame of a run: claude's arguments (split_flags) without "--system-prompt-file @system_prompt",
+    which the bridge refuses, and the system prompt's text in "system_prompt" (null without one), which the bridge
+    writes to a file of its own and gives claude."""
+    args, system = split_flags(args), (files or {}).get("system_prompt")
+    if "--system-prompt-file" in args:
+        at = args.index("--system-prompt-file")
+        del args[at:at + 2]
+    return {"type": "start", "args": args, "system_prompt": system, "env": dict(env or {})}
+
+
 def _placed(args, files, folder):
     """The arguments with each "@name" of `files` made the path of a file in `folder` that holds its text."""
     placed = []
@@ -463,7 +474,7 @@ def bridge_refused(code, message=""):
         return Failed("The LUFI bridge is switched off. Switch it on on LUFI, or pick the API key connection.")
     if code == "timeout":
         return Failed("The LUFI bridge stopped Claude Code: it ran longer than the bridge allows.")
-    if code == "refused_flag":
+    if code in ("refused", "refused_flag"):
         return Failed("The LUFI bridge refused how the studio starts Claude Code ({}). The studio and the bridge must "
                       "follow the same contract: update the older one.".format(said or "a flag"))
     return Failed("The LUFI bridge could not run Claude Code: {}".format(said or code or "no reason given"))
@@ -477,6 +488,10 @@ def bridge_address(url, path):
     if path == "/run":
         url = "ws" + url[len("http"):] if url.startswith("http") else url
     return url + path
+
+
+EOF = {"type": "eof"}   # the frame that closes claude's stdin on LUFI
+STREAMS = {b"\x01": "stdout", b"\x02": "stderr"}   # the first byte of a binary frame from the bridge: which output it is
 
 
 def bridge_headers(key):
@@ -503,40 +518,51 @@ class BridgeProgram:
         except (OSError, asyncio.TimeoutError, InvalidHandshake, InvalidURI, ValueError):
             raise Failed(BRIDGE_UNREACHABLE)
         RUNNING["now"] += 1
-        await self._send({"type": "start", "args": split_flags(args), "files": dict(files or {}), "env": dict(env or {})})
+        await self._send(start_frame(args, files, env))
 
     async def _send(self, frame):
+        """A frame to the bridge: a dict as JSON text, bytes as they are (claude's stdin)."""
         from websockets.exceptions import ConnectionClosed
         try:
-            await self.socket.send(json.dumps(frame, ensure_ascii=False))
+            await self.socket.send(frame if isinstance(frame, bytes) else json.dumps(frame, ensure_ascii=False))
         except ConnectionClosed:   # the bridge ended the run: its last frames say why
             pass
 
     async def write(self, text):
-        await self._send({"type": "stdin", "data": text})
+        await self._send(text.encode("utf-8"))
 
     async def end_input(self):
         if self.socket is not None and not self.exited.is_set():
-            await self._send({"type": "stdin_close"})
+            await self._send(EOF)
 
     async def output(self):
+        """claude's output as the bridge relays it: binary frames, the first byte saying stdout (1) or stderr (2), each
+        stream decoded on its own (a character can be split across frames); text frames for started, exit and error."""
         from websockets.exceptions import ConnectionClosed
+        decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace") for name in STREAMS.values()}
         try:
             async for raw in self.socket:
+                if isinstance(raw, bytes):
+                    name = STREAMS.get(raw[:1])
+                    text = decoders[name].decode(raw[1:]) if name else ""
+                    if text:
+                        yield name, text
+                    continue
                 try:
                     frame = json.loads(raw)
                 except ValueError:
                     continue
                 kind = frame.get("type") if isinstance(frame, dict) else None
-                if kind in ("stdout", "stderr"):
-                    yield kind, str(frame.get("data") or "")
-                elif kind == "exit":
+                if kind == "exit":
+                    for name, decoder in decoders.items():
+                        if rest := decoder.decode(b"", final=True):
+                            yield name, rest
                     self.code = frame.get("code") if isinstance(frame.get("code"), int) else -1
                     self.exited.set()
                     return
                 elif kind == "error":
                     self.exited.set()
-                    raise bridge_refused(frame.get("code"), frame.get("message"))
+                    raise bridge_refused(frame.get("code"), frame.get("error") or frame.get("message"))
         except ConnectionClosed:
             pass
         self.exited.set()
@@ -549,7 +575,7 @@ class BridgeProgram:
         try:
             if not self.exited.is_set():   # its session's file is written as it ends: a moment for that, then it is ended
                 with contextlib.suppress(Exception):
-                    await socket.send(json.dumps({"type": "stdin_close"}))
+                    await socket.send(json.dumps(EOF))
                 with contextlib.suppress(asyncio.TimeoutError):
                     await asyncio.wait_for(self.exited.wait(), LET_GO)
         finally:

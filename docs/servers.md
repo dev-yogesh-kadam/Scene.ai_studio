@@ -80,11 +80,12 @@ The console card takes the bridge's base address, `http://<host>:<port>` (on LUF
 elsewhere its Tailscale address); the studio uses `ws://<host>:<port>/run`, `<base>/health` and `<base>/forget`.
 
 **Run `claude`: WebSocket `GET /run`.** The studio's first frame is
-`{"type":"start","args":[...],"files":{"system_prompt":"<text>"},"env":{...}}`:
+`{"type":"start","args":[...],"system_prompt":"<text>"|null,"env":{...}}`:
 
 - `args`: the arguments for `claude`, without the program's name. A `--flag=value` is always sent as two arguments.
-- Where the studio would pass `--system-prompt-file <path>`, it passes `--system-prompt-file @system_prompt` and the
-  text in `files.system_prompt`; the bridge writes it to a temp file and puts that path in its place.
+- Where the studio would pass `--system-prompt-file <path>`, it leaves the flag out of `args` and sends the file's
+  text as `system_prompt`; the bridge writes it to a temp file and passes `--system-prompt-file` itself. The bridge
+  refuses `--system-prompt-file`, `--system-prompt` and `--append-system-prompt` in `args`.
 - `env`: only `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Never a key.
 - Then, in any order: `{"type":"stdin","data":"<text>"}` and `{"type":"stdin_close"}`.
 - The bridge sends `{"type":"stdout","data":"..."}` and `{"type":"stderr","data":"..."}` unbuffered and in order, then
@@ -105,7 +106,7 @@ elsewhere its Tailscale address); the studio uses `ws://<host>:<port>/run`, `<ba
 **Flags the bridge takes**; anything else is `refused_flag`: `-p`, `-v`, `--version`, `--input-format`,
 `--output-format`, `--verbose`, `--model`, `--tools`, `--allowedTools`, `--strict-mcp-config`, `--setting-sources`,
 `--disable-slash-commands`, `--max-turns`, `--settings`, `--effort`, `--resume`, `--no-session-persistence`,
-`--json-schema`, `--system-prompt-file @system_prompt`, `--mcp-config`. No positional argument: a command of Claude
+`--json-schema`, `--mcp-config` (the system prompt goes in `system_prompt`, above). No positional argument: a command of Claude
 Code's (`/compact`, `/rename`) goes on stdin as a message.
 
 - `--tools`: empty, or the web-search tools only (`WebSearch`).

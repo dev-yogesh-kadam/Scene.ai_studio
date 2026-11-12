@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 import { Icon } from '../../../common/components/Icon/Icon';
 import { Segmented } from '../../../common/components/Segmented';
 import { cx } from '../../../common/cx';
-import { byRole } from '../jobs/jobForm';
+import { byRole, offered } from '../jobs/jobForm';
 import { KeepField } from '../kit/KeepField';
 import { Pills } from './Pills';
 import { RefHint, Source, type Pick } from './RefSlots';
@@ -79,7 +79,7 @@ export function ActionForm({ action, label, project, pick, focus, onBack }: Prop
         )}
         {wf && <p className="muted small">{wf.description}</p>}
         {wf?.options
-          .filter((o) => o.top)
+          .filter((o) => o.top && offered(o, form.options))
           .map((o) => (
             <div key={o.id} className="field">
               <div className="label">{o.label}</div>

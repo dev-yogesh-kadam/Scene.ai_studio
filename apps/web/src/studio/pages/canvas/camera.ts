@@ -204,13 +204,21 @@ export class Camera {
   }
 }
 
-/** Follows the pointer until it is let go (on the window, so a fast drag that leaves the element still counts). */
+/** Follows the pointer until it is let go (on the window, so a fast drag that leaves the element still counts). No
+ *  words are selected meanwhile: a drag that passes over the panel or the bars would otherwise select all of them. */
 export function track(onMove: (e: PointerEvent) => void, onEnd: () => void) {
+  const root = document.documentElement;
+  const select = root.style.userSelect;
+  root.style.userSelect = 'none';
+  window.getSelection()?.removeAllRanges();
   const end = () => {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', end);
+    window.removeEventListener('pointercancel', end);
+    root.style.userSelect = select;
     onEnd();
   };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
 }

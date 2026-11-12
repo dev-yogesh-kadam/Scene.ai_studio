@@ -184,7 +184,8 @@ export class AgentChat {
 
   /** Fold the conversation so far into the direction, so the agent keeps the whole of it in a few lines. */
   async compact() {
-    if (this.busy || !this.runs.length) return;
+    if (!this.runs.length) return;
+    if (this.busy) return this.say('The agent is working. Fold the conversation when it has finished.');
     try {
       const done = await compactDirection({
         direction: this.direction,
@@ -244,6 +245,11 @@ export class AgentChat {
   }
   toggleExplain() {
     userPrefs.setAgent({ explain: { [this.env.session || 'main']: !this.explain } });
+    this.say(
+      this.explain
+        ? 'Explain more is on: from the next reply the agent says why it chose each thing.'
+        : 'Explain more is off: replies stay brief.',
+    );
     this.changed();
   }
   setPins(ids: string[]) {

@@ -23,7 +23,7 @@
   inset: 0;
   background: var(--canvas);
   overflow: hidden;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
 }
 .canvas-stage.panning {

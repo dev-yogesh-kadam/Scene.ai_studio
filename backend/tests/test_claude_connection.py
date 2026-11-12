@@ -82,8 +82,8 @@ def test_a_call_of_its_own_goes_by_the_connection_in_use(connection, tmp_path):
     assert "@system_prompt" not in run["args"] and "--no-session-persistence" in run["args"]
     if connection.bridge:
         [start] = connection.bridge.starts
-        assert start["env"] == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"} and start["files"]["system_prompt"].startswith("You answer")
-        assert start["args"][start["args"].index("--system-prompt-file") + 1] == "@system_prompt"
+        assert start["env"] == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"} and start["system_prompt"].startswith("You answer")
+        assert "--system-prompt-file" not in start["args"] and "files" not in start   # the bridge refuses the flag
         assert API_KEY not in json.dumps(start) and BRIDGE_KEY not in json.dumps(start)   # never a key to LUFI
         assert run["cwd"] == connection.bridge.folder and run["api_key"] is None
     else:
@@ -146,7 +146,7 @@ def test_claude_codes_version_by_the_connection(connection):
     ("locked", claude.Failed, "The bridge key is wrong"),
     ("off", claude.Failed, "switched off"),
     ("timeout", claude.Failed, "longer than the bridge allows"),
-    ("refused_flag", claude.Failed, "refused how the studio starts Claude Code"),
+    ("refused", claude.Failed, "refused how the studio starts Claude Code"),
     ("internal", claude.Failed, "could not run Claude Code"),
 ])
 def test_every_refusal_of_the_bridge_is_said_in_the_studios_words(connection, tmp_path, code, raised, words):

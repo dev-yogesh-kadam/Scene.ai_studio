@@ -308,6 +308,7 @@ def create_app(settings=None):
         # The agent's approved plans run here, step by step (plans.py); the ones a restart interrupted go on.
         app.state.plans = PlanRunner(app.state)
         app.state.jobs.finished.append(app.state.plans.job_ended)
+        app.state.jobs.ahead = app.state.plans.ahead   # a plan queueing its next shot keeps its place (jobs.QUEUE_ORDER)
         app.state.plans.start()
         workers = [asyncio.create_task(app.state.jobs.run_forever()), asyncio.create_task(app.state.jobs.run_forever(local=True)),
                    asyncio.create_task(health.Watcher(app.state).run_forever()),   # alerts, sent while nobody watches

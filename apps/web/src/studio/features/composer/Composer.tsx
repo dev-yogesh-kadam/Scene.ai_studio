@@ -16,6 +16,7 @@ import {
   loadCatalog,
   loadWorkflow,
   newForm,
+  optionsShown,
   submitJob,
   warningsOf,
   type JobForm,
@@ -232,7 +233,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         ),
       );
     }
-    for (const o of wf.options) {
+    for (const o of optionsShown(form)) {
       cells.push(
         cell(
           o.label,

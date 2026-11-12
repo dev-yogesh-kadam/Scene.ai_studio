@@ -40,7 +40,8 @@ def test_the_agent_sets_length_shape_resolution_and_the_workflows_own_settings(c
     settings = step["settings"]
     assert settings["values"]["102:value"] == 7 and settings["options"]["shape"] == "portrait" and settings["values"]["501:value"] == 480
     # "ultra" and the made-up setting are ignored, and first-frame mode needs a picture to start on, which this shot has not
-    assert settings["options"] == {"engine": "reference", "quality": "high", "shape": "portrait", "sound": "off", "keyframes": "off", "upscale": "off"}
+    assert settings["options"] == {"engine": "reference", "quality": "high", "shape": "portrait", "sound": "off", "keyframes": "off", "upscale": "off",
+                                   "sharpen": "off", "best_upscale": "7b", "smooth": "off"}
     assert step["why"] == "7 s for the pour; portrait for Reels; a draft"
     assert "7 s" in step["facts"]
     # What the model was told: the length it may choose and the settings it may set, with what each value means.

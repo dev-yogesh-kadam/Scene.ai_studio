@@ -57,13 +57,18 @@ export function flyFrom(dialog: HTMLDialogElement, area: HTMLElement, source: So
     dialog.style.setProperty('--open', String(Math.max(0, Math.min(1, p))));
   };
   const spring = new Spring(0, put, 0.001);
-  spring.to(1, {
-    response: 0.42,
-    done: () => {
-      dialog.toggleAttribute('data-flying', false);
-      flyer.hidden = true;
-    },
-  });
+  // Landed: the flyer goes and the viewer shows. Also after a while whatever happened to the spring (stopped, or the
+  // tab hidden mid-flight), so a picture half way is never left over the video.
+  let landed = false;
+  const land = () => {
+    if (landed) return;
+    landed = true;
+    dialog.toggleAttribute('data-flying', false);
+    dialog.style.setProperty('--open', '1');
+    flyer.hidden = true;
+  };
+  spring.to(1, { response: 0.42, done: land });
+  window.setTimeout(land, 1200);
   return {
     back(done: () => void) {
       if (!source.pic.isConnected) return false;
@@ -71,7 +76,14 @@ export function flyFrom(dialog: HTMLDialogElement, area: HTMLElement, source: So
       flyer.hidden = false;
       put(spring.x);
       dialog.toggleAttribute('data-flying', true);
-      spring.to(0, { response: 0.36, done });
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        done();
+      };
+      spring.to(0, { response: 0.36, done: close });
+      window.setTimeout(close, 1000); // closes even if the spring never ends
       return true;
     },
   };

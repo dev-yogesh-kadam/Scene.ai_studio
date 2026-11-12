@@ -61,7 +61,7 @@
 .frame {
   position: absolute;
   width: 240px;
-  cursor: grab;
+  cursor: default;
   user-select: none;
 }
 /* "+" on a frame: add it to the agent's message. Shown when the pointer is on the frame (always on a touch screen). */

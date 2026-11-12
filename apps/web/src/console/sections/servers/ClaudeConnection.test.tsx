@@ -38,16 +38,40 @@ function serve(...answers: unknown[]) {
 describe('the Claude connection card', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('says how the connection is, that it is testing, and shows no key', () => {
+  it('saved, it reads like the other servers: the address, how it is, Edit and Test; Edit opens the form', async () => {
+    const user = userEvent.setup();
     render(<ClaudeConnectionCard data={BRIDGE} refresh={async () => undefined} />);
     expect(screen.getByTestId('claude-status')).toHaveTextContent(
       'LUFI bridge · Claude Code 2.1.3 · signed in · 1 of 4 calls running',
     );
     expect(screen.getAllByText('Testing on a personal Claude subscription').length).toBeGreaterThan(0);
+    expect(screen.getByText('http://100.64.0.7:8765')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Bridge address')).toHaveValue('http://100.64.0.7:8765');
     const key = screen.getByLabelText('Bridge key');
     expect(key).toHaveValue('');
     expect(key).toHaveAttribute('placeholder', 'Kept unless you type a new one');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  });
+
+  it("the section's Add opens the form on the other way to reach Claude", () => {
+    const { rerender } = render(<ClaudeConnectionCard data={BRIDGE} refresh={async () => undefined} adding={0} />);
+    expect(screen.queryByLabelText('Anthropic API key')).not.toBeInTheDocument();
+    rerender(<ClaudeConnectionCard data={BRIDGE} refresh={async () => undefined} adding={1} />);
+    expect(screen.getByLabelText('Anthropic API key')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+
+  it('not saved yet, the form is open', () => {
+    render(
+      <ClaudeConnectionCard
+        data={{ ...BRIDGE, connection: { ...BRIDGE.connection, has_bridge_key: false } }}
+        refresh={async () => undefined}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 
   it('says why it does not work', () => {
@@ -69,6 +93,7 @@ describe('the Claude connection card', () => {
     const refresh = vi.fn(async () => undefined);
     const user = userEvent.setup();
     render(<ClaudeConnectionCard data={BRIDGE} refresh={refresh} />);
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Anthropic API key' }));
     await user.type(screen.getByLabelText('Anthropic API key'), 'sk-ant-new');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -79,7 +104,7 @@ describe('the Claude connection card', () => {
     });
     expect(await screen.findByText('Saved: in use from the next call.')).toBeInTheDocument();
     expect(screen.getByTestId('claude-status')).toHaveTextContent('Anthropic API key · Claude Code 2.1.3 · key works');
-    expect(screen.getByLabelText('Anthropic API key')).toHaveValue(''); // never kept on the page
+    expect(screen.getByText('Anthropic API key · kept')).toBeInTheDocument(); // saved: the form closes, no key shown
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -87,6 +112,7 @@ describe('the Claude connection card', () => {
     const sent = serve(BRIDGE);
     const user = userEvent.setup();
     render(<ClaudeConnectionCard data={BRIDGE} refresh={async () => undefined} />);
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(sent[0].body).toEqual({ mode: 'lufi_bridge', bridge_url: 'http://100.64.0.7:8765' });
   });
@@ -103,13 +129,15 @@ describe('the Claude connection card', () => {
     expect(await screen.findByText('It does not work: Claude on LUFI is signed out.')).toBeInTheDocument();
   });
 
-  it('a setting the environment fixes is shown, not changed here', () => {
+  it('a setting the environment fixes is shown, not changed here', async () => {
+    const user = userEvent.setup();
     render(
       <ClaudeConnectionCard
         data={{ ...BRIDGE, connection: { ...BRIDGE.connection, fixed: ['claude_bridge_key'] } }}
         refresh={async () => undefined}
       />,
     );
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
     const key = screen.getByLabelText('Bridge key');
     expect(key).toBeDisabled();
     expect(key).toHaveAttribute('placeholder', 'Set by SCENE_CLAUDE_BRIDGE_KEY');

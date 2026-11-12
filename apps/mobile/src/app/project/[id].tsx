@@ -71,7 +71,7 @@ export default function ProjectScreen() {
         }
         renderItem={({ item, index }) => (
           <Animated.View entering={FadeIn.duration(200)} style={styles.item}>
-            <ModuleCard module={item} onPress={() => router.push({ pathname: '/module/[id]', params: { id: String(item.id) } })} />
+            <ModuleCard module={item} onPress={() => router.push({ pathname: '/canvas/[id]', params: { id: String(item.id) } })} />
           </Animated.View>
         )}
         ListEmptyComponent={

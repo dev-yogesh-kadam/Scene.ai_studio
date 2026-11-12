@@ -2,12 +2,15 @@
 ComfyUI's own reason, it is cancelled whether or not ComfyUI answers the cancel, it is given up when ComfyUI no longer
 has it (restarted) or when it never finishes, and in every case the credits held for it are given back."""
 
+import asyncio
+import json
 import time
 
 import httpx
 import pytest
 
 from scene import jobs as jobs_module
+from scene import media
 from test_api import post_job, register
 
 
@@ -18,7 +21,7 @@ class FakeComfy:
 
     def __init__(self, entry=None, held=True, down=False, cancel_fails=False):
         self.entry, self.held, self.down, self.cancel_fails = entry, held, down, cancel_fails
-        self.queued, self.cancelled = [], []
+        self.queued, self.cancelled, self.files = [], [], {}   # files: what view(name) gives, as bytes
 
     def ws_url(self, client_id):
         return "ws://127.0.0.1:9/ws?clientId=" + client_id   # nothing listens: progress is best effort
@@ -44,6 +47,9 @@ class FakeComfy:
         if self.cancel_fails:
             raise httpx.ConnectError("gone")
         self.cancelled.append(prompt_id)
+
+    async def view(self, filename, subfolder="", kind="output"):
+        return httpx.Response(200, content=self.files[filename], request=httpx.Request("GET", self.url + "/view"))
 
 
 def until(check, seconds=20):
@@ -126,3 +132,19 @@ def test_a_render_pc_that_never_answers_fails_the_job_and_refunds_it(client, fak
     job = post_job(client).json()
     row = ended(client, job["id"])
     assert row["status"] == "failed" and "Lost the connection" in row["error"] and credits(client) == before
+
+
+@pytest.mark.parametrize("fps", [24, 48])
+def test_a_video_is_filed_with_the_frame_rate_read_from_its_file(client, fake, tmp_path, fps):
+    """H3 All In One saves at 48 fps with Smooth motion on and at 24 without: the library says what the file has."""
+    clip = tmp_path / "h3_all_in_one_00001_.mp4"
+    asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x48:d=1:r={}".format(fps),
+                              "-pix_fmt", "yuv420p", clip))
+    fake.comfy.files[clip.name] = clip.read_bytes()
+    fake.comfy.entry = {"status": {"status_str": "success", "completed": True},
+                        "outputs": {"16": {"images": [{"filename": clip.name, "subfolder": "video", "type": "output"}]}}}
+    job = post_job(client, options={"smooth": "on" if fps == 48 else "off"}).json()
+    assert ended(client, job["id"])["status"] == "done"
+    assert fake.comfy.queued[0]["523"]["inputs"]["value"] is (fps == 48)
+    row = client.app.state.db.one("SELECT context FROM generations WHERE job_id = ?", (job["id"],))
+    assert json.loads(row["context"])["fps"] == fps

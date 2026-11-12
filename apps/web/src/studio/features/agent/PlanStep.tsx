@@ -132,7 +132,9 @@ function Refs({ step }: { step: Step }) {
 function PromptEdit({ chat, run, step, index }: { chat: AgentChat; run: Run; step: Step; index: number }) {
   const [text, setText] = useState(step.prompt ?? '');
   const box = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => box.current?.focus(), []);
+  useEffect(() => {
+    box.current?.focus();
+  }, []);
   return (
     <div className={s['approval-edit']}>
       <textarea

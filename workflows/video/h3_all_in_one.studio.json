@@ -4,14 +4,13 @@
     "video/h3_master",
     "video/h3_director"
   ],
-  "description": "Every MiniMax H3 job in one workflow: reference mode, first and last frame, keyframes built by Qwen Image Edit, a voice track, and an optional SeedVR2 upscale.",
-  "pick_when": "Most video shots: a new scene from words or references, with sound and dialogue, 4-15 s; a shot that starts on a picture; lips that follow a voice track.",
+  "description": "Every MiniMax H3 job in one workflow: reference mode, first and last frame, keyframes built by Qwen Image Edit, a voice track, an optional SeedVR2 upscale to 1080 and RIFE smooth motion.",
+  "pick_when": "The MiniMax H3 default: most video shots, a new scene from words or references, with sound and dialogue, 3-15 s; a shot that starts on a picture; lips that follow a voice track; a product ad from keyframes. H3 Chunk is the second option, for a scene clip that needs its anchor, more than three characters or shot keyframes.",
   "output_name": "16.filename_prefix",
   "labels": {
     "100:value": "Describe the action, camera and sound. Say \"the main character\", \"the background\" for the references.",
     "405:value": "Opening keyframe prompt (Qwen Image Edit)",
-    "406:value": "End keyframe prompt (edits the opening frame)",
-    "462:value": "Upscale: short edge"
+    "406:value": "End keyframe prompt (edits the opening frame)"
   },
   "defaults": {
     "100:value": ""
@@ -31,11 +30,14 @@
     "431",
     "434",
     "452",
+    "462",
     "463",
     "500",
     "502",
     "506",
-    "507"
+    "507",
+    "523",
+    "527"
   ],
   "options": [
     {
@@ -64,17 +66,17 @@
         {
           "id": "low",
           "label": "Low",
-          "hint": "a fast turbo draft, about 30 s for 6 s at 480p"
+          "hint": "a fast turbo draft, under 1 min for 3 s at 480p"
         },
         {
           "id": "medium",
           "label": "Medium",
-          "hint": "the full model, 20 steps, about 1.5 min for 6 s at 480p"
+          "hint": "the full model, 20 steps, about 4.3 min for 5 s at 720p"
         },
         {
           "id": "high",
           "label": "High",
-          "hint": "the full model, 40 steps, about 3 min for 6 s at 480p and 10 min at 720p"
+          "hint": "the full model, 40 steps, about 8 min for 5 s at 720p"
         }
       ]
     },
@@ -152,7 +154,66 @@
         {
           "id": "on",
           "label": "On",
-          "hint": "SeedVR2, to the short edge below (slow)"
+          "hint": "SeedVR2 to 1080 on the short edge (1920x1080 landscape), about 2.5 min more for 5 s"
+        }
+      ]
+    },
+    {
+      "id": "sharpen",
+      "label": "Sharpen first frame",
+      "default": "off",
+      "choices": [
+        {
+          "id": "off",
+          "label": "Off",
+          "hint": "the first frame as it is"
+        },
+        {
+          "id": "on",
+          "label": "On",
+          "hint": "SeedVR2 sharpens the FIRST FRAME (or the built opening frame) before it is animated"
+        }
+      ]
+    },
+    {
+      "id": "best_upscale",
+      "label": "Best upscale",
+      "default": "7b",
+      "when": [
+        {
+          "upscale": "on"
+        },
+        {
+          "sharpen": "on"
+        }
+      ],
+      "choices": [
+        {
+          "id": "7b",
+          "label": "Best (7B)",
+          "hint": "SeedVR2 7B: closer to the source, less flicker"
+        },
+        {
+          "id": "3b",
+          "label": "Fast (3B)",
+          "hint": "SeedVR2 3B: about 10% faster, looks sharper but adds halos"
+        }
+      ]
+    },
+    {
+      "id": "smooth",
+      "label": "Smooth motion",
+      "default": "off",
+      "choices": [
+        {
+          "id": "off",
+          "label": "Off",
+          "hint": "24 fps"
+        },
+        {
+          "id": "on",
+          "label": "On (48 fps)",
+          "hint": "RIFE doubles the frames: saved at 48 fps, a few seconds more"
         }
       ]
     }
@@ -283,6 +344,60 @@
       "set": {
         "409.value": true
       }
+    },
+    {
+      "when": {},
+      "set": {
+        "462.value": 1080
+      }
+    },
+    {
+      "when": {
+        "sharpen": "off"
+      },
+      "set": {
+        "407.value": false
+      }
+    },
+    {
+      "when": {
+        "sharpen": "on"
+      },
+      "set": {
+        "407.value": true
+      }
+    },
+    {
+      "when": {
+        "best_upscale": "7b"
+      },
+      "set": {
+        "527.value": true
+      }
+    },
+    {
+      "when": {
+        "best_upscale": "3b"
+      },
+      "set": {
+        "527.value": false
+      }
+    },
+    {
+      "when": {
+        "smooth": "off"
+      },
+      "set": {
+        "523.value": false
+      }
+    },
+    {
+      "when": {
+        "smooth": "on"
+      },
+      "set": {
+        "523.value": true
+      }
     }
   ],
   "refs_when": [
@@ -308,6 +423,131 @@
     "Quality: medium at 480p looks close to high at about half the time, for drafts and look tests; low can add people or effects nobody asked for. A final take where hands pass things or a ball is in play: high at 720p.",
     "Prompt blocks, short: GOAL · SCENE · OPENING · SHOTS timed '[0-2s] size, lens, angle → one action → dialogue → move' · STYLE · END STATE · LOCKS. No shape or length words.",
     "For speech write who says what, in quotes, in the beat it is said: the old man says: \"Sign here.\" With a VOICE TRACK the lips follow your own audio. A silent clip says 'No dialogue. No music.'",
-    "Identity in words: age, build, the features that tell them apart; the same words every clip. No negative prompt: put short 'No ...' lines in LOCKS."
-  ]
+    "Identity in words: age, build, the features that tell them apart; the same words every clip. No negative prompt: put short 'No ...' lines in LOCKS.",
+    "For a 1080 final, use Resolution 720 with Upscale video on: H3 renders at its native 1344x768 and SeedVR2 upscales it to 1920x1080. Resolution 1080 is above H3's training size: slower, more warping.",
+    "Upscale video goes to 1080 on the short edge only: 1440 filled the GPU and looked no sharper. Best upscale (7B) stays closer to the source; Fast (3B) is about 10% quicker.",
+    "Smooth motion (RIFE) saves the video at 48 fps; without it the video is 24 fps."
+  ],
+  "checks": [
+    {
+      "if": "407.value",
+      "needs": [
+        "209:image",
+        "403.value"
+      ],
+      "message": "Sharpen first frame needs a first frame: add a picture in FIRST FRAME, or build the opening frame (Keyframes)."
+    },
+    {
+      "if": "408.value",
+      "needs": [
+        "211:audio"
+      ],
+      "message": "Keep my voice track needs a VOICE TRACK: add one, or pick another Sound."
+    },
+    {
+      "if": "403.value",
+      "needs": [
+        "401:image"
+      ],
+      "message": "Building the opening frame needs a picture in KEYFRAME BUILDER: PRODUCT / SUBJECT IMAGE."
+    },
+    {
+      "if": "404.value",
+      "needs": [
+        "403.value"
+      ],
+      "message": "Building the end frame needs the opening frame built too."
+    }
+  ],
+  "confirm": [
+    {
+      "message": "Resolution 1080 renders above H3's training size: slower, with more warping. For a 1080 final, use Resolution 720 with Upscale video on: H3 renders at its native 1344x768 and SeedVR2 upscales it to 1920x1080.",
+      "when": {
+        "resolution": 1080
+      },
+      "alt": {
+        "label": "Use 720 + Upscale video",
+        "set": {
+          "resolution": 720,
+          "upscale": "on"
+        }
+      }
+    }
+  ],
+  "estimate": {
+    "key": [
+      "quality",
+      "resolution"
+    ],
+    "table": {
+      "low/480": {
+        "3": [
+          1.0,
+          true
+        ]
+      },
+      "medium/720": {
+        "5": [
+          4.3,
+          true
+        ],
+        "10": [
+          14,
+          true
+        ]
+      },
+      "high/720": {
+        "5": [
+          8,
+          true
+        ],
+        "10": [
+          27,
+          true
+        ]
+      }
+    },
+    "add": [
+      {
+        "when": {
+          "upscale": "on",
+          "best_upscale": "7b"
+        },
+        "table": {
+          "5": [
+            2.55,
+            true
+          ],
+          "10": [
+            4.62,
+            true
+          ],
+          "15": [
+            6.8,
+            true
+          ]
+        }
+      },
+      {
+        "when": {
+          "upscale": "on",
+          "best_upscale": "3b"
+        },
+        "table": {
+          "5": [
+            2.27,
+            true
+          ],
+          "10": [
+            4.28,
+            true
+          ],
+          "15": [
+            6.17,
+            true
+          ]
+        }
+      }
+    ]
+  }
 }

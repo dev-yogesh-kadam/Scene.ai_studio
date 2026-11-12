@@ -166,10 +166,12 @@ async def _bridge_status(found, connection, run_claude):
     number = lambda v: v if isinstance(v, int) and not isinstance(v, bool) else None
     found.update(claude_version=str(said.get("claude_version") or "")[:40], bridge_version=str(said.get("bridge_version") or "")[:40],
                  signed_in=said.get("signed_in") if isinstance(said.get("signed_in"), bool) else None,
-                 running=number(said.get("running")) or 0, limit=number(said.get("limit")))
+                 running=number(said.get("calls_now")) or 0, limit=number(said.get("limit")))
     if found["signed_in"] is False:
         found["detail"] = "Claude on LUFI is signed out: sign Claude Code in again on LUFI."
-    elif said.get("ok") is not True:
+    elif said.get("enabled") is False:
+        found["detail"] = "The LUFI bridge is switched off. Switch it on on LUFI, or pick the API key connection."
+    elif said.get("up") is not True:
         found["detail"] = "The LUFI bridge says it is not well: {}".format(str(said.get("last_error") or "no reason given")[:300])
     elif run_claude:
         try:

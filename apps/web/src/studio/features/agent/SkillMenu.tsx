@@ -70,7 +70,10 @@ export function SkillMenu({ mode, search, onSearch, onPick, onClose, onKeys, out
   useEffect(() => {
     if (mode === 'box') field.current?.focus(); // with /name the message keeps focus, so you go on typing there
   }, [mode]);
-  useEffect(() => item.current?.scrollIntoView({ block: 'nearest' }), [here]);
+  // In braces: Chrome's scrollIntoView now returns a Promise, and an effect must return nothing or a cleanup.
+  useEffect(() => {
+    item.current?.scrollIntoView({ block: 'nearest' });
+  }, [here]);
   useEffect(() => {
     const press = (e: PointerEvent) => {
       if (menu.current?.contains(e.target as Node) || outside(e.target as Node)) return;

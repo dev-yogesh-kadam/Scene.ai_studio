@@ -7,7 +7,7 @@ import { api } from '../../../common/api';
 import { Field } from '../../../common/components/AuthForm';
 import { askText } from '../../../common/components/Dialog';
 import { Segmented } from '../../../common/components/Segmented';
-import { byRole, type Control, type JobForm } from '../../features/jobs/jobForm';
+import { byRole, optionsShown, type Control, type JobForm } from '../../features/jobs/jobForm';
 import s from './CreatePage.module.css';
 import { classesOf } from '../../../common/cx';
 import css0 from '../../../common/components/Shared.module.css';
@@ -50,8 +50,10 @@ export function CreateFields({ form, onChange, projects, onProjects, onError }: 
       <div className="hint">{o.choices.find((c) => c.id === form.options[o.id])?.hint || ''}</div>
     </Field>
   );
-  parts.unshift(...wf.options.filter((o) => o.top).map(choice)); // what the whole form depends on comes first
-  const groups: ReactNode[] = wf.options.filter((o) => !o.top).map(choice);
+  // An option some choices leave out is not shown under them (Best upscale needs Upscale video or Sharpen first frame).
+  const shown = optionsShown(form);
+  parts.unshift(...shown.filter((o) => o.top).map(choice)); // what the whole form depends on comes first
+  const groups: ReactNode[] = shown.filter((o) => !o.top).map(choice);
   const sizes = wf.resolutions.map((r) => ({ id: r, label: String(r) }));
   if (wf.size) {
     special.add(byRole(wf, 'width')?.id ?? '').add(byRole(wf, 'height')?.id ?? '');

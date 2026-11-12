@@ -270,7 +270,7 @@ async def join(clips, target):
     """Join chained clips into one video.
 
     Each clip after the first starts on the last frame of the clip before it, so that repeated
-    frame (and its 1/24 s of sound) is dropped.
+    frame (and its one frame of sound: 1/24 s at 24 fps, 1/48 s at 48) is dropped.
     """
     with_audio = all([(await probe(clip))["audio"] for clip in clips])
     args, filters, labels = ["-loglevel", "error"], [], ""
@@ -280,7 +280,7 @@ async def join(clips, target):
         filters.append("[{0}:v]{1}setpts=PTS-STARTPTS[v{0}]".format(i, skip))
         labels += "[v{}]".format(i)
         if with_audio:
-            askip = "atrim=start={:.5f},".format(1 / FPS) if i else ""
+            askip = "atrim=start={:.5f},".format(1 / await frame_rate(clip)) if i else ""
             filters.append("[{0}:a]{1}asetpts=PTS-STARTPTS[a{0}]".format(i, askip))
             labels += "[a{}]".format(i)
     filters.append("{}concat=n={}:v=1:a={}[v]{}".format(labels, len(clips), int(with_audio), "[a]" if with_audio else ""))

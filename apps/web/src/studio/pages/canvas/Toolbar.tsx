@@ -73,10 +73,26 @@ export function ViewBar({
       </button>
       <button
         className={cx('btn small quiet', s['canvas-zoom'])}
+        title="Zoom out (or Ctrl + mouse wheel)"
+        aria-label="Zoom out"
+        onClick={() => camera.zoomTo(camera.cam.k / 1.25)}
+      >
+        −
+      </button>
+      <button
+        className={cx('btn small quiet', s['canvas-zoom'])}
         title="Zoom to 100% (0)"
         onClick={() => camera.zoomTo(1)}
       >
         {zoom + '%'}
+      </button>
+      <button
+        className={cx('btn small quiet', s['canvas-zoom'])}
+        title="Zoom in (or Ctrl + mouse wheel)"
+        aria-label="Zoom in"
+        onClick={() => camera.zoomTo(camera.cam.k * 1.25)}
+      >
+        +
       </button>
       <button
         className="btn small quiet"

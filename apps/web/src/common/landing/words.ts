@@ -24,6 +24,5 @@ export function withPrompt(path: string, text: string | null) {
 }
 export const promptOf = (search: string) => new URLSearchParams(search).get('prompt')?.trim() || '';
 
-/** The Motion setting (theme.js), or the computer asking for less motion. */
-export const calmNow = () =>
-  document.documentElement.dataset.motion === 'calm' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** The Motion setting (theme.js): always full in the studio. */
+export const calmNow = () => document.documentElement.dataset.motion === 'calm';

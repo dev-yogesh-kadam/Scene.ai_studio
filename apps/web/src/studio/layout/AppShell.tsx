@@ -7,7 +7,7 @@ import { Link, Outlet, useLocation } from 'react-router';
 import { CreditMark, Icon } from '../../common/components/Icon/Icon';
 import { Segmented } from '../../common/components/Segmented';
 import { tabTitle } from '../../common/format';
-import { MOTIONS, THEMES, useAppearance } from '../../common/hooks/useAppearance';
+import { THEMES, useAppearance } from '../../common/hooks/useAppearance';
 import { useJobs, useStatus, useStudioLive } from '../live';
 import { PAGES, SIDEBAR_PAGES } from '../pages';
 import { pageOf } from '../place';
@@ -304,10 +304,6 @@ function AccountMenu({
       <div className={css('menu-row')}>
         Theme
         <Segmented choices={THEMES} current={appearance.theme} onPick={appearance.setTheme} />
-      </div>
-      <div className={css('menu-row')}>
-        Motion
-        <Segmented choices={MOTIONS} current={appearance.motion} onPick={appearance.setMotion} />
       </div>
       <button role="menuitem" className={css('menu-item')} onClick={() => void signOut()}>
         <Icon name="logout" />

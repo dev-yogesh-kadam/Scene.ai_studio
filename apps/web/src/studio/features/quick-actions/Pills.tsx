@@ -3,7 +3,7 @@
 // each option costs ("1080p · 200 cr"). "All settings" opens the full form on the Create page.
 
 import { useNavigate } from 'react-router';
-import { byRole, type Quote } from '../jobs/jobForm';
+import { byRole, offered, type Quote } from '../jobs/jobForm';
 import { short } from './refs';
 import type { ActionForm } from './useActionForm';
 import { toCreate } from '../../handoff';
@@ -116,7 +116,7 @@ export function Pills({ action }: { action: ActionForm }) {
           />
         ))}
       {wf.options
-        .filter((o) => !o.top)
+        .filter((o) => !o.top && offered(o, form.options))
         .map((o) => (
           <Pill
             key={o.id}

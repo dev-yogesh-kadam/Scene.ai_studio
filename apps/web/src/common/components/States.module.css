@@ -28,11 +28,6 @@
 :root[data-motion='calm'] .bone {
   animation: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .bone {
-    animation: none;
-  }
-}
 .said {
   position: absolute;
   width: 1px;

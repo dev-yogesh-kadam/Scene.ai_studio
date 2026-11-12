@@ -51,6 +51,8 @@ class PlanRunner:
         self.db = state.db
         self.tasks = {}            # plan id -> its running task
         self.steps_lock = threading.Lock()   # one change of a plan's progress at a time (_set_step)
+        self.preparing = {}        # plan id -> its queue place (approved), while it is queueing a step (JobManager.ahead)
+        self.waiting_on = {}       # plan id -> (the job its next step starts on, its queue place), while that job is made
         self.ended = asyncio.Event()   # set whenever a job ends: the plans waiting on one look again
         self.woken = 0                 # ...and counted: a waiter that looked at the count before it looked misses none (_pause)
         try:   # the loop the plans wait on: stop() and choose() may be called from a database thread (db.offload)
@@ -275,8 +277,22 @@ class PlanRunner:
         """A job ended (JobManager.finished): the plans it belongs to are told, on the database's threads."""
         await offload(self._job_ended, job, status)
 
+    def _let_queue_go(self):
+        """The render queue looks again: what this plan held back may start."""
+        jobs = getattr(self.state, "jobs", None)
+        if jobs is not None and hasattr(jobs, "_wake"):
+            jobs._wake()
+
+    def ahead(self):
+        """The earliest queue place of a plan queueing a step now: renders asked for after it wait until it has."""
+        return min(self.preparing.values(), default=None)
+
     def _job_ended(self, job, status):
         """Told by the queue whenever a job ends: a plan's step is made (or not), and the plans waiting look again."""
+        # A plan whose next step starts on this job holds the queue from now (before its server is free) until it is in.
+        for plan_id, (waited, place) in list(self.waiting_on.items()):
+            if waited == job["id"]:
+                self.preparing[plan_id] = place
         step = job.get("plan_step")
         if job.get("plan_id") is not None and isinstance(step, int):
             # Only while this job is still the step's: a step tried again after a failure has a new job, and the old
@@ -318,6 +334,10 @@ class PlanRunner:
             await self._walk(plan_id)
         except Exception as problem:   # a plan never stops the server; it says what went wrong
             await offload(self._finish, plan_id, "failed", "{}: {}".format(type(problem).__name__, problem))
+        finally:
+            self.preparing.pop(plan_id, None)
+            self.waiting_on.pop(plan_id, None)
+            self._let_queue_go()   # what it held back may go
 
     async def _walk(self, plan_id):
         row = await offload(self._row, plan_id)
@@ -325,6 +345,8 @@ class PlanRunner:
             return
         user = await self.db.aone("SELECT * FROM users WHERE id = ?", (row["user_id"],))
         steps = json.loads(row["steps"])
+        place = row["approved"] or row["created"]
+        self.preparing[plan_id] = place   # while it queues its steps, renders asked for after it wait for them
         for i, step in enumerate(steps):
             row = await offload(self._row, plan_id)
             if row["state"] != "running":
@@ -346,6 +368,8 @@ class PlanRunner:
                 await offload(self._set_step, plan_id, i, error=str(refused), waiting=False)
                 return await offload(self._finish, plan_id, "failed", "“{}” was not made: {}".format(step.get("name") or "A step", refused))
             await offload(self._set_step, plan_id, i, job=job, error="", waiting=False)
+        self.preparing.pop(plan_id, None)   # all queued: they hold their places in the queue themselves
+        self._let_queue_go()
         # Every queued step ends before the plan does.
         while True:
             seen = self.woken   # before the look: a job that ends after it wakes the pause below
@@ -458,8 +482,15 @@ class PlanRunner:
                     if made:
                         return p.get("chosen") or made
                     raise Refused("The step this one starts on has no result in the library.")
+                # While that job is made the queue is not held (it is in it, ahead); its end holds it again (_job_ended).
+                if plan_id in self.preparing:
+                    self.waiting_on[plan_id] = (job, self.preparing.pop(plan_id))
+                    self._let_queue_go()
                 await self._pause(seen)
         finally:
+            held = self.waiting_on.pop(plan_id, None)
+            if held is not None:   # waited for, still queueing (a stopped plan's _run lets go of it)
+                self.preparing.setdefault(plan_id, held[1])
             await offload(self._mark_waiting, plan_id, waiting_step, False)
 
     def _mark_waiting(self, plan_id, step, waiting):

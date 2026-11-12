@@ -35,12 +35,12 @@ The mode the user picked in the chat decides the models, and the models decide t
 
 A video model with no prompter: tell the user which models this skill supports and stop. Chain is left out where video-to-video is weak (Seedance 2.0) or missing (MiniMax).
 
-**Studio:** `minimax_h3` is the workflow H3 Chunk (`video/h3_chunk`), and H3 All in One (`video/h3_all_in_one`) for a single shot made on its own; `minimax_h3_max` is not here (H3 Chunk takes a motion clip itself). The Seedance and Wan 3 rows are left out: those models are not in this studio, and neither are their prompters. The workflows the chat chose are the turn's note of available models.
+**Studio:** `minimax_h3` is H3 All in One (`video/h3_all_in_one`), the studio's MiniMax H3 default, for a single shot made on its own; this skill's scene clips are its second option, H3 Chunk (`video/h3_chunk`), made for them (the anchor, up to five character sheets, shot keyframes); `minimax_h3_max` is not here (H3 Chunk takes a motion clip itself). The Seedance and Wan 3 rows are left out: those models are not in this studio, and neither are their prompters. The workflows the chat chose are the turn's note of available models.
 
 One AskUserQuestion round:
 1. **Convert the script into:** Video, Images, Detailed script.
 2. **Aspect ratio:** 16:9 (Default), 9:16, 1:1.
-3. **Resolution:** the video model's resolutions in `video_create_edit`, 720p (Default). **Studio:** H3 Chunk's are 480p and 768p (Default); 1080p or 4K is an upscale after the cut (Upscale video on the canvas), said in one line when asked.
+3. **Resolution:** the video model's resolutions in `video_create_edit`, 720p (Default). **Studio:** 480p is the Default on every workflow (the quickest); H3 All in One's are 480p, 720p (about twice the time) and 1080p (shots of 10 s or less), H3 Chunk's 480p and 768p; 1080p or 4K is otherwise an upscale after the cut (Upscale video on the canvas), said in one line when asked. Asked unless the conversation's direction already has a "Resolution:" line.
 4. **Continuity method (video only):** the model's methods; Chain (Default) where it is offered, else Board (Default). **Studio:** on H3 Chunk that is Board (Default) and Recall; Chain comes back when a workflow that extends a clip is listed.
 
 A question left with one option is not asked; that option is used. Answers that don't apply are ignored: continuity for Images and Detailed script; resolution for Images (the mode sets it) and Detailed script; aspect ratio for Detailed script.

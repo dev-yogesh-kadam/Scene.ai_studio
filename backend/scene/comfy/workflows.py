@@ -565,6 +565,9 @@ def context(schema, settings):
     for o in schema["options"]:   # a choice no rule knows would leave the workflow on whatever it was saved with
         if ctx[o["id"]] not in [c["id"] for c in o["choices"]]:
             raise WorkflowError("'{}' is not a choice for {}.".format(ctx[o["id"]], o["label"]))
+    for o in schema["options"]:   # an option the other choices do not offer stays on its default, whatever was sent
+        if not shown(o, ctx):
+            ctx[o["id"]] = o.get("default")
     roles = {c["role"]: c for c in schema["controls"] if c["role"]}
     if "duration" in roles:
         ctx["duration"] = _cast("float", values.get(roles["duration"]["id"], roles["duration"]["default"]))
@@ -617,6 +620,29 @@ def _cast(ctype, value):
 
 def _matches(when, ctx):
     return all(ctx.get(k) in (v if isinstance(v, list) else [v]) for k, v in when.items())
+
+
+def shown(option, ctx):
+    """Whether an option is offered with these choices. Its "when" is one set of choices ({"upscale": "on"}) or a list of
+    them, any one of which will do ([{"upscale": "on"}, {"sharpen": "on"}]); with none it is always offered."""
+    when = option.get("when")
+    if not when:
+        return True
+    return any(_matches(w, ctx) for w in (when if isinstance(when, list) else [when]))
+
+
+def _is_on(nodes, key):
+    nid, _, name = str(key).partition(".")
+    return bool(nodes.get(nid, {}).get("inputs", {}).get(name))
+
+
+def check(profile, nodes, filled):
+    """The presets file's "checks": a switch that fails the job on ComfyUI when what it works on is missing.
+    {"if": "407.value", "needs": ["209:image", "403.value"], "message": ...}: when node 407's value is on, at least one
+    of "needs" must be there, a reference box with a file ("209:image") or another switch that is on ("403.value")."""
+    for rule in profile.get("checks", []):
+        if _is_on(nodes, rule["if"]) and not any(n in filled or _is_on(nodes, n) for n in rule["needs"]):
+            raise WorkflowError(rule["message"])
 
 
 def refs_in_use(schema, settings):
@@ -735,6 +761,7 @@ def build_prompt(wf, settings):
             if nid not in nodes:
                 raise WorkflowError("{}.studio.json sets node {}, which is not in the workflow.".format(wf["id"], nid))
             nodes[nid]["inputs"][name] = value
+    check(wf["profile"], nodes, {r["id"] for r in schema["refs"] if given.get(r["id"]) and _matches(r.get("when") or {}, ctx)})
 
     # The Save node files the result on the render server under the job's name, in a folder named after its kind.
     named, name = wf["profile"].get("output_name"), re.sub(r"[^\w.-]+", "_", str(settings.get("name") or "")).strip("._")
@@ -755,12 +782,31 @@ def format_estimate(minutes, measured):
     return ("about " if measured else "~") + text + ("" if measured else " (est.)")
 
 
+# What a result's context says that was read from its file, not asked for: the frame rate, and the frame size of a
+# workflow whose settings do not set one.
+FROM_THE_FILE = {"seed", "fps"}
+
+
+def _asked(recorded, ctx):
+    return {k: v for k, v in recorded.items()
+            if k not in FROM_THE_FILE and not (k in ("width", "height") and k not in ctx)}
+
+
+def _by_duration(row, duration):
+    """(minutes, measured) from a row of {seconds: [minutes, measured]}: the nearest length, scaled when not the same."""
+    nearest = min(row, key=lambda d: abs(float(d) - duration))
+    minutes, measured = row[nearest]
+    if float(nearest) != duration:
+        return minutes * duration / float(nearest), False
+    return minutes, measured
+
+
 def estimate(wf, settings, history=()):
     """Expected minutes for one job: from earlier runs with the same settings, else the profile's table."""
     schema = describe(wf)
     ctx = context(schema, settings)
     same = [h["seconds"] for h in history if h.get("workflow") == wf["id"] and h.get("seconds")
-            and {k: v for k, v in (h.get("context") or {}).items() if k != "seed"} == ctx]
+            and _asked(h.get("context") or {}, ctx) == ctx]
     if same:
         minutes = sum(same[:3]) / len(same[:3]) / 60
         return {"minutes": minutes, "measured": True, "text": format_estimate(minutes, True) + ", from your earlier runs"}
@@ -770,13 +816,15 @@ def estimate(wf, settings, history=()):
     duration = ctx.get("duration")
     if not row or not duration:
         return {"minutes": None, "measured": False, "text": "no estimate yet (it appears after the first run)"}
-    nearest = min(row, key=lambda d: abs(float(d) - duration))
-    minutes, measured = row[nearest]
-    if float(nearest) != duration:
-        minutes, measured = minutes * duration / float(nearest), False
+    minutes, measured = _by_duration(row, duration)
     if "width" in ctx and table.get("base_pixels"):
         ratio = ctx["width"] * ctx["height"] / float(table["base_pixels"])
         if abs(ratio - 1.0) > 0.02:
             minutes, measured = minutes * ratio ** 1.5, False
+    # A step some choices add after the render, timed on its own (an upscale): {"when": {...}, "table": {"5": [m, measured]}}.
+    # The sum was never timed as one run, so it is an estimate.
+    for extra in table.get("add", []):
+        if _matches(extra.get("when", {}), ctx):
+            minutes, measured = minutes + _by_duration(extra["table"], duration)[0], False
     minutes *= ctx.get("clips", 1)
     return {"minutes": minutes, "measured": measured, "text": format_estimate(minutes, measured)}

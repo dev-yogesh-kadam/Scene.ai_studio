@@ -17,6 +17,7 @@ MAX_STEPS = 12   # a longer film runs in stages (cast, stills, clips), each pric
 SHOT_SECONDS = (4, 15)  # the length the agent may give one video shot; the workflow takes any number of seconds
 WORDS_PER_SECOND = 2.5  # how fast people speak in a shot, for the time spoken words need
 LONG_SHOT = 10          # a shot longer than this is not made at the largest resolution: it may not fit in memory
+AGENT_RESOLUTION = 480  # the agent's videos unless the user picks another: the quickest, the user is asked (prompt)
 MAX_HISTORY = 40    # earlier turns of the conversation sent along with a new message
 HISTORY_CHARS = 48_000   # ...but no more than this much of them (about 12k tokens): the newest turns are kept
 FIX_ROUNDS = 2   # how many times a finished plan with steps that cannot run goes back to the model to be put right
@@ -81,15 +82,23 @@ they already made. When they ask for something small, you do it well and quickly
 How you work. The creative process scales with the job.
 
 Small jobs (one or a few shots, one picture, an edit, music, a retake, a quick test, anything up to 4 generate steps
-the studio does not price as a big job): never ask questions about them. Decide everything yourself, plan it, and say
-what you chose in "why" and "thought". "concept" is "".
+the studio does not price as a big job): never ask questions about them, but for the resolution of a video (below).
+Decide everything else yourself, plan it, and say what you chose in "why" and "thought". "concept" is "".
+
+The resolution of a video. Before the first video plan of a conversation, unless the user named a resolution or the
+conversation already settled one (its "direction" says "Resolution:"), ask it in one "question" and plan no steps in
+that answer: "What resolution?" with the options 480p (default: the fastest, for drafts and most work), 720p (sharper,
+about twice the time) and, when the shots are 10 seconds or less, 1080p (a final or a big screen, the slowest), and
+"default" 480p. Once answered, keep it in "direction" as a line "Resolution: 480p" (or the one picked) and use it for
+every video shot of the conversation without asking again; a resolution the user names later replaces it. On a big
+job it is one of the brief card's questions instead of a card of its own.
 
 Big jobs: a plan of more than 4 generate steps, or one the studio prices above its big-job limit (an ad campaign, a
 short film, a music video, a reel of many shots). For a big job:
 1. The brief. Read /brief from the memory (state_read). When it is missing and the conversation has not already
    settled these, ask ONE brief card first, as "questions" (at most {max_questions}, each with a "default" you would
-   pick and options that are real choices): the audience, the platform and shape, the tone, and a reference or a
-   must-have. Plan no steps in that answer. When the user's messages already answer them, write /brief yourself and do
+   pick and options that are real choices): the audience, the platform and shape, the tone, and the resolution of
+   its videos (when it has videos and none is settled; otherwise a reference or a must-have). Plan no steps in that answer. When the user's messages already answer them, write /brief yourself and do
    not ask. Once answered, save it with state_write to /brief as {"audience", "platform", "shape", "tone",
    "must_have"}; in a conversation that keeps no memory, put it in "direction" as one line that starts "Brief:".
 2. The concept. In "thought", one sentence: the idea the whole piece serves. Put the same sentence in "concept", and
@@ -366,8 +375,9 @@ or a quality they name is used exactly):
   group: landscape. An Instagram feed post, a profile picture, a product tile, an album or podcast cover: square. When
   nothing says, follow the brief, then the earlier plans of this conversation, then the workflow's default. All the
   shots of one piece keep one shape.
-- "resolution": 480 for a test, a draft or a quick look; the workflow's default resolution for normal work; 1080 for a
-  final, a hero shot or a big screen, only for shots of 10 seconds or less.
+- "resolution": the one the user picked (see "The resolution of a video"); until then 480, the studio's default, which
+  is each workflow's "default_resolution". 720 when the user asks for sharper or better; 1080 for a final, a hero shot
+  or a big screen, only for shots of 10 seconds or less.
 - "choices": the workflow's own settings, listed under its "settings". Set one only when the script or the user calls
   for it, by copying its "setting" and one of its "value"s; leave the rest out and they keep their defaults.
   - Quality: low for a draft, a test or "quickly"; medium for normal work; high for a final, a client or "best quality".
@@ -685,6 +695,12 @@ AUDIO: <what is heard: room sound, effects, music; spoken words in quotation mar
 
 
 QUOTES = re.compile(r"[\"“”«»]|\b(quote|said|says|told|according to)\b", re.IGNORECASE)
+
+
+def default_resolution(schema):
+    """The resolution the agent makes a sized video at when none was picked: AGENT_RESOLUTION where the workflow offers
+    it, else the workflow's own."""
+    return AGENT_RESOLUTION if AGENT_RESOLUTION in schema.get("resolutions", ()) else schema["size"]["resolution"]
 
 
 def founded(scene, about):
@@ -1515,8 +1531,10 @@ def offer(schema, attached=True):
     if schema.get("size") or "resolution" in roles:
         info["resolutions"] = schema["resolutions"]
     if schema.get("size"):
-        info["default_resolution"] = schema["size"]["resolution"]
+        info["default_resolution"] = default_resolution(schema)
         info["orientation"] = "landscape, portrait or square; default " + schema["size"]["orientation"]
+    elif "resolution" in roles and AGENT_RESOLUTION in schema["resolutions"]:
+        info["default_resolution"] = AGENT_RESOLUTION
     if "duration" in roles:
         info["duration_seconds"] = "{} to {}: decide it from the shot (default {:g}){}".format(
             *SHOT_SECONDS, roles["duration"]["default"],
@@ -2376,12 +2394,12 @@ def settings_for(schema, step, selection_ids, project_id, filled=(), used_items=
         values[roles["duration"]["id"]] = max(SHOT_SECONDS[0], min(SHOT_SECONDS[1], seconds))
     resolution = orientation = None
     if schema.get("size"):
-        resolution = step.get("resolution") if step.get("resolution") in schema["resolutions"] else schema["size"]["resolution"]
+        resolution = step.get("resolution") if step.get("resolution") in schema["resolutions"] else default_resolution(schema)
         orientation = step.get("orientation") if step.get("orientation") in ORIENTATIONS else schema["size"]["orientation"]
         if "duration" in roles and values[roles["duration"]["id"]] > LONG_SHOT and resolution > schema["size"]["resolution"]:
             resolution = schema["size"]["resolution"]   # a long shot at the largest size may not fit in the render server's memory
-    elif "resolution" in roles and step.get("resolution") in schema["resolutions"]:
-        resolution = step["resolution"]
+    elif "resolution" in roles and (step.get("resolution") in schema["resolutions"] or AGENT_RESOLUTION in schema["resolutions"]):
+        resolution = step["resolution"] if step.get("resolution") in schema["resolutions"] else AGENT_RESOLUTION
         usual = int(roles["resolution"]["default"] or 0)
         if "duration" in roles and values[roles["duration"]["id"]] > LONG_SHOT and usual and resolution > usual:
             resolution = usual   # as above: a long shot is not made larger than the workflow's own size

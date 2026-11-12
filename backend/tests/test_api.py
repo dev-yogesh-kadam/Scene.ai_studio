@@ -61,19 +61,30 @@ def test_workflow_catalog_and_form(client):
     form = client.get("/api/workflows/video/h3_all_in_one").json()
     assert form["title"] == "H3 All In One" and len(form["refs"]) == 13
     assert [(o["id"], o.get("top", False)) for o in form["options"]] == [("engine", True), ("quality", False), ("shape", False), ("sound", False),
-                                                                          ("keyframes", False), ("upscale", False)]
+                                                                          ("keyframes", False), ("upscale", False), ("sharpen", False),
+                                                                          ("best_upscale", False), ("smooth", False)]
+    # Best upscale is offered only with Upscale video or Sharpen first frame on
+    assert next(o for o in form["options"] if o["id"] == "best_upscale")["when"] == [{"upscale": "on"}, {"sharpen": "on"}]
     # the reference images, the motion video and the voice sample belong to reference mode; the rest to both modes
     assert [r["id"] for r in form["refs"] if r.get("when") == {"engine": "reference"}] == [
         "201:image", "202:image", "203:image", "204:image", "205:image", "206:image", "207:video", "208:audio"]
     assert [r["id"] for r in form["refs"] if "when" not in r] == ["209:image", "210:image", "211:audio", "401:image", "402:image"] and form["chain"] is True
     estimate = client.post("/api/estimate", json={"workflow": "video/h3_all_in_one"}).json()
-    assert estimate["text"] == "no estimate yet (it appears after the first run)"   # it has no table of minutes
+    assert estimate["text"] == "about 8.0 min"   # high, 720p, 5 s, as measured on the render PC
 
 
 def test_a_job_with_an_empty_prompt_is_refused(client):
     client.post("/api/auth/register", json=ADMIN)
     response = client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_all_in_one"}'})
     assert response.status_code == 400 and response.json()["detail"] == "The prompt is empty."
+
+
+def test_a_switch_without_what_it_works_on_is_refused_before_it_is_queued(client):
+    """H3 All In One fails on ComfyUI when Sharpen first frame has no first frame: the studio says so first."""
+    client.post("/api/auth/register", json=ADMIN)
+    response = post_job(client, options={"sharpen": "on"})
+    assert response.status_code == 400 and response.json()["detail"].startswith("Sharpen first frame needs a first frame")
+    assert not client.app.state.db.one("SELECT id FROM jobs")
 
 
 def test_users_only_see_their_own_jobs(client):

@@ -44,6 +44,12 @@ RENDER_MOST = 4 * 3600   # seconds one render may take on ComfyUI, waiting in it
 # The plan and step being queued now (plans.py): JobManager.add writes them into the job's own row.
 QUEUEING = contextvars.ContextVar("queueing", default=None)
 
+# Where a job stands in the queue: a plan's jobs where the plan was approved, in the order of its steps, so a plan whose
+# later shots are queued only once the shot they start on is made keeps its place ahead of what was asked for after it
+# (another module's video ran between them). Every other job where it was asked for. Ahead of both: what was put first.
+QUEUE_AT = "COALESCE((SELECT approved FROM agent_plans p WHERE p.id = jobs.plan_id), jobs.created)"
+QUEUE_ORDER = "priority DESC, {}, plan_step, created".format(QUEUE_AT)
+
 class Cancelled(Exception):
     pass
 
@@ -78,6 +84,7 @@ class JobManager:
         self.agent = None         # the agent's model, which writes the captions some image models need (main.py sets it)
         self.langfuse = None      # each finished job, as a span of its turn's trace (langfuse_trace.Sender; main.py sets it)
         self.finished = []        # functions(job, status) told when a job ends (aftercare.install: the agent checks its shots)
+        self.ahead = None         # () -> the queue place of a plan's next step being queued now, or None (plans.py)
         self.wake = asyncio.Event()
         self.woken = 0   # wakes counted: a worker that read the count before it looked misses none (_idle)
         try:   # the loop the workers wait on: add() and pause() may be called from a database thread (db.offload)
@@ -100,7 +107,7 @@ class JobManager:
         waiting, busy = {True: [], False: []}, {True: 0, False: 0}
         servers = max(1, len(self.pool.servers())) if self.pool else 1
         with as_everyone():   # where the user's jobs stand in the queue depends on everyone's
-            queue = self.db.all("SELECT id, workflow, status FROM jobs WHERE status IN ('queued', 'running') ORDER BY priority DESC, created")
+            queue = self.db.all("SELECT id, workflow, status FROM jobs WHERE status IN ('queued', 'running') ORDER BY " + QUEUE_ORDER)
         for r in queue:
             if r["status"] == "running":
                 busy[edits.is_edit(r["workflow"])] += 1
@@ -197,10 +204,18 @@ class JobManager:
             if not local and await offload(self.paused):
                 await self._idle(seen, 5)
                 continue
-            job = await self.db.aone("SELECT * FROM jobs WHERE status = 'queued' AND {} ORDER BY priority DESC, created LIMIT 1".format(mine))
+            job = await self.db.aone("SELECT *, {} AS queue_at FROM jobs WHERE status = 'queued' AND {} ORDER BY {} LIMIT 1".format(
+                QUEUE_AT, mine, QUEUE_ORDER))
             if job is None:
                 await self._idle(seen)
                 continue
+            # A plan ahead of it is queueing its next shot (the one before it was just made): that shot goes first, so
+            # this one waits the moment it takes. What was put first (priority) does not.
+            held = self.ahead() if self.ahead and not local else None
+            if held is not None and held < job.pop("queue_at") and not job["priority"]:
+                await self._idle(seen, 1)
+                continue
+            job.pop("queue_at", None)
             # Each render goes to a ComfyUI server that is free. When none is (all are busy), it waits for one to finish.
             # When none answers (turned off, restarting, its network gone), the renders wait for one, and their owners
             # are told so, instead of each one failing in turn. They are asked again every few seconds.
@@ -511,6 +526,8 @@ class JobManager:
                 pass   # nothing to read from a transcript's file
             elif found["width"] and not ctx.get("width"):
                 ctx = dict(ctx, width=found["width"], height=found["height"])
+            if kind == "video":   # the rate it was saved at (H3 All In One's smooth motion makes 48), never assumed
+                ctx = dict(ctx, fps=await media.frame_rate(target))
             await offload(self._record, job, kind, target, dict(ctx, output=label) if label else ctx,
                           name="{} · {}".format(job["name"], label)[:120] if label else None)
             saved += 1
@@ -598,7 +615,7 @@ class JobManager:
                 await self._fetch(video, part, comfy=live["comfy"])
                 parts.append(part)
                 # Where the next clip's sound starts: this clip's length, minus the one frame the two clips share.
-                voice_start += (await media.probe(part))["seconds"] - (1 / media.FPS if i else 0)
+                voice_start += (await media.probe(part))["seconds"] - (1 / await media.frame_rate(part) if i else 0)
                 if i < clips - 1:
                     frame = await media.last_frame(part, tmp / "frame_{}.png".format(i))
                     previous = await live["comfy"].upload("scene_chain_{}_{}.png".format(job["id"], i), frame.read_bytes(), "image/png")
@@ -608,7 +625,7 @@ class JobManager:
             folder, stem = await offload(self._target, job)
             target = folder / (stem + ".mp4")
             await media.join(parts, target)
-        await offload(self._record, job, "video", target, full_ctx)
+        await offload(self._record, job, "video", target, dict(full_ctx, fps=await media.frame_rate(target)))
 
     async def _render(self, job, live, wf, settings, client_id):
         """Run one graph on ComfyUI and wait for it. Returns (history entry, context)."""

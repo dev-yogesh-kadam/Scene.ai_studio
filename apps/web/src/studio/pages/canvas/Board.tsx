@@ -1,8 +1,9 @@
 // The board: an endless stage the camera looks at, the world on it (the labels behind, the frames of the items, the
-// NeuralCore's files and the jobs in progress), and what the pointer does there. Drag the empty board to pan (it carries
-// on when flicked), the wheel scrolls it (with Ctrl or ⌘, zooms), files dropped on it are uploaded. A frame is selected
-// by a click (Shift adds), dragged into another shot or into the gap between two (a new shot there). Only the frames
-// near the part of the world in view are drawn, so a canvas of hundreds of shots stays quick.
+// NeuralCore's files and the jobs in progress), and what the pointer does there. The middle button drags the board (it
+// carries on when flicked; a finger does too, the left button not), the wheel scrolls it (with Ctrl or ⌘, zooms), files
+// dropped on it are uploaded. A frame is selected by a click (Shift adds), dragged into another shot or into the gap
+// between two (a new shot there). Only the frames near the part of the world in view are drawn, so a canvas of hundreds
+// of shots stays quick.
 
 import {
   memo,
@@ -81,23 +82,34 @@ export const Board = memo(function Board(props: Props) {
     return () => camera.attach(null, null);
   }, [camera]);
 
-  // The wheel: scrolls the board, or with Ctrl or ⌘ zooms where the pointer is. Not passive: the page must not scroll.
+  // The wheel scrolls the board up and down (with Shift, sideways); with Ctrl or ⌘ it zooms where the pointer is, a
+  // mouse's notch a step, a pinch (which comes with Ctrl) smoothly. Not passive: the page must not scroll.
   useEffect(() => {
     const node = stage.current;
     if (!node) return;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       camera.stop();
-      if (e.ctrlKey || e.metaKey) return camera.zoomAt(e.clientX, e.clientY, camera.cam.k * Math.exp(-e.deltaY * 0.01));
+      if (e.ctrlKey || e.metaKey) {
+        const step = Math.max(-1, Math.min(1, e.deltaY / 100)) * 0.15; // a notch is about 100: 15% a notch
+        return camera.zoomAt(e.clientX, e.clientY, camera.cam.k * Math.exp(-step));
+      }
+      if (e.shiftKey && !e.deltaX) return camera.moveTo(camera.cam.x - e.deltaY, camera.cam.y);
       camera.moveTo(camera.cam.x - e.deltaX, camera.cam.y - e.deltaY);
     };
     node.addEventListener('wheel', wheel, { passive: false });
     return () => node.removeEventListener('wheel', wheel);
   }, [camera]);
 
-  // Drag the empty board to pan; a click on it clears the selection.
+  // The middle button (the wheel pressed) drags the board, from anywhere on it, over a frame too; so does a finger on a
+  // touch screen. The left button does not move it: a click on the empty board clears the selection.
   const pan = (e: ReactPointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.button !== 1) return;
+    const middle = e.button === 1;
+    if (!middle && e.pointerType === 'mouse') {
+      if (latest.current.selected.size) latest.current.onSelect(new Set());
+      return;
+    }
     camera.stop();
     const from = { x: e.clientX, y: e.clientY, cx: camera.cam.x, cy: camera.cam.y };
     const edge = camera.limits();
@@ -120,7 +132,7 @@ export const Board = memo(function Board(props: Props) {
       () => {
         setPanning(false);
         if (moved) camera.throwWith(speed.velocity());
-        else if (latest.current.selected.size) latest.current.onSelect(new Set());
+        else if (!middle && latest.current.selected.size) latest.current.onSelect(new Set());
       },
     );
   };
@@ -199,6 +211,9 @@ export const Board = memo(function Board(props: Props) {
       ref={stage}
       className={s['canvas-stage'] + (panning ? ' ' + s.panning : '')}
       onPointerDown={pan}
+      onMouseDown={(e) => {
+        if (e.button === 1) e.preventDefault(); // no autoscroll circle under a middle-button drag
+      }}
       onDragOver={(e) => {
         if (![...e.dataTransfer.types].includes('Files')) return;
         e.preventDefault();

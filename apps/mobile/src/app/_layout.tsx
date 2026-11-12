@@ -67,7 +67,7 @@ function Screens() {
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
         <Stack.Screen name="project/[id]" />
-        <Stack.Screen name="module/[id]" />
+        <Stack.Screen name="canvas/[id]" />
         <Stack.Screen name="skill/[id]" />
         <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="activity" />

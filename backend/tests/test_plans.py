@@ -26,7 +26,10 @@ def studio(client, monkeypatch):
     client.hold = {}      # job name -> asyncio.Event the render waits for
     client.failing = set()   # job names whose render fails
 
+    client.started = []   # job names, in the order their renders started
+
     async def render(job):
+        client.started.append(job["name"])
         if job["name"] in client.hold:
             await client.hold[job["name"]].wait()
         if job["name"] in client.failing:
@@ -320,3 +323,23 @@ def test_a_job_that_ends_between_the_plans_look_and_its_wait_is_not_missed(studi
     studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
     done = wait_for(studio, plan["id"], seconds=10)
     assert landed and done["state"] == "done" and time.time() - started < 10
+
+
+def test_a_plans_later_shots_keep_its_place_ahead_of_what_was_asked_for_after_it(studio):
+    """A plan whose next shot starts on the one being made (queued only once that is made) is not overtaken by a
+    video asked for after the plan, in another module: its shots render first, in their order."""
+    release = hold(studio, "one")
+    steps = [step("one"), step("two", after={"step": 0, "slot": "x"}), step("three")]
+    plan = studio.post("/api/agent/plans", json={"steps": steps}).json()
+    studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    until = time.time() + 10
+    while "one" not in studio.started and time.time() < until:
+        time.sleep(0.02)
+    other = studio.post("/api/jobs", data={"settings": json.dumps({"workflow": IMAGE, "name": "other", "values": {}})})
+    assert other.status_code == 200, other.text
+    release()
+    assert wait_for(studio, plan["id"])["state"] == "done"
+    until = time.time() + 10
+    while "other" not in studio.started and time.time() < until:
+        time.sleep(0.02)
+    assert studio.started == ["one", "two", "three", "other"]

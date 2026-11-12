@@ -304,11 +304,16 @@ animation here starts at --since (set from the clock), so drawing the log again 
 .result-media:focus-visible {
   outline-color: var(--agent);
 }
-.result-media img {
+.result-media img,
+.result-media video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.result-media video {
+  object-fit: contain;
+  background: #000;
 }
 .clip-badge {
   position: absolute;

@@ -67,6 +67,7 @@ export async function openLarge(id: number | null | undefined) {
 
 export function ResultMedia({ chat, take, step }: { chat: AgentChat; take: Take; step: Step }) {
   const p = progressOf(chat, take, step);
+  const [playing, setPlaying] = useState(false); // a video clicked plays here; "Show on canvas" goes to it there
   if (p.state !== 'done') {
     return (
       <div
@@ -89,13 +90,26 @@ export function ResultMedia({ chat, take, step }: { chat: AgentChat; take: Take;
     );
   const video = step.kind !== 'image';
   const seconds = video && (take.madeInfo?.duration || step.current?.duration);
+  if (video && playing)
+    return (
+      <div className={s['result-media']} style={sized(take, step)}>
+        <video
+          src={`/api/library/${id}/file`}
+          poster={`/api/library/${id}/poster`}
+          controls
+          autoPlay
+          playsInline
+          onEnded={() => setPlaying(false)}
+        />
+      </div>
+    );
   return (
     <button
       type="button"
       className={s['result-media']}
-      title="Show it on the canvas"
+      title={video ? 'Play' : 'Open it large'}
       style={sized(take, step)}
-      onClick={() => chat.env.onFocus(id)}
+      onClick={() => (video ? setPlaying(true) : void openLarge(id))}
     >
       <img src={`/api/library/${id}/poster`} alt={step.name} loading="lazy" />
       {video && (

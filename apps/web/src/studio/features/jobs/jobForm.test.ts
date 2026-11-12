@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existingRef, inUse, jobSettings, newForm, warningsOf, type Workflow } from './jobForm';
+import { existingRef, inUse, jobSettings, newForm, offered, optionsShown, warningsOf, type Workflow } from './jobForm';
 
 const wf: Workflow = {
   id: 'video/h3',
@@ -83,6 +83,67 @@ describe('the one rule for a job', () => {
     expect(warningsOf(form)).toEqual([]);
     expect(warningsOf({ ...form, resolution: 1080, values: { ...form.values, d: 15 } }).map((w) => w.message)).toEqual([
       'Long',
+    ]);
+  });
+});
+
+// H3 All In One: Best upscale is offered with Upscale video or Sharpen first frame on, and a RESOLUTION field (not a
+// size) is what its 1080 warning looks at.
+const onOff = (id: string, def = 'off') => ({
+  id,
+  label: id,
+  default: def,
+  choices: [
+    { id: 'off', label: 'Off' },
+    { id: 'on', label: 'On' },
+  ],
+});
+const h3: Workflow = {
+  ...wf,
+  id: 'video/h3_all_in_one',
+  controls: [...wf.controls, { id: '501:value', label: 'RESOLUTION', role: 'resolution', default: 720 }],
+  options: [
+    onOff('upscale'),
+    onOff('sharpen'),
+    {
+      id: 'best_upscale',
+      label: 'Best upscale',
+      default: '7b',
+      when: [{ upscale: 'on' }, { sharpen: 'on' }],
+      choices: [
+        { id: '7b', label: 'Best (7B)' },
+        { id: '3b', label: 'Fast (3B)' },
+      ],
+    },
+    onOff('smooth'),
+  ],
+  size: null,
+  confirm: [{ message: 'Use 720 + Upscale', when: { resolution: 1080 } }],
+};
+
+describe('options some choices leave out', () => {
+  it.each([
+    ['off', 'off', false],
+    ['on', 'off', true],
+    ['off', 'on', true],
+    ['on', 'on', true],
+  ])('Best upscale with Upscale video %s and Sharpen first frame %s is offered: %s', (upscale, sharpen, shown) => {
+    const form = { ...newForm(h3), options: { upscale, sharpen, best_upscale: '7b', smooth: 'off' } };
+    expect(offered(h3.options[2], form.options)).toBe(shown);
+    expect(optionsShown(form).map((o) => o.id)).toEqual(
+      shown ? ['upscale', 'sharpen', 'best_upscale', 'smooth'] : ['upscale', 'sharpen', 'smooth'],
+    );
+  });
+
+  it('starts on the defaults: no upscale, no sharpening, 7B, no smooth motion', () => {
+    expect(newForm(h3).options).toEqual({ upscale: 'off', sharpen: 'off', best_upscale: '7b', smooth: 'off' });
+  });
+
+  it('warns on a RESOLUTION field of 1080, as on a size', () => {
+    const form = newForm(h3);
+    expect(warningsOf(form)).toEqual([]);
+    expect(warningsOf({ ...form, values: { ...form.values, '501:value': 1080 } }).map((w) => w.message)).toEqual([
+      'Use 720 + Upscale',
     ]);
   });
 });

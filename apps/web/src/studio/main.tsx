@@ -20,6 +20,20 @@ import '../common/landing/Landing7.module.css';
 import '../common/landing/Landing8.module.css';
 import { App, createRouter, makeQueryClient } from './App';
 
+// A page opened before the studio was built again asks for files the new build no longer has: load the new build, once
+// (a second failure within a minute is a real one, and shows).
+window.addEventListener('vite:preloadError', (e) => {
+  try {
+    const last = Number(sessionStorage.getItem('scene.reloaded') || 0);
+    if (Date.now() - last < 60_000) return;
+    sessionStorage.setItem('scene.reloaded', String(Date.now()));
+  } catch {
+    // no storage: reload anyway
+  }
+  e.preventDefault();
+  window.location.reload();
+});
+
 const router = createRouter();
 const client = makeQueryClient();
 
