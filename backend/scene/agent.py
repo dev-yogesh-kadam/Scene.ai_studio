@@ -10,7 +10,7 @@ import math
 import re
 import time
 
-from . import agent_tools, camera, claude, guardrails, kit, prompters, sequence
+from . import generation_models, agent_tools, camera, claude, guardrails, kit, prompters, sequence
 from .db import offload
 
 MAX_STEPS = 12   # a longer film runs in stages (cast, stills, clips), each priced and approved on its own
@@ -82,23 +82,34 @@ they already made. When they ask for something small, you do it well and quickly
 How you work. The creative process scales with the job.
 
 Small jobs (one or a few shots, one picture, an edit, music, a retake, a quick test, anything up to 4 generate steps
-the studio does not price as a big job): never ask questions about them, but for the resolution of a video (below).
+the studio does not price as a big job): never ask questions about them, but for the model and the resolution (below).
 Decide everything else yourself, plan it, and say what you chose in "why" and "thought". "concept" is "".
 
-The resolution of a video. Before the first video plan of a conversation, unless the user named a resolution or the
-conversation already settled one (its "direction" says "Resolution:"), ask it in one "question" and plan no steps in
-that answer: "What resolution?" with the options 480p (default: the fastest, for drafts and most work), 720p (sharper,
-about twice the time) and, when the shots are 10 seconds or less, 1080p (a final or a big screen, the slowest), and
-"default" 480p. Once answered, keep it in "direction" as a line "Resolution: 480p" (or the one picked) and use it for
-every video shot of the conversation without asking again; a resolution the user names later replaces it. On a big
-job it is one of the brief card's questions instead of a card of its own.
+The model and the resolution. The studio sets no model for the user: they pick it. Before the first video plan of a
+conversation, unless the user named a video model (a ComfyUI workflow's title or id, or a generation server model's
+name: "Kling", "Seedance 2.5") or the conversation already settled one (its "direction" says "Video model:"), ask which,
+and plan no steps in that answer: "Which video model?" with two to four that fit the job best as options, from both
+lists (each its title or the model's name; its "details" line what it is best at, in a few words), and "default" the
+one you would pick (MiniMax H3 Max when the generation server's models are listed and nothing points elsewhere). The same before the first picture plan: "Which image model?", settled by "Image model:". Then the
+resolution, unless the user named one or "direction" already says it for that kind: "What resolution?" with that
+workflow's own resolutions as options (its "resolutions", or the choices of its "resolution" setting), the lowest as
+"default" (the fastest and cheapest, for drafts and most work), and for a video the highest only when its shots are
+10 seconds or less. A model whose entry has "with_references" renders only those resolutions when a shot is given
+references (reference pictures, the cast's, sound, a clip; a first or last frame alone is not one): for shots with
+references offer only those, the lowest of them as "default" (MiniMax H3 Max: 768p, not 480p). When both are missing, ask them together as "questions" (the resolution's options are then those of
+the model you recommend; when the user picks another, use its resolution nearest to the one they picked). Once
+answered, keep them in "direction" as lines "Video model: <workflow id>" (for a generation server model "Video
+model: video/generation_video model=<its model>"), "Video resolution: 480p", "Image model: <workflow id>" (or
+"image/generation_image model=<its model>"), "Image resolution: 2K", and use them for every shot of that kind in the conversation without asking
+again; a model or resolution the user names later replaces it. On a big job they are among the brief card's questions
+instead of a card of their own.
 
 Big jobs: a plan of more than 4 generate steps, or one the studio prices above its big-job limit (an ad campaign, a
 short film, a music video, a reel of many shots). For a big job:
 1. The brief. Read /brief from the memory (state_read). When it is missing and the conversation has not already
    settled these, ask ONE brief card first, as "questions" (at most {max_questions}, each with a "default" you would
-   pick and options that are real choices): the audience, the platform and shape, the tone, and the resolution of
-   its videos (when it has videos and none is settled; otherwise a reference or a must-have). Plan no steps in that answer. When the user's messages already answer them, write /brief yourself and do
+   pick and options that are real choices): the models and resolutions not settled yet (see "The model and the
+   resolution"), then, as many as fit, the audience, the platform and shape, the tone, a reference or a must-have. Plan no steps in that answer. When the user's messages already answer them, write /brief yourself and do
    not ask. Once answered, save it with state_write to /brief as {"audience", "platform", "shape", "tone",
    "must_have"}; in a conversation that keeps no memory, put it in "direction" as one line that starts "Brief:".
 2. The concept. In "thought", one sentence: the idea the whole piece serves. Put the same sentence in "concept", and
@@ -126,7 +137,7 @@ When to ask, and when to just do it:
 - "from scratch", "generic", "your own" or "anything": invent the details yourself for that same subject (an ad for a
   pet page shows a pet) and plan it.
 - "generate it", "make it", "do it" or "use that prompt" after you wrote a prompt, a description or an idea: plan a
-  "generate" step whose "prompt" is that text from your earlier reply. A prompt alone is enough for the default workflow.
+  "generate" step whose "prompt" is that text from your earlier reply. A prompt alone is enough for a workflow that takes a prompt.
 - "start", "go", "approve", "generate" or "yes" after a reply of yours that had no plan: plan it now, with steps.
 - Ask in only two other cases: an editing tool with no video selected (return no steps and ask the user to select the
   video on the canvas), and a NeuralCore entry marked "unnamed" that you need (ask once who or what it is, and when
@@ -292,8 +303,16 @@ Always:
 - One shot is ONE action in one place.
 - Never write the settings (resolution, quality, length, orientation, aspect ratio) or a tag such as @1 into a prompt.
 The steps:
-- Each step is one job on one of the listed workflows. Use the one marked "default" unless the instruction names
-  another or needs something only another can do (an image instead of a video, for example). Between workflows that
+- Each step is one job on one of the listed workflows. Use the model the user picked for its kind ("direction":
+  "Video model:", "Image model:"; one marked "default" when there is no pick) unless the instruction names another or
+  needs something only another can do (an image instead of a video, for example).
+- A generation server model is the "model" setting of its kind's one workflow (video/generation_video,
+  image/generation_image), in "choices", with that model's resolution, shape and sound: another model is the same
+  workflow with another "model", never another workflow. Keep "duration" within the model's "seconds" and the
+  references within its "references" (some take none). Pick another model when the user names one ("make it with
+  Kling") or the shot needs it: Seedance to combine first or last frames with reference pictures, Kling 4.0 or Wan 3.0
+  for one take of up to 30 seconds, a model that takes reference pictures for a character who comes back. Pictures
+  stay on the ComfyUI picture workflows unless the user asks for a generation server model. Between workflows that
   make the same kind of thing (the picture models, the restyles), pick the one whose "pick_when" fits the shot best,
   and keep to it for every shot of one piece so they look alike; mind what it says of its licence. A workflow marked
   "needs_references" only works when its required slots are filled through "uses".
@@ -375,8 +394,9 @@ or a quality they name is used exactly):
   group: landscape. An Instagram feed post, a profile picture, a product tile, an album or podcast cover: square. When
   nothing says, follow the brief, then the earlier plans of this conversation, then the workflow's default. All the
   shots of one piece keep one shape.
-- "resolution": the one the user picked (see "The resolution of a video"); until then 480, the studio's default, which
-  is each workflow's "default_resolution". 720 when the user asks for sharper or better; 1080 for a final, a hero shot
+- "resolution": the one the user picked (see "The model and the resolution"); until then the workflow's
+  "default_resolution". A workflow whose resolution is one of its "settings" (the generation workflows: 480p, 768p,
+  1080p, 2K) takes it in "choices" instead, as that setting's value. 720 when the user asks for sharper or better; 1080 for a final, a hero shot
   or a big screen, only for shots of 10 seconds or less.
 - "choices": the workflow's own settings, listed under its "settings". Set one only when the script or the user calls
   for it, by copying its "setting" and one of its "value"s; leave the rest out and they keep their defaults.
@@ -428,7 +448,8 @@ Your answer:
   your previous reply ("generate it", "yes, go", "इसे बना दो", "hazlo"); then plan it now, with steps. False otherwise.
 - Decide these three from what the words mean, in any language the user writes in.
 
-Two examples of the shape (DEFAULT stands for the id of the workflow marked "default"; the fields left out keep their
+Two examples of the shape (MODEL stands for the id of the video workflow the user picked: this conversation's
+"direction" already says "Video model:" and "Video resolution:"; the fields left out keep their
 defaults; the prompts are cut short here to show the shape: write yours in full, as the workflow's prompt guide says):
 User: "hi, what can you do?"
 {"thought": "A greeting and a question about the studio; nothing to make yet.", "concept": "", "reply": "Hi! I plan and
@@ -440,16 +461,16 @@ User: "a girl runs through a rainy market, jumps over a crate and hides behind a
 close on the run so the first second hooks; the sizes go wide for the jump and close again for the hiding.", "concept":
 "", "reply": "Three shots of the chase, each going on from the last: the **run**, the **jump** and the **hiding**.",
 "steps": [
- {"tool": "generate", "workflow": DEFAULT, "name": "Market run", "prompt": "A girl of about twenty with a black braid and
+ {"tool": "generate", "workflow": MODEL, "name": "Market run", "prompt": "A girl of about twenty with a black braid and
  a yellow raincoat runs straight at the camera through a crowded night market in heavy rain, splashing through puddles
  under neon signs.", "orientation": "portrait", "duration": 6, "after": 0, "shot_size": "MCU", "angle": "eye", "move":
  "track", "end_state": "she nears a stack of crates", "place": "rainy night market", "why": "portrait for Reels; a
  close, moving open as the hook"},
- {"tool": "generate", "workflow": DEFAULT, "name": "Crate jump", "prompt": "A girl of about twenty with a black braid
+ {"tool": "generate", "workflow": MODEL, "name": "Crate jump", "prompt": "A girl of about twenty with a black braid
  and a yellow raincoat leaps over a wooden crate in a rainy night market and lands running.", "orientation": "portrait",
  "duration": 4, "after": 1, "shot_size": "WS", "angle": "low", "move": "static", "end_state": "she runs on toward the
  stalls", "place": "rainy night market", "why": "4 s for one jump"},
- {"tool": "generate", "workflow": DEFAULT, "name": "Hiding", "prompt": "A girl of about twenty with a black braid and a
+ {"tool": "generate", "workflow": MODEL, "name": "Hiding", "prompt": "A girl of about twenty with a black braid and a
  yellow raincoat crouches behind a fruit stall in a rainy night market, breathing hard, rain dripping from the awning.",
  "orientation": "portrait", "duration": 5, "after": 2, "shot_size": "CU", "angle": "eye", "move": "push in",
  "end_state": "she holds still, watching", "place": "rainy night market", "why": ""}],
@@ -1535,10 +1556,18 @@ def offer(schema, attached=True):
         info["orientation"] = "landscape, portrait or square; default " + schema["size"]["orientation"]
     elif "resolution" in roles and AGENT_RESOLUTION in schema["resolutions"]:
         info["default_resolution"] = AGENT_RESOLUTION
-    if "duration" in roles:
+    if "duration" in roles and generation_models.has_models(schema):
+        info["duration_seconds"] = ("the chosen model's \"seconds\" (under \"models\"), decided from the shot; {} to {} where "
+                                    "a model does not say").format(*SHOT_SECONDS)
+    elif "duration" in roles:
         info["duration_seconds"] = "{} to {}: decide it from the shot (default {:g}){}".format(
             *SHOT_SECONDS, roles["duration"]["default"],
             "; decimals allowed: the clip has round(24 x seconds) frames" if roles["duration"]["type"] == "float" else "")
+    if generation_models.is_generation(schema):   # the generation server's models: each one its own entry
+        info["source"] = "generation server"
+    if generation_models.has_models(schema):   # a voiceover, music, lip sync … are one model each: no "models"
+        info["models"] = [{k: v for k, v in dict(m, about=m["about"][:MODEL_MEANS]).items() if k != "prices"}
+                          for m in (schema.get("models") or generation_models.catalog(schema))]
     choosable = choosable_settings(schema)
     if choosable:
         info["settings"] = choosable
@@ -1570,7 +1599,19 @@ def offer(schema, attached=True):
 
 def choosable_settings(schema):
     """The workflow's own settings the agent may decide: its option groups (mode, speed, quality) and its controls that
-    offer a list of values (the length of a song, an aspect ratio). Each as {"setting", "about", "default", "choices"}."""
+    offer a list of values (the length of a song, an aspect ratio). Each as {"setting", "about", "default", "choices"}.
+    A generation workflow's Model is a setting whose choices are its "models" (offer), and its Resolution, Shape and
+    Sound, one option per group of models, are one setting each: the chosen model's own (apply_choices finds which)."""
+    if generation_models.has_models(schema):
+        model = generation_models.model_option(schema)
+        found = [{"setting": "model", "about": "the model that makes it: one of \"models\" (its \"model\" value)", "default": model["default"]}]
+        said = {"resolution": "one of the chosen model's \"resolutions\"", "shape": "one of the chosen model's \"shapes\", as written (16:9)",
+                "sound": "on or off, only for a model whose \"sound\" is \"choice\""}
+        defaults = generation_models.settings_of(schema, model["default"])
+        for label in dict.fromkeys(o["label"].strip().lower() for o in schema["options"] if o["id"] != "model"):
+            first = defaults.get(label) or next(o for o in schema["options"] if o["label"].strip().lower() == label)
+            found.append({"setting": label, "about": said.get(label, first["label"]), "default": first["default"]})
+        return found
     found = [{"setting": o["id"], "about": o["label"], "default": o["default"],
               "choices": [{"value": c["id"], "means": str(c.get("hint") or c.get("label") or "")[:110]} for c in o["choices"]]}
              for o in schema["options"]]
@@ -1584,6 +1625,7 @@ def choosable_settings(schema):
     return found
 
 
+MODEL_MEANS = 320   # a generation model's hint (its strengths, lengths, frames, references, prices) runs to about 250
 FREE_TYPES = ("bool", "string", "text")   # the kinds of a workflow's setting the model may set to its own value
 FREE_CHARS = 4000
 PROMPT_CHARS = 4000   # the most of a prompt a job is given (settings_for); a longer one goes back to the model (too_long)
@@ -1630,11 +1672,18 @@ def apply_choices(schema, settings, choices):
     free = {c["id"]: c["type"] for c in schema["controls"] if not c["role"] and not c.get("choices") and c["type"] in FREE_TYPES}
     # A model sometimes names a setting by its label ("speed") instead of its id ("mode").
     labels = {o["label"].strip().lower(): o["id"] for o in schema["options"]}
-    for choice in choices if isinstance(choices, list) else []:
-        if not isinstance(choice, dict):
-            continue
+    generation = generation_models.has_models(schema)
+    given = [c for c in choices if isinstance(c, dict)] if isinstance(choices, list) else []
+    # A generation workflow's Model first: which Resolution or Shape a setting means depends on it.
+    given.sort(key=lambda c: str(c.get("setting") or "").strip().lower() != "model")
+    for choice in given:
         key, value = str(choice.get("setting") or ""), str(choice.get("value") or "").strip()
-        if key not in options and key not in controls:   # an id always wins: H3's speed is "mode", its Mode is "engine"
+        if generation and key not in controls:   # the option of that label shown for the chosen model
+            found = generation_models.option_for(schema, key, generation_models.model_of(schema, settings["options"]))
+            key = found["id"] if found else key
+            if found and value not in options[key]:   # a value by its label: "16:9", "With sound", "Seedance 2.5"
+                value = next((c["id"] for c in found["choices"] if str(c.get("label") or "").strip().lower() == value.lower()), value)
+        elif key not in options and key not in controls:   # an id always wins: H3's speed is "mode", its Mode is "engine"
             key = labels.get(key.strip().lower(), key)
         if key in options and value in options[key]:
             settings["options"][key] = value
@@ -1919,6 +1968,8 @@ def likely_kinds(texts):
 def workflow_line(offer):
     """A workflow in one line, for the kinds a message is not about: enough to know it is there and what it is for."""
     line = {"id": offer["id"], "title": offer["title"], "makes": offer["makes"], "about": offer["about"][:120]}
+    if offer.get("models"):   # the generation server's: its models by name, the rest with workflow_info
+        line["models"] = [m["name"] for m in offer["models"]]
     if offer.get("pick_when"):
         line["pick_when"] = offer["pick_when"][:160]
     if offer.get("default"):
@@ -1928,13 +1979,25 @@ def workflow_line(offer):
 
 def workflows_part(offers, full):
     """The "workflows" part of the message: every workflow the agent may use, those in `full` in full and the rest in one
-    line each (workflow_info gives one of those in full)."""
+    line each (workflow_info gives one of those in full). ComfyUI's workflows and the generation server's models are
+    two lists, never one: a model is picked as the "model" setting of its workflow."""
     shown = {o["id"] for o in full}
+    comfy = [o for o in offers if o.get("source") != "generation server"]
+    models = [o for o in offers if o.get("source") == "generation server"]
     if len(shown) == len(offers):
-        return "Workflows:\n" + "\n".join(json.dumps(o) for o in offers)
-    return ("Workflows (every one you may use: those of the kinds this message is about in full, the others in one line; "
-            "before you plan a step with one of those, call workflow_info with its id for its settings, references and "
-            "prompt guide):\n" + "\n".join(json.dumps(o if o["id"] in shown else workflow_line(o)) for o in offers))
+        text = "Workflows (ComfyUI on the render PC):\n" + ("\n".join(json.dumps(o) for o in comfy) or "(none)")
+    else:
+        text = ("Workflows (ComfyUI on the render PC; every one you may use: those of the kinds this message is about in "
+                "full, the others in one line; before you plan a step with one of those, call workflow_info with its id "
+                "for its settings, references and prompt guide):\n"
+                + ("\n".join(json.dumps(o if o["id"] in shown else workflow_line(o)) for o in comfy) or "(none)"))
+    if models:
+        text += ("\n\nModels (the generation server's: Seedance, Kling, Wan, MiniMax and the others, made on the provider). "
+                 "These are models, not workflows: video and pictures each have one workflow, and a step picks its model "
+                 "with the setting \"model\" (one of its \"models\"), then that model's own resolution, shape and sound, and "
+                 "seconds within its \"seconds\"; one with no \"models\" (a voiceover, music, a sound effect, lip sync, "
+                 "upscale) is one model on its own, used as it is:\n" + "\n".join(json.dumps(o if o["id"] in shown else workflow_line(o)) for o in models))
+    return text
 
 
 def workflow_info(offers, wanted):
@@ -2340,6 +2403,10 @@ def shape_like(schema, settings, shape):
         choices = [c for c in control.get("choices") or [] if _ratio(c)]
         if control["input"] == "aspect_ratio" and choices:
             settings["values"][control["id"]] = min(choices, key=lambda c: abs(math.log(_ratio(c) / ratio)))
+    option = generation_models.option_for(schema, "shape", generation_models.model_of(schema, settings.get("options")))
+    choices = [c for c in (option or {}).get("choices", []) if _ratio(c.get("label"))]
+    if choices:   # a generation model's Shape (16:9, 21:9, 9:16 ...): its nearest
+        settings.setdefault("options", {})[option["id"]] = min(choices, key=lambda c: abs(math.log(_ratio(c["label"]) / ratio)))["id"]
 
 
 def shape_of(schema, settings, ctx):
@@ -2354,6 +2421,12 @@ def shape_of(schema, settings, ctx):
         chosen = (settings.get("options") or {}).get(option["id"], option.get("default"))
         if chosen in ORIENTATION_RATIOS:
             return [round(1000 * ORIENTATION_RATIOS[chosen]), 1000]
+    option = generation_models.option_for(schema, "shape", generation_models.model_of(schema, settings.get("options")))
+    if option:
+        chosen = (settings.get("options") or {}).get(option["id"], option.get("default"))
+        label = next((c.get("label") for c in option["choices"] if c["id"] == chosen), None)
+        if _ratio(label):
+            return [round(1000 * _ratio(label)), 1000]
     return None
 
 
@@ -2391,6 +2464,7 @@ def settings_for(schema, step, selection_ids, project_id, filled=(), used_items=
         # that takes decimals gets them (a clip of exactly 151 frames is 151 / 24 s); the others whole seconds.
         seconds = max(float(asked), spoken_seconds(prompt))
         seconds = round(seconds, 4) if roles["duration"]["type"] == "float" else int(seconds)
+        wanted = seconds   # before the usual bounds: a generation model may take more (bound_by_model)
         values[roles["duration"]["id"]] = max(SHOT_SECONDS[0], min(SHOT_SECONDS[1], seconds))
     resolution = orientation = None
     if schema.get("size"):
@@ -2416,6 +2490,11 @@ def settings_for(schema, step, selection_ids, project_id, filled=(), used_items=
                 "values": values, "options": {o["id"]: o["default"] for o in schema["options"]},
                 "resolution": resolution, "orientation": orientation, "seed_mode": "random", "clips": clips,
                 "project_id": project_id, "refs": {}}
+    if generation_models.has_models(schema):   # the model first: the shapes and lengths are its own
+        apply_choices(schema, settings, [c for c in step.get("choices") or [] if isinstance(c, dict)
+                                         and str(c.get("setting") or "").strip().lower() == "model"])
+        if "duration" in roles:
+            values[roles["duration"]["id"]] = bound_by_model(schema, settings, wanted, values[roles["duration"]["id"]])
     # A workflow that takes an aspect ratio instead of an orientation gets the ratio that orientation means.
     if not schema.get("size") and step.get("orientation") in ORIENTATIONS:
         shape_like(schema, settings, {"landscape": (16, 9), "portrait": (9, 16), "square": (1, 1)}[step["orientation"]])
@@ -2435,6 +2514,17 @@ def settings_for(schema, step, selection_ids, project_id, filled=(), used_items=
 
 
 LENGTH_ASKED = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*(seconds?|secs?|s\b|minutes?|mins?)", re.IGNORECASE)
+
+
+def bound_by_model(schema, settings, wanted, usual):
+    """A generation shot's seconds: what was wanted, within the chosen model's lengths when the generation server's
+    list says them (schema["models"]); otherwise `usual`, the agent's own bounds."""
+    model = generation_models.model_of(schema, settings["options"])
+    entry = next((m for m in schema.get("models") or [] if m["model"] == model), None)
+    span = (entry or {}).get("seconds") or {}
+    if span.get("min") is None and span.get("max") is None:
+        return usual
+    return int(max(span.get("min", 1), min(span.get("max", wanted), wanted)))
 
 
 def seconds_asked(instruction):

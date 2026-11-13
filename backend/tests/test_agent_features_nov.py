@@ -238,6 +238,7 @@ def shot(client, user_id, job_id, kind="video", take=1):
 
 
 def test_a_finished_shot_is_checked_in_the_background_and_retaken_once_when_allowed(client, monkeypatch):
+    monkeypatch.setattr(aftercare, "REVIEW_PICTURES", True)   # off in the studio; the check itself still works
     me = register(client)
     state = client.app.state
     assert any(getattr(f, "__name__", "") == "finished" for f in state.jobs.finished)   # installed at start
@@ -273,27 +274,41 @@ def test_a_finished_shot_is_checked_in_the_background_and_retaken_once_when_allo
     assert client.portal.call(aftercare.after, state, job, 0) is None
 
 
-def test_the_shots_of_a_batch_are_checked_once_the_last_is_made(client, monkeypatch):
+def test_a_shot_is_checked_as_soon_as_it_is_made_against_the_shot_before(client, monkeypatch):
+    """Not after the rest of its batch: the other shots of the plan may still be rendering. A shot that goes on from
+    another (its "parent", a clip) is checked against that shot too."""
+    monkeypatch.setattr(aftercare, "REVIEW_PICTURES", True)   # off in the studio; the check itself still works
     me = register(client)
     state = client.app.state
     model_says(monkeypatch, client, PASSED)
-    monkeypatch.setattr(aftercare, "WAIT", 0)
-    monkeypatch.setattr(aftercare, "BATCH_POLL", 0.01)
+    seen = []
+    real = aftercare.review.review_item
+
+    async def review_item(state_, user_id, item, prompt, references=(), previous=None, model=None):
+        seen.append(previous)
+        return await real(state_, user_id, item, prompt, references, previous, model)
+    monkeypatch.setattr(aftercare.review, "review_item", review_item)
+    before, _ = shot(client, me["id"], "job0")
+    item, job = shot(client, me["id"], "job1")
+    job["settings"]["parent"] = before
+    add = "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created) VALUES (?, ?, 'Next', 'video/h3_all_in_one', 'video', ?, 'running', 1)"
+    state.db.run(add, ("job2", me["id"], json.dumps(job["settings"])))   # the next shot of the plan, still being made
+    assert client.portal.call(aftercare.after, state, job, 0)["passed"] is True
+    assert review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,)))["by"] == "auto"
+    assert seen and seen[0] is not None and str(seen[0][0]).endswith("job0.mp4") and seen[0][1] == "video"
+    assert aftercare.WAIT <= 5   # a moment for its item to be filed, no longer half a minute
+
+
+def test_a_made_picture_or_clip_is_not_checked_now(client, monkeypatch):
+    """The agent no longer looks at the pictures and clips it made (the user's choice): nothing is asked of its model."""
+    me = register(client)
+    state = client.app.state
+    asked = []
+    monkeypatch.setattr(aftercare, "_picture", lambda *a: asked.append(a))
     item, job = shot(client, me["id"], "job0")
-    add = "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created) VALUES (?, ?, 'Other', 'video/h3_all_in_one', 'video', ?, 'running', 1)"
-    # a render the agent did not plan is not part of the batch
-    state.db.run(add, ("by_hand", me["id"], "{}"))
-    assert not aftercare.batch_running(state, job)
-    # another shot of the plan is still being made: nothing is checked yet
-    state.db.run(add, ("job1", me["id"], json.dumps(job["settings"])))
-    assert aftercare.batch_running(state, job)
-    checked = client.portal.start_task_soon(aftercare.after_batch, state, job)
-    time.sleep(0.2)
-    assert not checked.done() and review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,))) is None
-    # the last one is made: now it is
-    state.db.run("UPDATE jobs SET status = 'done' WHERE id = 'job1'")
-    checked.result(timeout=10)
-    assert review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,)))["passed"] is True
+    assert aftercare.REVIEW_PICTURES is False
+    assert client.portal.call(aftercare.after, state, job, 0) is None and not asked
+    assert review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,))) is None
 
 
 def test_a_sound_is_measured_for_its_length_loudness_and_silences(client, tmp_path):
@@ -373,6 +388,18 @@ def test_a_chat_pinned_to_a_workflow_plans_on_it(client, monkeypatch):
     assert any(t.startswith("Uses the workflows chosen for this chat: ") for t in said)
     assert any("which this chat does not use: it is made on" in t for t in said)
     assert plan["steps"][0]["settings"]["workflow"] == "video/h3_all_in_one"
+
+
+def test_a_chat_pinned_to_a_model_plans_on_that_model_only(client, monkeypatch):
+    register(client)
+    step = dict(STEP, workflow="video/h3_all_in_one", choices=[{"setting": "model", "value": "minimax_h3_max"}])
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "One.", "steps": [step]})
+    plan = client.post("/api/agent/plan", json={"instruction": "a dog", "workflows": ["video/generation_video#kling_4_0"]}).json()
+    said = [e.get("text", "") for e in plan["activity"]]
+    assert "Uses the workflows chosen for this chat: Kling 4.0" in said or any(
+        t.startswith("Uses the workflows chosen for this chat: Kling") for t in said), said
+    settings = plan["steps"][0]["settings"]
+    assert settings["workflow"] == "video/generation_video" and settings["options"]["model"] == "kling_4_0"   # never another model
 
 
 # ---------------------------------------------------------------- 17: an entry's fields through book_save

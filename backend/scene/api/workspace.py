@@ -12,7 +12,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .. import aftercare, agent, camera, guardrails, claude, conversations, content_check, core, craft_library, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
+from .. import aftercare, agent, camera, generation_models, guardrails, claude, conversations, content_check, core, craft_library, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
     pages, runs, placement, sessions, sharing, skills, traces, web
 from ..db import as_everyone, offload
 from ..comfy import workflows
@@ -25,7 +25,7 @@ from .film_ops import (  # noqa: F401 (the names are workspace's too: plans.py a
     RENDER_FIELDS, _builder_guides, _finished, _hyperframes_guide, _motion_price, _motion_seconds, _named_videos, add_sound,
     assemble, export_timeline, motion_estimate, motion_render, motion_scenes, motion_templates)
 from .deps import allowed as within_limit, costly, current_user, project_ref
-from .studio import fit_resolution, price
+from .studio import fit_resolution, price, unreachable
 
 router = APIRouter(prefix="/api", tags=["workspace"])
 
@@ -407,7 +407,8 @@ async def _retake(state, user, item, verdict, previous):
     except (workflows.WorkflowError, HTTPException, ValueError, KeyError):
         return None
     return {"settings": settings, "credits": quote["credits"], "time": quote["text"], "prompt": fix["prompt"],
-            "why": fix.get("why") or "", "start": start, "workflow_title": schema["title"]}
+            "why": fix.get("why") or "", "start": start,
+            "workflow_title": generation_models.title_of(schema, settings.get("options"))}
 
 
 @router.post("/agent/compact", dependencies=[costly("agent")])
@@ -639,6 +640,18 @@ async def agent_step(body: dict, request: Request, user: dict = Depends(current_
     uses = uses + [dict(fill, cast=True) for fill in kit.fills(
         schema, pinned, {u["slot"] for u in uses}, {u["asset"] for u in uses if u.get("asset")}, step.get("leave_out") or (),
         {u["id"] for u in uses if u.get("id")} | ({started} if started else set()))]
+    if generation_models.has_models(schema) and first_frame and (start or after):   # a frame or references, not both
+        filled = lambda: {u["slot"] for u in uses} | {first_frame}
+        if start and generation_models.clashes(schema, settings["options"], filled()):
+            uses = [u for u in uses if not u.get("cast")]   # the picture asked for wins over the always-on cast
+        if generation_models.clashes(schema, settings["options"], filled()):
+            start = after = None
+            step = dict(step, why=" ".join(filter(None, [step.get("why"), generation_models.clash_note(schema, settings["options"])])))
+    if generation_models.has_models(schema):   # given references now: a resolution its model renders with them
+        rules = await offload(generation_models.reference_rules, state.db)
+        fitted = generation_models.fit_references(schema, settings, {u["slot"] for u in uses}, rules)
+        if fitted:
+            step = dict(step, why=" ".join(filter(None, [step.get("why"), fitted])))
     try:
         return await _shown_step(state, schema, settings, await _menu(state, user), uses,
                                  dict(start, slot=first_frame) if start else None,
@@ -870,13 +883,19 @@ async def _planning(request, user, body, instruction, project):
     schemas = {}
     default = state.catalog.current(state.settings.default_workflow)
     menu = await _menu(state, user)
-    # The workflows the user pinned for this chat (the panel's choice, kept with the tab): of a kind they pinned (video,
-    # image), only those are offered, unless the message names another.
-    chat_pins = [w for w in body.get("workflows") or [] if isinstance(w, str)][:12] if isinstance(body.get("workflows"), list) else []
+    # The workflows and models the user pinned for this chat (the panel's choice, kept with the tab): of a kind they
+    # pinned (video, image, audio, upscale), only those are offered, unless the message names another. A generation
+    # server model is pinned as "<workflow id>#<model>": its workflow is offered with only the models pinned.
+    pin_values = [w for w in body.get("workflows") or [] if isinstance(w, str)][:40] if isinstance(body.get("workflows"), list) else []
+    chat_pins, pinned_models = list(dict.fromkeys(w.split("#", 1)[0] for w in pin_values)), {}
+    for w in pin_values:
+        if "#" in w:
+            pinned_models.setdefault(w.split("#", 1)[0], []).append(w.split("#", 1)[1])
     pinned_kinds = {w.split("/", 1)[0] for w in chat_pins if w.split("/", 1)[0] in PINNABLE}
     named_here = instruction.lower()
     every_workflow = await state.catalog.listing()
     usable_ids = await offload(state.credits.enabled_of, [w["id"] for w in every_workflow], user)   # one query, not one a workflow
+    usable_ids -= set(await unreachable(state, every_workflow))   # a generation model no server in use can make now
     for listed in every_workflow:
         if listed.get("error") or listed["id"] not in usable_ids:
             continue
@@ -890,6 +909,14 @@ async def _planning(request, user, body, instruction, project):
                 and listed["title"].lower() not in said and listed["id"].lower() not in said and listed["id"] not in chat_pins:
             continue
         schema = workflows.describe(await state.catalog.load(listed["id"]))
+        if generation_models.has_models(schema):   # the generation server's models, with its list when it answers
+            schema["models"] = generation_models.catalog(schema, await state.generation_models.live(schema["id"]))
+            rules = await offload(generation_models.reference_rules, state.db)
+            for entry in schema["models"]:   # the resolutions it renders with references, when they are fewer
+                if rules.get(entry["model"]):
+                    entry["with_references"] = rules[entry["model"]]
+            if listed["id"] in pinned_models and listed["title"].lower() not in named_here:   # only the models pinned
+                schema = generation_models.only_models(schema, pinned_models[listed["id"]])
         if schema["resolutions"]:   # only the resolutions an admin left on are offered (credits.allowed_resolutions)
             allowed = await offload(state.credits.allowed_resolutions, schema["id"], schema["resolutions"])
             if not allowed:
@@ -898,7 +925,9 @@ async def _planning(request, user, body, instruction, project):
         schemas[listed["id"]] = schema
     if chat_pins:
         yield activity("plan", "Uses the workflows chosen for this chat: {}".format(
-            ", ".join(schemas[w]["title"] for w in chat_pins if w in schemas) or "none of them is switched on now"))
+            ", ".join(", ".join(m["name"] for m in schemas[w].get("models") or []) if w in pinned_models
+                      and schemas[w].get("models") else schemas[w]["title"] for w in chat_pins if w in schemas)
+            or "none of them is switched on now"))
     # The pictures the user names in the message ("Maya - @3", "location - Bonfire Clearing - @10") are kept in the
     # project's kit under those names: every agent tab knows them from then on, by name and by id.
     folder, outputs = state.assets_dir / str(user["id"]), await offload(state.outputs.folder, user["id"])
@@ -2379,6 +2408,22 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
     uses = uses + [dict(fill, cast=True) for fill in kit.fills(
         schema, pinned, {use["slot"] for use in uses}, {use["asset"] for use in uses if use.get("asset")}, left_out,
         {use["id"] for use in uses if use["id"]} | ({start} if start else set()))]
+    # A generation model that takes a frame or references, not both (all but Seedance): a picture the user asked to start
+    # on wins over the always-on cast; a shot that would only go on from the one before starts fresh from its
+    # references instead (its prompt cites them), and no longer waits for that shot.
+    if generation_models.has_models(schema) and first_frame and (start or chained):
+        filled = lambda: {use["slot"] for use in uses} | {first_frame}
+        if start and generation_models.clashes(schema, settings["options"], filled()):
+            uses = [use for use in uses if not use.get("cast")]
+        if generation_models.clashes(schema, settings["options"], filled()):
+            start, chained = None, False
+            stepped = " ".join(filter(None, [stepped, generation_models.clash_note(schema, settings["options"])]))
+    # With every reference it is given now (the cast's too), a model that renders only some resolutions with references
+    # is made at one of them (MiniMax H3 Max: 768p or 1080p), priced so and said on the card.
+    if generation_models.has_models(schema):
+        rules = await offload(generation_models.reference_rules, state.db)
+        fitted = generation_models.fit_references(schema, settings, {use["slot"] for use in uses}, rules)
+        stepped = " ".join(filter(None, [stepped, fitted]))
     steps.append(await _shown_step(state, schema, settings, menu or [], uses,
                                    {"id": start, "name": names[start], "slot": first_frame} if start else None,
                                    {"step": earlier, "slot": first_frame} if chained else None, agent.why(proposed)))
@@ -2399,7 +2444,7 @@ async def _plan_step(state, proposed, instruction, steps, made_by, schemas, name
 
 
 PLANNED_KEYS = ("shot_number", "shot_numbers", "board", "placement_group", "review_refs", "variation", "clean_voice")   # settings a card keeps when changed
-PINNABLE = ("video", "image")   # the kinds of workflow a chat can be pinned to (body "workflows")
+PINNABLE = ("video", "image", "audio", "upscaler")   # the kinds of workflow a chat can be pinned to (body "workflows")
 
 
 def boards_text(state, user_id, project):
@@ -2507,7 +2552,7 @@ async def _shown_step(state, schema, settings, menu, uses, start, after, why="")
     kind = schema["id"].split("/", 1)[0]
     aspect = any(c["input"] == "aspect_ratio" and c.get("choices") for c in schema["controls"])
     resolutions = schema["resolutions"] if schema.get("size") or "resolution" in roles else []
-    return {"name": settings["name"], "workflow_title": schema["title"], "kind": kind,
+    return {"name": settings["name"], "workflow_title": generation_models.title_of(schema, settings.get("options")), "kind": kind,
             "prompt": settings["values"][roles["prompt"]["id"]] if "prompt" in roles else "", "facts": workflows.summary(schema, ctx), "time": quote["text"],
             "credits": quote["credits"], "settings": settings, "start": start, "uses": uses, "after": after,
             "shape": agent.shape_of(schema, settings, ctx), "why": why, "keep": settings.get("keep"),

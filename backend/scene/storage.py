@@ -1,5 +1,6 @@
 """Where the studio's media are kept: the library's finished pictures, videos and sounds (outputs), their thumbnails
-(posters), NeuralCore's files (kit) and the work picked for the Home page (showcase). One interface, two places:
+(posters), NeuralCore's files (kit), the work picked for the Home page (showcase) and the files jobs use as inputs
+(references). One interface, two places:
 
 - LocalStorage (`storage_backend` "local", the default): folders on this machine, as they always were.
 - AzureBlobStorage ("azure"): Azure Blob Storage, one container with a prefix per kind ("outputs/<user>/<file>"). The
@@ -23,7 +24,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
-KINDS = ("outputs", "posters", "kit", "showcase")
+# references: the files a job uses as inputs (references.keep_reference), kept here and sent to the render server that
+# runs the job when it starts, so an upload never depends on a render server answering.
+KINDS = ("outputs", "posters", "kit", "showcase", "references")
 
 
 class StorageError(ValueError):

@@ -13,10 +13,15 @@ import { useUser } from '../../session';
 import {
   byRole,
   estimate,
+  lengthChoices,
   loadCatalog,
   loadWorkflow,
   newForm,
   optionsShown,
+  pickValue,
+  pickerGroups,
+  splitPick,
+  withModel,
   submitJob,
   warningsOf,
   type JobForm,
@@ -68,9 +73,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }
   const firstFrame = form && form.wf.refs.find((r) => r.id === form.wf.slots.first_frame);
 
-  const select = useCallback(async (id: string) => {
+  // `picked`: a workflow's id, or a generation server model as "<workflow id>#<model>" (jobForm.pickValue).
+  const select = useCallback(async (picked: string) => {
+    const [id, model] = splitPick(picked);
     const wf = await loadWorkflow(id);
-    setForm(newForm(wf));
+    const made = newForm(wf);
+    setForm(model ? { ...made, ...withModel(wf, made.options, made.values, model) } : made);
     setNote('');
   }, []);
 
@@ -84,9 +92,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           setNote('No workflows yet. Save a ComfyUI workflow into the workflows folder, then reload.');
           return;
         }
+        // The workflow the user picked last (or the studio's default, when one is set). With neither, none is picked
+        // for them: they choose it in the Workflow cell.
         const kind = userPrefs.studio().kind || 'video';
-        const wanted = userPrefs.studio().workflows[kind] || list.default;
-        return select((usable.find((w) => w.id === wanted) || usable[0]).id);
+        const last = userPrefs.studio().workflows[kind] || list.default || '';
+        if (usable.some((w) => w.id === splitPick(last)[0])) return select(last);
       })
       .catch((e: Error) => setNote(e.message));
   }, [select]);
@@ -186,18 +196,43 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     );
   };
 
-  const cells = [];
+  // The Workflow cell: ComfyUI's workflows and the generation server's models, two groups never mixed. Another model
+  // of the workflow in use keeps the form and only changes the model.
+  const picked = (value: string) => {
+    const [id, model] = splitPick(value);
+    if (form && model && form.wf.id === id)
+      setForm({ ...form, ...withModel(form.wf, form.options, form.values, model) });
+    else void select(value).catch((err: Error) => setNote(err.message));
+  };
+  const cells = [
+    catalog.length > 0 && (
+      <label key="Workflow" className={css('cell')}>
+        <span>Workflow</span>
+        <select
+          value={form ? pickValue(form.wf, form.options) : ''}
+          onChange={(e) => e.target.value && picked(e.target.value)}
+        >
+          {!form && (
+            <option value="" disabled>
+              Choose a model…
+            </option>
+          )}
+          {pickerGroups(catalog, (w) => `${KIND_LABEL[w.kind] || w.kind} · ${w.title}`).map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.entries.map((e) => (
+                <option key={e.value} value={e.value}>
+                  {e.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+    ),
+  ];
   if (form) {
     const wf = form.wf;
     const set = (patch: Partial<JobForm>) => setForm({ ...form, ...patch });
-    cells.push(
-      cell(
-        'Workflow',
-        catalog.map((w) => ({ id: w.id, label: `${KIND_LABEL[w.kind] || w.kind} · ${w.title}` })),
-        wf.id,
-        (id) => void select(id).catch((e: Error) => setNote(e.message)),
-      ),
-    );
     const sizes = wf.resolutions.map((r) => ({ id: r, label: String(r) }));
     if (wf.size) {
       cells.push(cell('Resolution', sizes, form.resolution, (r) => set({ resolution: Number(r) }), 'resolution'));
@@ -223,7 +258,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       );
     const dur = byRole(wf, 'duration');
     if (dur) {
-      const lengths = [...new Set([5, 10, 15, Number(form.values[dur.id])])].sort((a, b) => a - b);
+      const lengths = lengthChoices(wf, form.options, Number(form.values[dur.id]));
       cells.push(
         cell(
           'Length',
@@ -233,14 +268,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         ),
       );
     }
-    for (const o of optionsShown(form)) {
+    for (const o of optionsShown(form).filter((o) => !(wf.source === 'generation' && o.id === 'model'))) {
       cells.push(
         cell(
           o.label,
           o.choices,
           form.options[o.id],
           (id) => set({ options: { ...form.options, [o.id]: id } }),
-          o.id === 'quality' ? 'quality' : undefined,
+          o.id === 'quality' ? 'quality' : o.id === 'resolution' ? 'resolution' : undefined,
         ),
       );
     }

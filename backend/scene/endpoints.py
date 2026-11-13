@@ -3,10 +3,13 @@ Langfuse, which is sent the agent's calls (langfuse_trace.py; its key is "public
 off or removed in the console while the app runs. (The agent's models are Claude's, through
 Claude Code on this machine: they need no server here.)
 
-A render goes to a ComfyUI server that is free: one that answers and runs none of the studio's renders now (jobs.py).
+A render goes to a ComfyUI server that can do it and has a slot free (balancer.py): each server has the workflows it
+takes ("Workflows", the column `models`) and how many renders it runs at once ("Jobs at once", `slots`).
 
-The first ComfyUI server is the main one: the files people upload are put there and the node definitions are read from
-it. A render on another server is given the files it needs first (jobs.py).
+The files people upload for a job are kept by the studio (references.keep_reference), not on a server: when a render
+starts, the server it runs on is given the files it needs (jobs._send_inputs). So no server has to answer for a job to be
+added, and a server that is off holds up only the renders that can be made nowhere else. The first ComfyUI server in use
+is still called the main one: files uploaded before the studio kept them are copied from it.
 """
 
 import asyncio
@@ -16,11 +19,12 @@ import time
 import httpx
 
 from . import vault
-from .comfy.client import Comfy
+from .balancer import ComfyPool  # noqa: F401  (the pool lives in balancer.py; main.py makes it as endpoints.ComfyPool)
 from .db import offload
 
 KINDS = {"comfy": "ComfyUI", "langfuse": "Langfuse"}
-FIELDS = ("kind", "name", "url", "api_key", "models", "active")
+FIELDS = ("kind", "name", "url", "api_key", "models", "slots", "active")
+MOST_SLOTS = 16   # "Jobs at once" a server may be given
 
 
 def seed(db, settings):
@@ -46,9 +50,10 @@ def listed(db, kind=None, active_only=False):
 
 
 def clean(body, before=None):
-    """What an admin typed for one, tidied: {"kind", "name", "url", "api_key", "models", "active"}. Nothing is refused:
-    a missing name gets one, an address without http:// gets it, and one that does not answer is shown as not answering."""
-    row = dict(before or {"kind": "comfy", "name": "", "url": "", "api_key": "", "models": "", "active": 1})
+    """What an admin typed for one, tidied: {"kind", "name", "url", "api_key", "models", "slots", "active"}. Nothing is
+    refused: a missing name gets one, an address without http:// gets it, "Jobs at once" is kept between 1 and
+    MOST_SLOTS, and one that does not answer is shown as not answering."""
+    row = dict(before or {"kind": "comfy", "name": "", "url": "", "api_key": "", "models": "", "slots": 1, "active": 1})
     for key in FIELDS:
         if key in body:
             row[key] = body[key]
@@ -61,73 +66,17 @@ def clean(body, before=None):
         row["url"] = "http://" + row["url"]
     row["api_key"] = str(row["api_key"] or "").strip()[:500]
     row["models"] = ", ".join(m.strip() for m in str(row["models"] or "").split(",") if m.strip())[:500]
+    try:
+        row["slots"] = max(1, min(MOST_SLOTS, int(row.get("slots") or 1)))
+    except (TypeError, ValueError):
+        row["slots"] = 1
     row["active"] = 1 if row["active"] else 0
     return row
 
 
 def shown(row):
     """A row as the console sees it: the key is never sent back, only whether there is one."""
-    return {k: row[k] for k in ("id", "kind", "name", "url", "models", "active", "created")} | {"has_key": bool(row.get("api_key"))}
-
-
-class ComfyPool:
-    """The ComfyUI servers the renders may go to, with the one each is running now."""
-
-    def __init__(self, db, fallback):
-        self.db = db
-        self.fallback = fallback.rstrip("/") if fallback else ""   # config.json's, while none is in the table
-        self.main = Comfy(self.main_url)   # the main server (app.state.comfy)
-        self.clients = {}
-        self.busy = {}   # url -> the id of the studio's job running there
-        # The comfy rows of the endpoints table, read at start and again after each change (reload): the address is
-        # asked for on every request to the render server, which must not wait for the database.
-        self.rows = listed(db, "comfy")
-
-    def reload(self):
-        """Read the servers again after the console changed them (a database thread)."""
-        self.rows = listed(self.db, "comfy")
-
-    def servers(self):
-        """[{"name", "url"}] of the servers a render may go to now, the main one first."""
-        rows = self.rows
-        if not rows:
-            return [{"name": "", "url": self.fallback}] if self.fallback else []
-        return [{"name": r["name"], "url": r["url"]} for r in rows if r["active"] and r["url"]]
-
-    def main_url(self):
-        every = self.servers() or [{"url": r["url"]} for r in self.rows[:1]]
-        return every[0]["url"] if every else self.fallback
-
-    def client(self, url):
-        """The client of one server: the main one is app.state.comfy itself."""
-        if url == self.main.url:
-            return self.main
-        if url not in self.clients:
-            self.clients[url] = Comfy(lambda: url)
-        return self.clients[url]
-
-    async def free(self, answers=None):
-        """(the first free server that answers or None, whether any server answers or runs a render). `answers`:
-        async function(url) -> bool, whether a server answers; without it a free one is taken without asking it."""
-        alive = False
-        for s in self.servers():
-            if s["url"] in self.busy:
-                alive = True
-                continue
-            if answers is None or await answers(s["url"]):
-                return s, True
-        return None, alive
-
-    async def answers(self, url):
-        try:
-            await self.client(url).stats()
-            return True
-        except (httpx.HTTPError, ValueError):
-            return False
-
-    async def close(self):
-        for c in [self.main, *self.clients.values()]:
-            await c.http.aclose()
+    return {k: row.get(k) for k in ("id", "kind", "name", "url", "models", "slots", "active", "created")} | {"has_key": bool(row.get("api_key"))}
 
 
 async def status(state):
@@ -143,7 +92,7 @@ async def status(state):
                 r = await http.get(row["url"] + "/system_stats")
                 r.raise_for_status()
                 devices = r.json().get("devices") or [{}]
-                item.update(online=True, detail=devices[0].get("name", ""), running=pool.busy.get(row["url"]))
+                item.update(online=True, detail=devices[0].get("name", ""), running=pool.running(row["url"]))
             elif row["kind"] == "langfuse":
                 r = await http.get(row["url"] + "/api/public/health")
                 r.raise_for_status()

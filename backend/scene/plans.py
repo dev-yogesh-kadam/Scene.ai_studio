@@ -22,7 +22,7 @@ from starlette.datastructures import FormData
 from .credits import PREPAID
 from .jobs import QUEUEING
 from .db import offload
-from . import content_check, guardrails, moderation
+from . import content_check, errors, generation_models, guardrails, moderation
 
 RUNNING = ("running", "stopping")
 ENDED_JOB = ("done", "failed", "cancelled")
@@ -182,13 +182,59 @@ class PlanRunner:
                         settings.pop("source_seconds", None)   # not the length the plan says, which may be anything
                     wf = await self.state.catalog.load(str(settings.get("workflow", "")))
                     await offload(studio.switched_on, self.state, wf["id"], user)
-                    await offload(studio.fit_resolution, self.state, workflows.describe(wf), settings)   # it reads the database
+                    # it reads the database; every slot the step fills, as the queue will fill them (a model given
+                    # references may render only some resolutions: priced at the one it will be made at)
+                    await offload(studio.fit_resolution, self.state, workflows.describe(wf), settings, filled_slots(step))
                     total += (await studio.price(self.state, wf, settings, user["id"]))["credits"]
             except HTTPException:
                 raise
             except Exception as e:   # a step that can't be priced can't be made: said now, before anything is charged
                 raise HTTPException(400, "“{}” can't be priced: {}".format(step.get("name") or "A step", e))
         return total
+
+    async def _again(self, progress):
+        """The steps a resume tries again: not made, and whose job failed or was cancelled, or that failed before one was
+        queued. (A job's end may not have been told to the plan yet: job_ended runs after the job is shown ended.)"""
+        found = []
+        for i, p in enumerate(progress):
+            if p.get("made") or p.get("skipped"):
+                continue
+            job = p.get("job") and await self.db.aone("SELECT status FROM jobs WHERE id = ?", (p["job"],))
+            if (bool(job) and job["status"] in ("failed", "cancelled")) or (p.get("error") and not job):
+                found.append(i)
+        return found
+
+    async def redo(self, user, plan_id):
+        """What resuming a stopped or failed plan would make, for the user to approve: {"steps": [{"step", "name",
+        "kind", "maker", "reason" (why it was not made), "note" (what is changed so it can be: a resolution its
+        model needs with references)}], "total"}. Nothing is charged, queued or changed."""
+        from .api import studio
+        from .comfy import workflows
+        row = await offload(self.get, user, plan_id)
+        steps, progress = json.loads(row["steps"]), json.loads(row["progress"])
+        again = set(await self._again(progress))
+        for i in again:
+            progress[i] = dict(progress[i], error="", job=None)
+        found = []
+        for i, (step, p) in enumerate(zip(steps, progress)):
+            if p.get("made") or p.get("skipped") or p.get("job"):
+                continue
+            was = json.loads(row["progress"])[i]
+            reason = ""
+            if was.get("job"):
+                ended = await self.db.aone("SELECT error FROM jobs WHERE id = ?", (was["job"],))
+                reason = errors.for_user(ended["error"]) if ended and ended["error"] else ""
+            entry = {"step": i, "name": step.get("name") or "Step {}".format(i + 1), "kind": step.get("kind") or "",
+                     "maker": step.get("workflow_title") or "", "reason": reason or was.get("error") or "", "note": ""}
+            if step.get("settings") and not (step.get("assemble") or step.get("sound") or step.get("edit") or step.get("motion")):
+                try:
+                    wf = await self.state.catalog.load(str(step["settings"].get("workflow", "")))
+                    settings = json.loads(json.dumps(step["settings"]))
+                    entry["note"] = await offload(studio.fit_resolution, self.state, workflows.describe(wf), settings, filled_slots(step))
+                except Exception:
+                    pass   # priced (or refused) below, with the rest
+            found.append(entry)
+        return {"plan": plan_id, "steps": found, "total": await self.price(user, steps, progress) if found else 0}
 
     async def approve(self, user, plan_id, again=False):
         """Reserve the plan's price and run it. A plan already running or done is answered as it is: approving twice
@@ -204,12 +250,8 @@ class PlanRunner:
         try:
             steps, progress = json.loads(row["steps"]), json.loads(row["progress"])
             if again:   # what failed is tried again: a step not queued, or whose job failed or was cancelled
-                for p in progress:
-                    job = p.get("job") and await self.db.aone("SELECT status FROM jobs WHERE id = ?", (p["job"],))
-                    # its job's end may not have been told to the plan yet (job_ended runs after the job is shown ended)
-                    ended = bool(job) and job["status"] in ("failed", "cancelled")
-                    if not p.get("made") and (ended or (p.get("error") and not job)):
-                        p.update(error="", job=None)
+                for i in await self._again(progress):
+                    progress[i].update(error="", job=None)
             total = await self.price(user, steps, progress)
             problem = await offload(guardrails.plan_problem, self.db, user, total)   # the studio's stop, the plan limit
             if problem:
@@ -347,7 +389,12 @@ class PlanRunner:
         steps = json.loads(row["steps"])
         place = row["approved"] or row["created"]
         self.preparing[plan_id] = place   # while it queues its steps, renders asked for after it wait for them
-        for i, step in enumerate(steps):
+        # Every step that starts on nothing still to be made goes in first, all of them: they run side by side, as many
+        # at once as the servers take ("Jobs at once"). Then, in order, each that starts on an earlier step's result
+        # (a shot on the last frame of the one before, the finished cut), when that is made. A step that waits never
+        # holds up a free one planned after it.
+        for i in [i for i, s in enumerate(steps) if not waits(s)] + [i for i, s in enumerate(steps) if waits(s)]:
+            step = steps[i]
             row = await offload(self._row, plan_id)
             if row["state"] != "running":
                 break
@@ -439,6 +486,10 @@ class PlanRunner:
                         continue
                     ref = await library.as_reference(use["id"], inside, use.get("kind") or "image", user)
                     settings["refs"][use["slot"]] = {"comfy_name": ref["comfy_name"], "name": ref["name"]}
+                if (step.get("start") or step.get("after")) and await self._frame_clashes(step, settings):
+                    # a model that takes a frame or references, not both (all but Seedance), planned before the studio
+                    # knew: it starts fresh from its references (its prompt cites them), and waits for nothing
+                    step = {k: v for k, v in step.items() if k not in ("start", "after")}
                 if step.get("start"):
                     ref = await library.as_reference(step["start"]["id"], inside, "image", user)
                     settings["refs"][step["start"]["slot"]] = {"comfy_name": ref["comfy_name"], "name": ref["name"]}
@@ -457,6 +508,17 @@ class PlanRunner:
             raise
         except Exception as problem:
             raise Refused(str(problem) or type(problem).__name__)
+
+    async def _frame_clashes(self, step, settings):
+        """Whether this step's generation model can't take the frame it would start on with the references it has."""
+        from .comfy import workflows
+        try:
+            schema = workflows.describe(await self.state.catalog.load(str(settings.get("workflow", ""))))
+        except workflows.WorkflowError:
+            return False
+        frame = (step.get("start") or step.get("after") or {}).get("slot")
+        used = set(settings.get("refs") or {}) | {frame}
+        return bool(frame) and generation_models.has_models(schema) and generation_models.clashes(schema, settings.get("options"), used)
 
     async def _result(self, plan_id, steps, step, waiting_step):
         """The library item step `step` made, waiting for its job if it is still being made. A failed or cancelled job,
@@ -511,6 +573,20 @@ class PlanRunner:
         music = await self._result(plan_id, steps, cut["music_step"], i) if cut.get("music_step") is not None else cut.get("music")
         return {"name": cut.get("name"), "clips": clips, "music": music, "title": cut.get("title"), "end": cut.get("end"),
                 "look": cut.get("look"), "shape": cut.get("shape"), "project_id": project_id}
+
+
+def filled_slots(step):
+    """Every slot a plan's step fills when it is queued (_queue): its attached items and the cast's, the picture it
+    starts on, the frame of the step before it."""
+    slots = {use.get("slot") for use in step.get("uses") or [] if isinstance(use, dict)}
+    slots |= {(step.get(k) or {}).get("slot") for k in ("start", "after") if isinstance(step.get(k), dict)}
+    return {slot for slot in slots if slot}
+
+
+def waits(step):
+    """Whether a plan's step starts on what an earlier step makes: a shot on the one before it (its "after"), the
+    finished cut on every shot, music laid under shots still to be made."""
+    return bool(step.get("after") or step.get("assemble"))
 
 
 class _Stopping(Exception):

@@ -50,6 +50,13 @@ async def stop_plan(plan_id: int, request: Request, user: dict = Depends(current
     return await offload(_runner(request).stop, user, plan_id)
 
 
+@router.get("/agent/plans/{plan_id}/redo")
+async def redo_plan(plan_id: int, request: Request, user: dict = Depends(current_user)):
+    """What resuming a stopped or failed plan would make again, why each was not made, what is changed so it can be,
+    and the price: shown for approval before /resume. Nothing is charged or queued."""
+    return await _runner(request).redo(user, plan_id)
+
+
 @router.post("/agent/plans/{plan_id}/resume", dependencies=[costly("plan")])
 async def resume_plan(plan_id: int, request: Request, user: dict = Depends(current_user)):
     """A stopped or failed plan goes on: what is left is priced, reserved and run."""

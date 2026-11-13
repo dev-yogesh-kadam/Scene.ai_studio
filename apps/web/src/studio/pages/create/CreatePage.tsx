@@ -19,7 +19,11 @@ import {
   loadCatalog,
   loadWorkflow,
   newForm,
+  pickValue,
+  pickerGroups,
+  splitPick,
   submitJob,
+  withModel,
   warningsOf,
   type Catalog,
   type JobForm,
@@ -121,12 +125,15 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
 
   // Choose a workflow: its defaults, then what was handed over (Re-run's settings, Use as first frame's reference).
   const select = useCallback(
-    async (id: string, saved?: Saved) => {
+    async (picked: string, saved?: Saved) => {
+      // `picked`: a workflow's id, or a generation server model as "<workflow id>#<model>" (jobForm.pickValue)
+      const [id, model] = splitPick(picked);
       const wf = await loadWorkflow(id);
-      userPrefs.setStudio({ workflows: { [wf.id.split('/')[0]]: id } });
+      userPrefs.setStudio({ workflows: { [wf.id.split('/')[0]]: picked } });
       const last = userPrefs.studio().project;
       const projectId = last && known.current.has(last) ? last : null;
       let next = newForm(wf, { projectId, parent: rerun ? rerun.id : null });
+      if (model) next = { ...next, ...withModel(wf, next.options, next.values, model) };
       if (saved) next = withSaved(next, saved);
       setError('');
       const given = prefill.current;
@@ -156,11 +163,12 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
     (list: Catalog, forKind: string, wanted?: string, saved?: Saved) => {
       const usable = list.workflows.filter((w) => w.kind === forKind && !w.error);
       if (!usable.length) return setForm(null);
-      const want = wanted || userPrefs.studio().workflows[forKind] || list.default;
+      const asked = wanted || userPrefs.studio().workflows[forKind] || list.default;
+      const want = splitPick(asked)[0];
       const pick =
         usable.find((w) => w.id === want) || usable.find((w) => (w.replaces || []).includes(want)) || usable[0];
       const same = pick.id === want || (pick.replaces || []).includes(want);
-      select(pick.id, same ? saved : undefined).catch(showError);
+      select(pick.id === want ? asked : pick.id, same ? saved : undefined).catch(showError);
     },
     [select, showError],
   );
@@ -305,14 +313,32 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
               aria-label="Workflow"
               style={{ maxWidth: 320 }}
               className={items.length ? '' : 'hidden'}
-              value={form?.wf.id ?? ''}
-              onChange={(e) => select(e.target.value).catch(showError)}
+              value={form ? pickValue(form.wf, form.options) : ''}
+              onChange={(e) => {
+                // another model of the workflow in use keeps what is typed and given; another workflow starts afresh
+                const [id, model] = splitPick(e.target.value);
+                if (form && model && form.wf.id === id)
+                  setForm({ ...form, ...withModel(form.wf, form.options, form.values, model) });
+                else select(e.target.value).catch(showError);
+              }}
             >
-              {items.map((w) => (
-                <option key={w.id} value={w.id} disabled={!!w.error}>
-                  {w.title + (w.error ? ' (not readable yet)' : '')}
-                </option>
+              {/* two groups, never mixed: ComfyUI's workflows and the generation server's models */}
+              {pickerGroups(usable).map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.entries.map((e) => (
+                    <option key={e.value} value={e.value}>
+                      {e.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
+              {items
+                .filter((w) => w.error)
+                .map((w) => (
+                  <option key={w.id} value={w.id} disabled>
+                    {w.title + ' (not readable yet)'}
+                  </option>
+                ))}
             </select>
             <button
               className="btn small quiet"

@@ -1,5 +1,6 @@
 """The security measures: forged requests, headers, uploads, other users' files, rate limits, passwords and two-step sign-in."""
 
+import hashlib
 import json
 import time
 
@@ -57,7 +58,9 @@ def test_a_reference_file_of_another_user_cannot_be_used_or_seen(client, monkeyp
     settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}}
     made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("face.png", PNG, "image/png")})
     assert made.status_code == 200
-    mine = sent[0]
+    assert sent == []   # kept by the studio: no render server is asked when a job is added
+    mine = "scene_{}_face.png".format(hashlib.sha1(PNG).hexdigest()[:10])
+    assert client.get("/api/ref-preview", params={"name": mine}).content == PNG   # its owner sees it, from the studio's copy
     again = dict(settings, refs={"201:image": {"comfy_name": mine}})
     assert client.post("/api/jobs", data={"settings": json.dumps(again)}).status_code == 200   # the owner may reuse it
 

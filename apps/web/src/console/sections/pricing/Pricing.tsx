@@ -101,10 +101,23 @@ function Workflows({ data, factors, edit }: { data: Data; factors: Factors; edit
       .filter(Boolean)
       .join(' + ') || 'Free';
   const own = (w: WorkflowRow) => w.credits_per_second != null || w.base_credits != null;
+  // A generation workflow's models, priced one by one at each resolution: credits a second for a video, a picture's
+  // credits for a picture. The provider's own price is the hint, a starting point.
+  const modelFields = (w: WorkflowRow) =>
+    (w.models || []).flatMap((m) =>
+      m.resolutions.map((r) => ({
+        id: `model:${m.model}:${r}`,
+        label: `${m.name} · ${r} (credits ${perJob(w.kind) ? 'a picture' : 'a second'})`,
+        type: 'number' as const,
+        hint: m.prices?.[r] != null ? `The provider charges ${trim(m.prices[r])}` : "Empty: the workflow's own rate",
+      })),
+    );
   const open = (w: WorkflowRow) =>
     edit({
       title: w.title,
-      about: `${w.id}. Leave a rate empty to follow the rate for its type.`,
+      about: `${w.id}. Leave a rate empty to follow the rate for its type.${
+        w.models?.length ? " Its models (the generation server's) are priced one by one below." : ''
+      }`,
       fields: [
         {
           id: 'credits_per_second',
@@ -131,9 +144,15 @@ function Workflows({ data, factors, edit }: { data: Data; factors: Factors; edit
             hint: `${factors.factors[g.id][k]} (the studio's)`,
           })),
         ),
+        ...modelFields(w),
       ],
       values: {
         ...w,
+        ...Object.fromEntries(
+          (w.models || []).flatMap((m) =>
+            m.resolutions.map((r) => [`model:${m.model}:${r}`, w.model_prices?.[m.model]?.[r]]),
+          ),
+        ),
         ...Object.fromEntries(
           GROUPS.flatMap((g) => g.keys.map((k) => [`factor:${g.id}:${k}`, (w.own_factors?.[g.id] || {})[k]])),
         ),
@@ -145,10 +164,21 @@ function Workflows({ data, factors, edit }: { data: Data; factors: Factors; edit
             Object.fromEntries(g.keys.map((k) => [k, values[`factor:${g.id}:${k}`]]).filter(([, v]) => v != null)),
           ]),
         );
-        const plain = Object.fromEntries(Object.entries(values).filter(([k]) => !k.startsWith('factor:')));
+        const plain = Object.fromEntries(
+          Object.entries(values).filter(([k]) => !k.startsWith('factor:') && !k.startsWith('model:')),
+        );
         await api('/api/admin/pricing/workflow', { method: 'PUT', json: { workflow: w.id, ...plain } });
         if (!w.id.startsWith('edit/'))
           await api('/api/admin/pricing/workflow/factors', { method: 'PUT', json: { workflow: w.id, ...mine } });
+        if (w.models?.length) {
+          const prices: Record<string, Record<string, number>> = {};
+          for (const m of w.models)
+            for (const r of m.resolutions) {
+              const v = values[`model:${m.model}:${r}`];
+              if (v != null) (prices[m.model] ??= {})[r] = Number(v);
+            }
+          await api('/api/admin/pricing/models', { method: 'PUT', json: { workflow: w.id, prices } });
+        }
         await refresh();
       },
     });

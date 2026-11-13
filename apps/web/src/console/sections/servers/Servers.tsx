@@ -1,6 +1,6 @@
 // The console's Servers section: the Claude connection (how the agent reaches Claude Code: ClaudeConnection.tsx), the
-// ComfyUI servers the renders run on, and Langfuse, which is sent every call of the agent's models. Each can be added, switched off or removed while the studio runs; a waiting render goes to the first
-// one that is free. See backend/scene/endpoints.py and langfuse_trace.py.
+// ComfyUI servers the renders run on, and Langfuse, which is sent every call of the agent's models. Each can be added, switched off or removed while the studio runs; a waiting render goes to a
+// server that can do it ("Workflows") and has a slot free ("Jobs at once"). See backend/scene/balancer.py, endpoints.py and langfuse_trace.py.
 
 import { useRef, useState } from 'react';
 import { api } from '../../../common/api';
@@ -18,7 +18,7 @@ const css = classesOf(css0, css1, css2, css3, css4);
 
 const ABOUT: Record<string, string> = {
   comfy:
-    'Renders go to the first one that answers and is not rendering. The first is the main one: uploaded files are kept there and copied to the others when a render needs them.',
+    "Each render goes to a server that can make it and has a slot free, the least busy first. A server with Workflows takes only those; the others take every workflow no server claims, when they have its nodes. Uploaded files are kept by the studio and sent to the server that runs each render, so a server that is off never stops a job from being added. A server with only the generation server's nodes takes generation_* even with Workflows left empty.",
   langfuse:
     "Every call of the agent's models is sent here too: the words, the answer, the tokens and what they cost, one trace per turn and one session per Agent tab. The keys are the project's, from Langfuse's Settings → API keys.",
 };
@@ -30,8 +30,10 @@ type Endpoint = {
   name: string;
   url: string;
   active: number | boolean;
+  models?: string;
+  slots?: number;
   online?: boolean;
-  running?: boolean;
+  running?: number;
   detail?: string;
   has_key?: boolean;
 };
@@ -45,6 +47,8 @@ function Form({ kinds, row, close }: { kinds: Record<string, string>; row: Row; 
   const [name, setName] = useState(row.name || '');
   const [url, setUrl] = useState(row.url || '');
   const [active, setActive] = useState(row.active !== 0);
+  const [models, setModels] = useState(row.models || '');
+  const [slots, setSlots] = useState(String(row.slots || 1));
   const [pub, setPub] = useState('');
   const [secret, setSecret] = useState('');
   const [notice, setNotice] = useState('');
@@ -54,6 +58,7 @@ function Form({ kinds, row, close }: { kinds: Record<string, string>; row: Row; 
   const save = async () => {
     if (busy.current) return;
     const body: Record<string, unknown> = { kind, name, url, active };
+    if (kind === 'comfy') Object.assign(body, { models, slots: Number(slots) || 1 });
     if (kind === 'langfuse' && (pub.trim() || secret.trim())) {
       if (!pub.trim() || !secret.trim()) return setNotice('Type both keys, or neither to keep the ones it has.');
       body.api_key = pub.trim() + ':' + secret.trim();
@@ -104,6 +109,34 @@ function Form({ kinds, row, close }: { kinds: Record<string, string>; row: Row; 
           />
         </Field>
       </div>
+      {kind === 'comfy' && (
+        <div className={css('grid2')}>
+          <Field label="Workflows">
+            <input
+              type="text"
+              autoComplete="off"
+              aria-label="Workflows"
+              value={models}
+              placeholder="generation_*"
+              onChange={(e) => setModels(e.target.value)}
+            />
+            <div className="hint">
+              Workflows this server takes, e.g. generation_*. Empty: every workflow no other server claims.
+            </div>
+          </Field>
+          <Field label="Jobs at once">
+            <input
+              type="number"
+              min={1}
+              max={16}
+              aria-label="Jobs at once"
+              value={slots}
+              onChange={(e) => setSlots(e.target.value)}
+            />
+            <div className="hint">1 for ComfyUI. The generation server takes several (4 is a good start).</div>
+          </Field>
+        </div>
+      )}
       {kind === 'langfuse' && (
         <div className={css('grid2')}>
           <Field label="Public key">
@@ -152,7 +185,13 @@ function Line({ e, kinds }: { e: Endpoint; kinds: Record<string, string> }) {
       ? 'Not answering'
       : e.kind === 'langfuse'
         ? e.detail || 'Answering'
-        : (e.running ? 'Rendering' : 'Free') + (e.detail ? ' · ' + e.detail : '');
+        : (e.running
+            ? (e.slots || 1) > 1
+              ? `${e.running} of ${e.slots} running`
+              : 'Rendering'
+            : (e.slots || 1) > 1
+              ? `Free · ${e.slots} at once`
+              : 'Free') + (e.detail ? ' · ' + e.detail : '');
   return (
     <div className={css('card')}>
       <div className={css('card-head')} style={{ justifyContent: 'flex-start', gap: 10 }}>
@@ -171,6 +210,9 @@ function Line({ e, kinds }: { e: Endpoint; kinds: Record<string, string> }) {
         </div>
       )}
       <p className="muted small">{state}</p>
+      {e.kind === 'comfy' && (
+        <p className="muted small">{e.models ? 'Takes ' + e.models : 'Takes every workflow no other server claims'}</p>
+      )}
       <div className="row">
         <button className="btn small" onClick={() => setEditing(true)}>
           Edit

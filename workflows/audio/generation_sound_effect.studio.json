@@ -1,0 +1,21 @@
+{
+  "title": "Generation sound effect",
+  "description": "A new one-shot sound effect, 1 to 22 seconds, made by the generation server.",
+  "pick_when": "One sound: a door, footsteps, an explosion, ambience. Paid in provider credits.",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:value": "The sound, plainly: \"heavy wooden door slams shut in a stone hall\"",
+    "2:value": "Length in seconds (1 to 22)"
+  },
+  "defaults": {
+    "1:value": "",
+    "2:value": 5
+  },
+  "pricing": {
+    "seconds": "2:value"
+  },
+  "hints": [
+    "Made by the generation server on the provider.",
+    "Describe one sound and where it happens."
+  ]
+}

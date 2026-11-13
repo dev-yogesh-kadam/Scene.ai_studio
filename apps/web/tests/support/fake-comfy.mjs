@@ -7,9 +7,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { PORT_BASE, REPO } from './studio.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const RENDER_MS = 1500; // how long a "render" takes
 
@@ -45,10 +48,11 @@ export async function startFakeComfy({ port = PORT_BASE + 99, renderMs = RENDER_
         return send(200, {});
       }
       if (url.pathname === '/object_info') {
-        return send(
-          200,
-          JSON.parse(readFileSync(join(REPO, 'backend', 'tests', 'fixtures', 'node_definitions.json'), 'utf8')),
-        );
+        // The node definitions of a render server that has every node the repository's workflows use (the backend
+        // tests' fixture, and the rest as the real render server defines them): the load balancer gives a server only
+        // the workflows whose nodes it has, and the UI-format workflows are read with them. Not the generation
+        // server's own nodes (Generation*): this is not one, so its models are not offered.
+        return send(200, JSON.parse(readFileSync(join(HERE, 'object_info.json'), 'utf8')));
       }
       if (url.pathname === '/upload/image') {
         const name = (body.toString('latin1').match(/filename="([^"]+)"/) || [])[1] || `upload_${randomUUID()}.png`;
@@ -59,7 +63,9 @@ export async function startFakeComfy({ port = PORT_BASE + 99, renderMs = RENDER_
         if (!prompt || typeof prompt !== 'object')
           return send(400, { error: { message: 'no prompt' }, node_errors: {} });
         const id = randomUUID();
-        prompts.set(id, { queued: Date.now(), kind: kindOf(prompt), cancelled: false });
+        // A generation server's graph (GenerationVideo / GenerationImage) saves "videos" as the real one does.
+        const provider = Object.values(prompt).some((n) => /^Generation(Video|Image)$/.test(String(n?.class_type)));
+        prompts.set(id, { queued: Date.now(), kind: kindOf(prompt), provider, cancelled: false });
         return send(200, { prompt_id: id, number: prompts.size, node_errors: {} });
       }
       if (url.pathname.startsWith('/history/')) {
@@ -76,7 +82,8 @@ export async function startFakeComfy({ port = PORT_BASE + 99, renderMs = RENDER_
         }
         const filename = `fake_${id}${{ image: '.png', video: '.mp4', audio: '.wav' }[found.kind]}`;
         if (!files.has(filename)) files.set(filename, make(found.kind));
-        const key = found.kind === 'image' ? 'images' : found.kind === 'video' ? 'gifs' : 'audio';
+        const key =
+          found.kind === 'image' ? 'images' : found.kind === 'video' ? (found.provider ? 'videos' : 'gifs') : 'audio';
         return send(200, {
           [id]: {
             status: { status_str: 'success', completed: true, messages: [] },
@@ -137,6 +144,8 @@ export async function startFakeComfy({ port = PORT_BASE + 99, renderMs = RENDER_
 // What a workflow saves, by the class of its save nodes.
 function kindOf(prompt) {
   const classes = Object.values(prompt).map((node) => String(node?.class_type || ''));
+  if (classes.includes('GenerationVideo')) return 'video';
+  if (classes.includes('GenerationImage')) return 'image';
   if (classes.some((c) => /video|vhs_|webm|mp4/i.test(c) && /save|combine|create/i.test(c))) return 'video';
   if (classes.some((c) => /saveaudio|audio.*save/i.test(c))) return 'audio';
   return 'image';

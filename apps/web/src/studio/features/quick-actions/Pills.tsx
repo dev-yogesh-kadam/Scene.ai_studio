@@ -3,7 +3,7 @@
 // each option costs ("1080p · 200 cr"). "All settings" opens the full form on the Create page.
 
 import { useNavigate } from 'react-router';
-import { byRole, offered, type Quote } from '../jobs/jobForm';
+import { byRole, lengthChoices, offered, type Quote } from '../jobs/jobForm';
 import { short } from './refs';
 import type { ActionForm } from './useActionForm';
 import { toCreate } from '../../handoff';
@@ -62,9 +62,10 @@ export function Pills({ action }: { action: ActionForm }) {
       {dur && (
         <Pill
           name="Length"
-          choices={[...new Set([5, 10, 15, Number(form.values[dur.id])])]
-            .sort((a, b) => a - b)
-            .map((d) => ({ id: d, label: d + ' s' }))}
+          choices={lengthChoices(wf, form.options, Number(form.values[dur.id])).map((d) => ({
+            id: d,
+            label: d + ' s',
+          }))}
           current={form.values[dur.id]}
           onPick={(d) => value(dur.id, Number(d))}
           quote={quote}
@@ -116,7 +117,7 @@ export function Pills({ action }: { action: ActionForm }) {
           />
         ))}
       {wf.options
-        .filter((o) => !o.top && offered(o, form.options))
+        .filter((o) => !o.top && offered(o, form.options) && !(wf.source === 'generation' && o.id === 'model'))
         .map((o) => (
           <Pill
             key={o.id}

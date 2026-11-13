@@ -337,3 +337,141 @@ filtered by the message). It floats over the conversation, just above the input.
   box-sizing: border-box;
   margin-bottom: 20px;
 }
+
+/* "Workflows for this chat": a tab for each kind, "Agent selects" first, then the generation server's models and
+ComfyUI's workflows in two sections. The tabs and "Agent selects" stay put; the list under them scrolls. */
+.pin-pop {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-height: min(560px, calc(100vh - 16px));
+  overflow: hidden;
+}
+.pin-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 2px 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.pin-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: 500 13px/1 var(--sans);
+  cursor: pointer;
+}
+.pin-tab :global(.icon) {
+  width: 15px;
+  height: 15px;
+}
+.pin-tab:hover {
+  color: var(--text);
+}
+.pin-tab.on {
+  border-bottom-color: var(--agent);
+  color: var(--text);
+}
+.pin-count {
+  min-width: 16px;
+  padding: 2px 5px;
+  border-radius: 8px;
+  background: var(--agent-soft);
+  color: var(--agent);
+  font-size: 10px;
+  text-align: center;
+}
+.pin-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.pin-section {
+  padding: 12px 10px 4px;
+  color: var(--muted);
+  font: 600 11px/1.4 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pin-row {
+  align-items: flex-start;
+}
+.pin-auto {
+  flex: none;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 10px 10px 0 0;
+}
+.pin-box,
+.pin-radio {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 4px;
+}
+.pin-radio {
+  border-radius: 50%;
+}
+.pin-box.on {
+  border-color: var(--agent);
+  background: var(--agent);
+  color: var(--bg);
+}
+.pin-box :global(.icon) {
+  width: 12px;
+  height: 12px;
+}
+.pin-radio.on {
+  border: 5px solid var(--agent);
+}
+.pin-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.pin-about {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.pin-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.pin-meta :global(.icon) {
+  width: 12px;
+  height: 12px;
+}
+.pin-badge {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--muted);
+  font: 500 11px/1.4 var(--sans);
+}
+.pin-clear {
+  flex: none;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 10px 10px;
+}
+.pin-box,
+.pin-radio {
+  font-style: normal;
+}

@@ -37,7 +37,7 @@ import {
 } from './geometry';
 
 /** A job as the live connection gives it, with the settings it was sent with. */
-export type CanvasJob = Job & { settings?: Record<string, unknown>; error?: string; summary?: string };
+export type CanvasJob = Job & { settings?: Record<string, unknown>; error?: string; reason?: string; summary?: string };
 
 export type OnBoard = { board: string; name: string; stack?: Stack };
 

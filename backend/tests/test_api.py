@@ -1189,7 +1189,10 @@ def test_every_workflow_is_listed_in_the_section_of_its_kind(client):
     assert {w for w in listed if w.startswith("video/")} == {
         "video/h3_all_in_one", "video/h3_15s_720p", "video/h3_chunk", "video/talking_head_narration", "video/video_lipsync",
         "video/video_ltx2_5_t2v", "video/video_wan_animate2", "video/video_v2v_ltx23_iclora", "video/video_v2v_wan22_fun_control",
-        "video/video_v2v_wan_vace", "video/video_outpaint_wan_vace"}
+        "video/video_v2v_wan_vace", "video/video_outpaint_wan_vace",
+        "video/generation_video", "video/generation_lipsync"}   # the generation server's 16 models in one Model setting, and lip sync
+    assert listed["video/generation_video"]["source"] == "generation" and len(listed["video/generation_video"]["models"]) == 16
+    assert listed["video/h3_all_in_one"]["source"] == "comfy" and "models" not in listed["video/h3_all_in_one"]
     assert {w["kind"] for w in listed.values()} == {"video", "image", "audio", "upscaler"}
     assert client.get("/api/workflows/video/h3_director").json()["id"] == "video/h3_all_in_one"   # gone: served by what replaced it
 
@@ -1221,12 +1224,14 @@ def test_work_made_with_a_replaced_workflow_goes_to_the_one_that_replaced_it(cli
 def test_a_file_for_a_slot_the_mode_does_not_read_is_not_sent(client, monkeypatch):
     import json
     register(client)
-    sent = []
+    sent = []   # the files kept for the job (references.keep_reference): only those of the slots it reads
+    from scene.api import studio as studio_api
+    keep = studio_api.keep_reference
 
-    async def upload(name, data, content_type=None):
-        sent.append(name)
-        return name
-    monkeypatch.setattr(client.app.state.comfy, "upload", upload)
+    async def kept(store, filename, data, **kw):
+        sent.append(filename)
+        return await keep(store, filename, data, **kw)
+    monkeypatch.setattr(studio_api, "keep_reference", kept)
     png = b"\x89PNG\r\n\x1a\n"
     files = {"ref:201:image": ("face.png", png + b"face", "image/png"), "ref:209:image": ("first.png", png + b"first", "image/png")}
 

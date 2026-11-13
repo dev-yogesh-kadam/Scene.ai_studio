@@ -28,7 +28,7 @@ export const tokenRe = (token: string) => new RegExp(escapeRe(token) + '(?![\\w>
 export function refSlots(wf: Workflow | null, kind: string, options: Record<string, string>) {
   if (kind !== 'image' || !wf) return [];
   const place = (r: Slot) => (r.order ? 1e9 + r.order : Number.parseFloat(r.node ?? '') || 0); // a list (ref_1, ref_2 …) in its order
-  return wf.refs.filter((r) => r.kind === 'image' && inUse(r, options)).sort((a, b) => place(a) - place(b));
+  return wf.refs.filter((r) => r.kind === 'image' && inUse(r, options, wf)).sort((a, b) => place(a) - place(b));
 }
 
 /** "REF 1" when a required reference is missing, else ''. */

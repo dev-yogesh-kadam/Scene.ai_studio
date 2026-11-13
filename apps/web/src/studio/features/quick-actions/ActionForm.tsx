@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 import { Icon } from '../../../common/components/Icon/Icon';
 import { Segmented } from '../../../common/components/Segmented';
 import { cx } from '../../../common/cx';
-import { byRole, offered } from '../jobs/jobForm';
+import { byRole, chosenModel, offered, pickValue, pickerGroups } from '../jobs/jobForm';
 import { KeepField } from '../kit/KeepField';
 import { Pills } from './Pills';
 import { RefHint, Source, type Pick } from './RefSlots';
@@ -60,26 +60,40 @@ export function ActionForm({ action, label, project, pick, focus, onBack }: Prop
         <b>{label}</b>
       </div>
       <div className={s['quick-body']}>
-        {wf && (
+        {(wf || form.catalog.length > 0) && (
           <div className={cx('field', s.field)}>
             <div className="label">
               Model
               <span style={{ flex: 1 }} />
-              <span className={css('slate-text')}>{quote?.text ?? ''}</span>
+              <span className={css('slate-text')}>{wf ? (quote?.text ?? '') : ''}</span>
             </div>
-            <select aria-label="Model" value={wf.id} onChange={(e) => void action.selectWorkflow(e.target.value)}>
-              {form.catalog.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.title.replace(/^Text to Image:\s*/i, '')}
+            {/* Two groups, never mixed: ComfyUI's workflows and the generation server's models. */}
+            <select
+              aria-label="Model"
+              value={wf ? pickValue(wf, form.options) : ''}
+              onChange={(e) => e.target.value && void action.selectWorkflow(e.target.value)}
+            >
+              {!wf && (
+                <option value="" disabled>
+                  Choose a model…
                 </option>
+              )}
+              {pickerGroups(form.catalog, (w) => w.title.replace(/^Text to Image:\s*/i, '')).map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.entries.map((e) => (
+                    <option key={e.value} value={e.value}>
+                      {e.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
-            {wf.ref_naming?.license && <div className={s['ref-license']}>{wf.ref_naming.license}</div>}
+            {wf?.ref_naming?.license && <div className={s['ref-license']}>{wf.ref_naming.license}</div>}
           </div>
         )}
-        {wf && <p className="muted small">{wf.description}</p>}
+        {wf && <p className="muted small">{chosenModel(wf, form.options)?.about || wf.description}</p>}
         {wf?.options
-          .filter((o) => o.top && offered(o, form.options))
+          .filter((o) => o.top && offered(o, form.options) && !(wf.source === 'generation' && o.id === 'model'))
           .map((o) => (
             <div key={o.id} className="field">
               <div className="label">{o.label}</div>

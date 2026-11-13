@@ -143,6 +143,13 @@ def test_every_phone_workflow_prices_and_starts_with_the_settings_the_app_sends(
     signed_in(client)
     client.app.state.jobs.pause(True)
     client.app.state.db.run("UPDATE users SET credits = 100000")
+
+    class Unlimited:   # one job a workflow, 40-odd of them: more than the jobs route lets one person send a minute
+        remote = False
+
+        def allow(self, *args):
+            return True
+    client.app.state.limits = Unlimited()
     for workflow in client.get("/api/mobile/workflows").json()["workflows"]:
         if any(not r["optional"] for r in workflow["refs"]):
             continue   # it needs a picture or a video uploaded with it

@@ -1,0 +1,26 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "video.mp4"
+    },
+    "_meta": {
+      "title": "Video to upscale"
+    }
+  },
+  "10": {
+    "class_type": "GenerationUpscale",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "factor": 2,
+      "aspect_ratio": "16:9",
+      "filename_prefix": "upscaler/generation_upscale"
+    },
+    "_meta": {
+      "title": "Generation upscale"
+    }
+  }
+}

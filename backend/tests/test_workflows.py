@@ -211,7 +211,7 @@ def master(**settings):
 
 def test_every_video_workflow_has_a_presets_file():
     flows = sorted(p.stem for p in VIDEO.glob("*.json") if not p.name.endswith(".studio.json"))
-    assert len(flows) == 11 and {"h3_chunk", "h3_all_in_one", "video_wan_animate2", "video_v2v_wan_vace", "video_outpaint_wan_vace"} <= set(flows)
+    assert len(flows) == 13 and [f for f in flows if f.startswith("generation_")] == ["generation_lipsync", "generation_video"] and {"h3_chunk", "h3_all_in_one", "video_wan_animate2", "video_v2v_wan_vace", "video_outpaint_wan_vace"} <= set(flows)
     for name in flows:
         profile = json.loads((VIDEO / (name + ".studio.json")).read_text(encoding="utf-8"))
         assert profile["title"] and not {r.split("/")[1] for r in profile.get("replaces", [])} & set(flows), name   # it replaces only what has gone
@@ -220,7 +220,7 @@ def test_every_video_workflow_has_a_presets_file():
 def test_every_picture_workflow_has_a_presets_file_and_the_new_family_its_shape_and_upscale():
     image = VIDEO.parent / "image"
     flows = sorted(p.stem for p in image.glob("*.json") if not p.name.endswith((".studio.json", ".ui.json")))
-    assert len(flows) == 6
+    assert len(flows) == 7 and [f for f in flows if f.startswith("generation_")] == ["generation_image"]   # 11 models in one
     for name in flows:
         profile = json.loads((image / (name + ".studio.json")).read_text(encoding="utf-8"))
         assert profile["title"], name

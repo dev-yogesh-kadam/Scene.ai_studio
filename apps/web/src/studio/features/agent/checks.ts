@@ -10,7 +10,9 @@ import { api } from '../../../common/api';
 import type { Item } from '../../../common/media/item';
 import type { AgentChat } from './chat';
 import {
+  CHECK_RESULTS,
   MAX_RETAKES,
+  REVIEW_TIMEOUT,
   REVIEW_WITHIN,
   REVIEWS_AT_ONCE,
   SAVED_ONLY,
@@ -24,6 +26,7 @@ import type { Retake, Review, Run, Step, Take } from './types';
 
 /** Whether a finished take is still to be checked (one finished long ago is not, when the panel opens). */
 export function toCheck(chat: AgentChat, take: Take | null | undefined) {
+  if (!CHECK_RESULTS) return false;
   if (!take || !take.job || take.review || take.reviewing || take.reviewError) return false;
   const job = chat.jobOf(take.job);
   return !!job && job.status === 'done' && Date.now() - (take.queuedAt || 0) < REVIEW_WITHIN;
@@ -46,11 +49,12 @@ export function allMade(chat: AgentChat, run: Run) {
 }
 
 export const checking = (chat: AgentChat, run: Run) =>
-  shotsOf(run).some((s) => takesOf(s).some((t) => t.reviewing || toCheck(chat, t)));
+  CHECK_RESULTS && shotsOf(run).some((s) => takesOf(s).some((t) => t.reviewing || toCheck(chat, t)));
 
 /** Whether a step is done with for the run: a picture or a clip once its check is over and, when the check failed,
  *  once the user chose. A check that could not run, or a failed one with no retake to offer, never holds the run. */
 export function settled(chat: AgentChat, step: Step) {
+  if (!CHECK_RESULTS) return true; // nothing is checked: a made shot is done with
   if (step.skipped || !step.settings || (step.kind !== 'image' && step.kind !== 'video')) return true;
   const take = step.take2 || step;
   if (take.reviewing) return false;
@@ -158,13 +162,19 @@ async function reviewStep(chat: AgentChat, run: Run, take: Take, step: Step, all
     }
     const before = step.after ? run.steps[step.after.step] : step.follows != null ? run.steps[step.follows] : null;
     const uses = (step.uses || []).map((use) => (use.asset ? { asset: use.asset } : { id: use.id }));
-    const found = await reviewItem<{ verdict: Review; retake?: Retake; retaken?: { job: string; credits: number } }>({
-      item: take.made,
-      prompt: take.prompt || step.prompt,
-      uses,
-      previous: before ? before.made || null : null,
-      retake: allowRetake,
-    });
+    // never waited for longer than REVIEW_TIMEOUT: a check that hangs would hold its place, and the rest, for good
+    const found = await Promise.race([
+      reviewItem<{ verdict: Review; retake?: Retake; retaken?: { job: string; credits: number } }>({
+        item: take.made,
+        prompt: take.prompt || step.prompt,
+        uses,
+        previous: before ? before.made || null : null,
+        retake: allowRetake,
+      }),
+      new Promise<never>((_, fail) =>
+        setTimeout(() => fail(new Error('the check took too long; the shot is kept as it is.')), REVIEW_TIMEOUT),
+      ),
+    ]);
     take.review = found.verdict;
     if (allowRetake) step.retake = found.retake;
     const which = take === step ? `“${step.name}”` : `the retake of “${step.name}”`;
@@ -237,6 +247,7 @@ function weigh(chat: AgentChat, run: Run) {
 /** Check the shots of an approved plan once all of them have been made, each once. Edits, sounds and motion graphics
  *  are not reviewed: they are made from what the user already has. */
 export function reviewFinished(chat: AgentChat) {
+  if (!CHECK_RESULTS) return;
   let free =
     REVIEWS_AT_ONCE -
     chat.runs

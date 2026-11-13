@@ -1,0 +1,1325 @@
+{
+  "title": "Generation video",
+  "description": "Video on the provider's models (Seedance 2.5, Seedance 2.0, Seedance 2.0 Fast, Seedance 2.0 Mini, Kling O3 Standard, Kling 3.0 Standard, Kling 3.0 Turbo, Kling 4, Happy Horse 1.1, Gemini Omni Flash (Preview), Gemini Omni 1.1 Flash, MiniMax H3, Grok Imagine Video 1.5, MiniMax H3 Max, Wan 3.0, Wan 3.0 Prime), made by the generation server. Pick the model in the Model setting.",
+  "pick_when": "A video made on one of the provider's models (Seedance, Kling, Wan, MiniMax, Gemini Omni, Grok, …), paid in provider credits. Choose the model in the \"Model\" setting: each choice says what it is good at, its lengths, frames, references and price.",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:value": "Prompt",
+    "2:value": "Length in seconds (1 to 30; each model has its own range)",
+    "3:image": "First frame: the clip starts on this image",
+    "4:image": "Last frame: the clip ends on this image",
+    "5:audio": "Reference audio 1: a voice, music or sound the clip follows",
+    "6:audio": "Reference audio 2: a voice, music or sound the clip follows",
+    "7:audio": "Reference audio 3: a voice, music or sound the clip follows",
+    "8:video": "Reference video: a clip to continue or edit"
+  },
+  "defaults": {
+    "1:value": "",
+    "2:value": 5
+  },
+  "options": [
+    {
+      "id": "model",
+      "label": "Model",
+      "default": "minimax_h3_max",
+      "top": true,
+      "choices": [
+        {
+          "id": "seedance_2_5",
+          "label": "Seedance 2.5",
+          "hint": "Default for most video: cinematic multi-shot scenes, long takes up to 30s, many references. 4–30 s, first+last frame, up to 9 reference images, sound on/off. 480p 13/13, 720p 28/28, 1080p 72/72 credits per second (silent/with sound)."
+        },
+        {
+          "id": "seedance_2_0",
+          "label": "Seedance 2.0",
+          "hint": "Strong motion and character consistency in clips up to 15s; the Seedance for 4K. 4–15 s, first+last frame, up to 9 reference images, sound on/off. 480p 9/9, 720p 19/19, 1080p 45/45, 2160p 94/94 credits per second (silent/with sound)."
+        },
+        {
+          "id": "seedance_2_0_fast",
+          "label": "Seedance 2.0 Fast",
+          "hint": "Quick Seedance drafts for iterating on prompts and shots. 4–15 s, first+last frame, up to 9 reference images, sound on/off. 480p 7/7, 720p 15/15 credits per second (silent/with sound)."
+        },
+        {
+          "id": "seedance_2_0_mini",
+          "label": "Seedance 2.0 Mini",
+          "hint": "Cheapest Seedance previews to test an idea before the final render. 4–15 s, first+last frame, up to 9 reference images, sound on/off. 480p 5/5, 720p 10/10 credits per second (silent/with sound)."
+        },
+        {
+          "id": "kling_o3_standard",
+          "label": "Kling O3 Standard",
+          "hint": "Dependable Kling clips, and clip edits that keep the source clip's own sound. 3–15 s, first+last frame, no reference images, silent. 720p 11 credits per second."
+        },
+        {
+          "id": "kling_3_0_standard",
+          "label": "Kling 3.0 Standard",
+          "hint": "Solid text- or image-to-video when Seedance isn't available and no clip edit is needed. 3–15 s, first+last frame, no reference images, silent. 720p 11 credits per second."
+        },
+        {
+          "id": "kling_3_0_turbo",
+          "label": "Kling 3.0 Turbo",
+          "hint": "Quick, low-cost Kling clips from text or a first frame, with sound. 3–15 s, first frame, no reference images, sound on/off. 720p 14/14, 1080p 17/17 credits per second (silent/with sound)."
+        },
+        {
+          "id": "kling_4_0",
+          "label": "Kling 4",
+          "hint": "Kling clips of 3-30s with native sound, from first and last frames, up to 10 reference images, or a reference clip that guides a new video. 3–30 s, first+last frame, up to 9 reference images, always with sound. 720p 19, 1080p 29 credits per second."
+        },
+        {
+          "id": "happy_horse_1_1",
+          "label": "Happy Horse 1.1",
+          "hint": "Stylized, expressive character animation with several characters. 3–15 s, first frame, up to 9 reference images, always with sound. 720p 15, 1080p 20 credits per second."
+        },
+        {
+          "id": "gemini_omni_flash_preview",
+          "label": "Gemini Omni Flash (Preview)",
+          "hint": "Plain-language edits of a clip and reference-led shots, with sound. 3–10 s, first+last frame, up to 9 reference images, always with sound. 720p 12 credits per second."
+        },
+        {
+          "id": "gemini_omni_1_1_flash",
+          "label": "Gemini Omni 1.1 Flash",
+          "hint": "Plain-language edits of a clip (relight, restyle, add things), up to 4K. 3–10 s, first+last frame, up to 9 reference images, always with sound. 720p 12, 1080p 18, 2160p 36 credits per second."
+        },
+        {
+          "id": "minimax_h3",
+          "label": "MiniMax H3",
+          "hint": "Clips with native stereo sound, guided by image, clip or audio references. 5–15 s, first+last frame, up to 9 reference images, always with sound. 768p 10, 2k 15 credits per second."
+        },
+        {
+          "id": "grok_imagine_video_1_5",
+          "label": "Grok Imagine Video 1.5",
+          "hint": "xAI video from text or a first frame, with optional sound, including 3:2 and 2:3. 1–15 s, first frame, no reference images, sound on/off. 480p 10/10, 720p 17/17, 1080p 30/30 credits per second (silent/with sound)."
+        },
+        {
+          "id": "minimax_h3_max",
+          "label": "MiniMax H3 Max",
+          "hint": "Cheaper, faster MiniMax clips with native sound, from frames or image and audio references. 5–15 s, first+last frame, up to 9 reference images, always with sound. 480p 6, 768p 10, 1080p 20 credits per second."
+        },
+        {
+          "id": "wan_3_0",
+          "label": "Wan 3.0",
+          "hint": "Clips up to 30s that can edit or extend a source clip, with up to 10 image and 5 audio references. 2–30 s, first+last frame, up to 9 reference images, sound on/off. 480p 7/7, 720p 14/14, 1080p 28/28 credits per second (silent/with sound)."
+        },
+        {
+          "id": "wan_3_0_prime",
+          "label": "Wan 3.0 Prime",
+          "hint": "Higher-quality, pricier Wan 3.0 with the same inputs. 2–30 s, first+last frame, up to 9 reference images, sound on/off. 480p 10/10, 720p 20/20, 1080p 40/40 credits per second (silent/with sound)."
+        }
+      ]
+    },
+    {
+      "id": "resolution_1",
+      "label": "Resolution",
+      "default": "480p",
+      "top": true,
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "choices": [
+        {
+          "id": "480p",
+          "label": "480p"
+        },
+        {
+          "id": "720p",
+          "label": "720p"
+        },
+        {
+          "id": "1080p",
+          "label": "1080p"
+        }
+      ]
+    },
+    {
+      "id": "resolution_2",
+      "label": "Resolution",
+      "default": "480p",
+      "top": true,
+      "when": {
+        "model": [
+          "seedance_2_0"
+        ]
+      },
+      "choices": [
+        {
+          "id": "480p",
+          "label": "480p"
+        },
+        {
+          "id": "720p",
+          "label": "720p"
+        },
+        {
+          "id": "1080p",
+          "label": "1080p"
+        },
+        {
+          "id": "2160p",
+          "label": "2160p"
+        }
+      ]
+    },
+    {
+      "id": "resolution_3",
+      "label": "Resolution",
+      "default": "480p",
+      "top": true,
+      "when": {
+        "model": [
+          "seedance_2_0_fast",
+          "seedance_2_0_mini"
+        ]
+      },
+      "choices": [
+        {
+          "id": "480p",
+          "label": "480p"
+        },
+        {
+          "id": "720p",
+          "label": "720p"
+        }
+      ]
+    },
+    {
+      "id": "resolution_4",
+      "label": "Resolution",
+      "default": "720p",
+      "top": true,
+      "when": {
+        "model": [
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "gemini_omni_flash_preview"
+        ]
+      },
+      "choices": [
+        {
+          "id": "720p",
+          "label": "720p"
+        }
+      ]
+    },
+    {
+      "id": "resolution_5",
+      "label": "Resolution",
+      "default": "720p",
+      "top": true,
+      "when": {
+        "model": [
+          "kling_3_0_turbo",
+          "kling_4_0",
+          "happy_horse_1_1"
+        ]
+      },
+      "choices": [
+        {
+          "id": "720p",
+          "label": "720p"
+        },
+        {
+          "id": "1080p",
+          "label": "1080p"
+        }
+      ]
+    },
+    {
+      "id": "resolution_6",
+      "label": "Resolution",
+      "default": "720p",
+      "top": true,
+      "when": {
+        "model": [
+          "gemini_omni_1_1_flash"
+        ]
+      },
+      "choices": [
+        {
+          "id": "720p",
+          "label": "720p"
+        },
+        {
+          "id": "1080p",
+          "label": "1080p"
+        },
+        {
+          "id": "2160p",
+          "label": "2160p"
+        }
+      ]
+    },
+    {
+      "id": "resolution_7",
+      "label": "Resolution",
+      "default": "768p",
+      "top": true,
+      "when": {
+        "model": [
+          "minimax_h3"
+        ]
+      },
+      "choices": [
+        {
+          "id": "768p",
+          "label": "768p"
+        },
+        {
+          "id": "2k",
+          "label": "2k"
+        }
+      ]
+    },
+    {
+      "id": "resolution_8",
+      "label": "Resolution",
+      "default": "480p",
+      "top": true,
+      "when": {
+        "model": [
+          "minimax_h3_max"
+        ]
+      },
+      "choices": [
+        {
+          "id": "480p",
+          "label": "480p"
+        },
+        {
+          "id": "768p",
+          "label": "768p"
+        },
+        {
+          "id": "1080p",
+          "label": "1080p"
+        }
+      ]
+    },
+    {
+      "id": "shape_1",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        },
+        {
+          "id": "r21x9",
+          "label": "21:9"
+        },
+        {
+          "id": "r3x4",
+          "label": "3:4"
+        },
+        {
+          "id": "r4x3",
+          "label": "4:3"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    },
+    {
+      "id": "shape_2",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "kling_3_0_turbo",
+          "happy_horse_1_1",
+          "minimax_h3",
+          "minimax_h3_max"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    },
+    {
+      "id": "shape_3",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "kling_4_0"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        },
+        {
+          "id": "r21x9",
+          "label": "21:9"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    },
+    {
+      "id": "shape_4",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "gemini_omni_flash_preview",
+          "gemini_omni_1_1_flash"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    },
+    {
+      "id": "shape_5",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        },
+        {
+          "id": "r2x3",
+          "label": "2:3"
+        },
+        {
+          "id": "r3x2",
+          "label": "3:2"
+        },
+        {
+          "id": "r3x4",
+          "label": "3:4"
+        },
+        {
+          "id": "r4x3",
+          "label": "4:3"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    },
+    {
+      "id": "sound",
+      "label": "Sound",
+      "default": "on",
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_3_0_turbo",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "choices": [
+        {
+          "id": "on",
+          "label": "With sound"
+        },
+        {
+          "id": "off",
+          "label": "Silent"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "when": {
+        "model": "seedance_2_5"
+      },
+      "set": {
+        "10.model": "seedance_2_5"
+      }
+    },
+    {
+      "when": {
+        "model": "seedance_2_0"
+      },
+      "set": {
+        "10.model": "seedance_2_0"
+      }
+    },
+    {
+      "when": {
+        "model": "seedance_2_0_fast"
+      },
+      "set": {
+        "10.model": "seedance_2_0_fast"
+      }
+    },
+    {
+      "when": {
+        "model": "seedance_2_0_mini"
+      },
+      "set": {
+        "10.model": "seedance_2_0_mini"
+      }
+    },
+    {
+      "when": {
+        "model": "kling_o3_standard"
+      },
+      "set": {
+        "10.model": "kling_o3_standard",
+        "10.generate_audio": false
+      }
+    },
+    {
+      "when": {
+        "model": "kling_3_0_standard"
+      },
+      "set": {
+        "10.model": "kling_3.0_standard",
+        "10.generate_audio": false
+      }
+    },
+    {
+      "when": {
+        "model": "kling_3_0_turbo"
+      },
+      "set": {
+        "10.model": "kling_3.0_turbo"
+      }
+    },
+    {
+      "when": {
+        "model": "kling_4_0"
+      },
+      "set": {
+        "10.model": "kling_4.0",
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": "happy_horse_1_1"
+      },
+      "set": {
+        "10.model": "happy_horse_1_1",
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": "gemini_omni_flash_preview"
+      },
+      "set": {
+        "10.model": "gemini-omni-flash-preview",
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": "gemini_omni_1_1_flash"
+      },
+      "set": {
+        "10.model": "gemini-omni-1.1-flash",
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": "minimax_h3"
+      },
+      "set": {
+        "10.model": "minimax_h3",
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": "grok_imagine_video_1_5"
+      },
+      "set": {
+        "10.model": "grok-imagine-video-1.5"
+      }
+    },
+    {
+      "when": {
+        "model": "minimax_h3_max"
+      },
+      "set": {
+        "10.model": "minimax_h3_max",
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": "wan_3_0"
+      },
+      "set": {
+        "10.model": "wan_3_0"
+      }
+    },
+    {
+      "when": {
+        "model": "wan_3_0_prime"
+      },
+      "set": {
+        "10.model": "wan_3_0_prime"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "resolution_1": "480p"
+      },
+      "set": {
+        "10.resolution": "480p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "resolution_1": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "resolution_1": "1080p"
+      },
+      "set": {
+        "10.resolution": "1080p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0"
+        ],
+        "resolution_2": "480p"
+      },
+      "set": {
+        "10.resolution": "480p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0"
+        ],
+        "resolution_2": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0"
+        ],
+        "resolution_2": "1080p"
+      },
+      "set": {
+        "10.resolution": "1080p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0"
+        ],
+        "resolution_2": "2160p"
+      },
+      "set": {
+        "10.resolution": "2160p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0_fast",
+          "seedance_2_0_mini"
+        ],
+        "resolution_3": "480p"
+      },
+      "set": {
+        "10.resolution": "480p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0_fast",
+          "seedance_2_0_mini"
+        ],
+        "resolution_3": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "gemini_omni_flash_preview"
+        ],
+        "resolution_4": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_3_0_turbo",
+          "kling_4_0",
+          "happy_horse_1_1"
+        ],
+        "resolution_5": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_3_0_turbo",
+          "kling_4_0",
+          "happy_horse_1_1"
+        ],
+        "resolution_5": "1080p"
+      },
+      "set": {
+        "10.resolution": "1080p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "gemini_omni_1_1_flash"
+        ],
+        "resolution_6": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "gemini_omni_1_1_flash"
+        ],
+        "resolution_6": "1080p"
+      },
+      "set": {
+        "10.resolution": "1080p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "gemini_omni_1_1_flash"
+        ],
+        "resolution_6": "2160p"
+      },
+      "set": {
+        "10.resolution": "2160p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "minimax_h3"
+        ],
+        "resolution_7": "768p"
+      },
+      "set": {
+        "10.resolution": "768p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "minimax_h3"
+        ],
+        "resolution_7": "2k"
+      },
+      "set": {
+        "10.resolution": "2k"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "minimax_h3_max"
+        ],
+        "resolution_8": "480p"
+      },
+      "set": {
+        "10.resolution": "480p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "minimax_h3_max"
+        ],
+        "resolution_8": "768p"
+      },
+      "set": {
+        "10.resolution": "768p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "minimax_h3_max"
+        ],
+        "resolution_8": "1080p"
+      },
+      "set": {
+        "10.resolution": "1080p"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "shape_1": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "shape_1": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "shape_1": "r21x9"
+      },
+      "set": {
+        "10.aspect_ratio": "21:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "shape_1": "r3x4"
+      },
+      "set": {
+        "10.aspect_ratio": "3:4"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "shape_1": "r4x3"
+      },
+      "set": {
+        "10.aspect_ratio": "4:3"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "shape_1": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "kling_3_0_turbo",
+          "happy_horse_1_1",
+          "minimax_h3",
+          "minimax_h3_max"
+        ],
+        "shape_2": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "kling_3_0_turbo",
+          "happy_horse_1_1",
+          "minimax_h3",
+          "minimax_h3_max"
+        ],
+        "shape_2": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "kling_3_0_turbo",
+          "happy_horse_1_1",
+          "minimax_h3",
+          "minimax_h3_max"
+        ],
+        "shape_2": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_4_0"
+        ],
+        "shape_3": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_4_0"
+        ],
+        "shape_3": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_4_0"
+        ],
+        "shape_3": "r21x9"
+      },
+      "set": {
+        "10.aspect_ratio": "21:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "kling_4_0"
+        ],
+        "shape_3": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "gemini_omni_flash_preview",
+          "gemini_omni_1_1_flash"
+        ],
+        "shape_4": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "gemini_omni_flash_preview",
+          "gemini_omni_1_1_flash"
+        ],
+        "shape_4": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r2x3"
+      },
+      "set": {
+        "10.aspect_ratio": "2:3"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r3x2"
+      },
+      "set": {
+        "10.aspect_ratio": "3:2"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r3x4"
+      },
+      "set": {
+        "10.aspect_ratio": "3:4"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r4x3"
+      },
+      "set": {
+        "10.aspect_ratio": "4:3"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "grok_imagine_video_1_5"
+        ],
+        "shape_5": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_3_0_turbo",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "sound": "on"
+      },
+      "set": {
+        "10.generate_audio": true
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_3_0_turbo",
+          "grok_imagine_video_1_5",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ],
+        "sound": "off"
+      },
+      "set": {
+        "10.generate_audio": false
+      }
+    }
+  ],
+  "refs_when": [
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "kling_3_0_turbo",
+          "kling_4_0",
+          "happy_horse_1_1",
+          "gemini_omni_flash_preview",
+          "gemini_omni_1_1_flash",
+          "minimax_h3",
+          "grok_imagine_video_1_5",
+          "minimax_h3_max",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "refs": [
+        "3:image"
+      ]
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_3_0_standard",
+          "kling_4_0",
+          "gemini_omni_flash_preview",
+          "gemini_omni_1_1_flash",
+          "minimax_h3",
+          "minimax_h3_max",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "refs": [
+        "4:image"
+      ]
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "minimax_h3",
+          "minimax_h3_max",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "refs": [
+        "5:audio"
+      ]
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "minimax_h3",
+          "minimax_h3_max",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "refs": [
+        "6:audio"
+      ]
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "minimax_h3",
+          "minimax_h3_max",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "refs": [
+        "7:audio"
+      ]
+    },
+    {
+      "when": {
+        "model": [
+          "seedance_2_5",
+          "seedance_2_0",
+          "seedance_2_0_fast",
+          "seedance_2_0_mini",
+          "kling_o3_standard",
+          "kling_4_0",
+          "gemini_omni_flash_preview",
+          "gemini_omni_1_1_flash",
+          "minimax_h3",
+          "wan_3_0",
+          "wan_3_0_prime"
+        ]
+      },
+      "refs": [
+        "8:video"
+      ]
+    }
+  ],
+  "hints": [
+    "Made by the generation server on the provider, paid in provider credits. The Model setting picks the model; resolution, shape and sound show what that model offers, with prices in the model's description.",
+    "Each model takes its own range of lengths, its own frames and its own number of reference images (see its description); the server refuses a job that asks more, saying why.",
+    "Reference images carry a character, product or look; cite them in the prompt as @Image1, @Image2 … Only Seedance models combine references with first/last frames.",
+    "With a first or last frame the clip takes that image's shape.",
+    "Reference audio (on the models that take it) guides the clip's sound: a voice to speak in, music to move to.",
+    "A reference video (on the models that take one) is continued or edited."
+  ],
+  "refs": {
+    "mode": "dynamic",
+    "target_node": "10",
+    "target_input": "reference_image_{i}",
+    "first_index": 1,
+    "node_class": "LoadImage",
+    "node_input": "image",
+    "node_id": "ref_{n}",
+    "label": "Reference image {n}",
+    "max": 9,
+    "min": 0,
+    "prompt_tag": "@Image{n}"
+  }
+}

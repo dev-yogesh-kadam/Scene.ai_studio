@@ -31,7 +31,12 @@ export function progressOf(chat: AgentChat, take: Take, step: Step): Progress {
     }
     if (job.status === 'queued')
       return { state: 'queued', text: job.position ? `Waiting · ${job.position} in the queue` : 'Waiting' };
-    if (job.status === 'failed') return { state: 'failed', text: 'Failed. The credits came back.' };
+    if (job.status === 'failed') {
+      // why, in its own words (the provider's refusal, a server switched off), so the user knows what to change
+      const why = (job.reason || job.error || '').trim().replace(/\.$/, '');
+      const said = why.length > 160 ? why.slice(0, 157) + '…' : why;
+      return { state: 'failed', text: (said ? `Failed: ${said}.` : 'Failed.') + ' The credits came back.' };
+    }
     if (job.status === 'cancelled') return { state: 'failed', text: 'Cancelled. The credits came back.' };
   }
   if (take.job) return { state: 'running', share: 1, text: 'Finishing' };

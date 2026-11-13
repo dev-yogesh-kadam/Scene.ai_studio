@@ -8,6 +8,7 @@ lines of it, and check the models with `scripts/check_models.py`.
 | Server | Address | `config.json` key | Where it runs |
 |---|---|---|---|
 | ComfyUI (rendering) | `http://100.123.221.34:8188` | `comfy_url` | The Windows render PC (Zoro), reached over Tailscale |
+| Generation server (provider videos and pictures) | `http://100.123.221.34:8189` | the console (Servers & APIs → ComfyUI) | Zoro, beside ComfyUI (`D:\Studio_automation`): ComfyUI's API, the clips made on the provider |
 | Claude (the agent's models) | Anthropic, through Claude Code | the console's Claude connection; `claude_models` | Claude Code in the studio with an API key, or on LUFI through its bridge (below) |
 
 **The agent uses Anthropic's Claude models only** (since 31 October). Ollama, Gemini, Kimi and every other
@@ -37,9 +38,13 @@ With Claude unreachable, those stop and everything else works.
 {
   "comfy_url": "http://100.123.221.34:8188",
   "agent_model": "sonnet",
-  "default_workflow": "video/h3_master"
+  "default_workflow": ""
 }
 ```
+
+`default_workflow` is empty since 12 November: the studio sets no model. The agent asks which model and resolution
+before the first video and the first picture of a conversation (and keeps the answers in its direction), and Create's
+quick actions and the composer open on the model the user picked last, or on none until they pick one.
 
 Write the addresses without a trailing slash.
 
@@ -52,6 +57,41 @@ scenes) send spaces until their JSON is ready.
 ```bash
 .venv\Scripts\python.exe scripts\check_models.py
 ```
+
+## The render servers and the load balancer
+
+Every ComfyUI server of the console (Servers & APIs → ComfyUI) is a row of `endpoints`. The load balancer
+(`backend/scene/balancer.py`, run by the queue's worker in `jobs.py`) places each waiting render:
+
+- **What a server can do.** "Workflows" (the column `models`): patterns of the workflow ids it takes, fnmatch style,
+  matched against the whole id and the file's name (`generation_*` takes `video/generation_video`). A server
+  with patterns takes only those, and a workflow some server's patterns claim goes only to the servers that claim it.
+  A server without patterns takes everything no server claims, when it has the workflow's nodes (its `/object_info`,
+  read the first time a render could go there and every 30 minutes; unknown counts as having them).
+- **How much it runs at once.** "Jobs at once" (the column `slots`, 1 to 16, migration 0014): 1 for ComfyUI, about 4
+  for the generation server, which spreads its jobs over the provider accounts itself.
+- **Which one.** Of the servers that can do it and have a slot free, the least busy (running / slots), the first on a
+  tie, asked whether it answers. A render that has to wait does not hold up the renders behind it that another server
+  can do. A render no server in use could ever do fails at once, saying why, and its credits come back.
+- **Who and where.** Every graph is sent with `extra_data` = `{"scene": {"user", "project", "module", "job"}}`: the
+  generation server logs, limits and sorts its jobs by it (a job on a project's own canvas is in the module "Main
+  canvas"). ComfyUI ignores it.
+
+The generation server: add it with Workflows `generation_*` and Jobs at once 4. It makes **models**, not workflows
+(Seedance, Kling, Wan, MiniMax, Gemini Omni, Grok, Happy Horse; Nano Banana, GPT Image, Seedream, Grok for pictures),
+and the studio keeps them apart from ComfyUI's workflows everywhere they are offered: the pickers have two groups,
+"Workflows (ComfyUI)" and "Models (generation server)", and the agent two lists. Inside, all the models of a kind run
+through one workflow, `workflows/video/generation_video` or `workflows/image/generation_image` (copied from
+`D:\Studio_automation\scene-ai\workflows`), whose Model setting is the model; its Resolution, Shape and Sound are that
+model's own (`backend/scene/generation_models.py`). What each model takes (its lengths, reference pictures, frames,
+prices) comes from the generation server's `GET /generation/models`, kept 10 minutes; without it the presets files
+alone still work. Each model is priced at each resolution in the console (Pricing → the workflow), the provider's
+price shown as a starting point. Beside them are its single-model tools, each one model with no Model setting and
+listed with the models: `audio/generation_speech` (a voiceover; Voice and Language, or a Voice id), `audio/generation_music`
+(10 to 120 s), `audio/generation_sound_effect` (1 to 22 s), `video/generation_lipsync` (a video with one speaker and a voice
+track) and `upscaler/generation_upscale` (Scale 1.5 to 4).
+Its errors read "The provider: <reason>" (limits, credits, refusals, test mode). The provider has no cancel: a job
+cancelled once it started is still finished and charged there; the studio gives the user's credits back and says so.
 
 ## The Claude connection
 

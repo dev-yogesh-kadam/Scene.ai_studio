@@ -80,7 +80,11 @@ test('Quick actions: Generate image makes a picture that lands on the canvas', a
   const before = Number((await page.getByText(/^\d+ items$/).textContent())!.split(' ')[0]);
   const panel = page.getByRole('complementary', { name: 'Make something' });
   await panel.getByRole('button', { name: 'Generate image' }).click();
-  await expect(panel.getByRole('combobox', { name: 'Model' })).toBeVisible();
+  const model = panel.getByRole('combobox', { name: 'Model' });
+  await expect(model).toBeVisible();
+  // nothing is chosen for a user who never chose (no default model): they pick one, here the first ComfyUI workflow
+  const first = await model.locator('optgroup[label="Workflows (ComfyUI)"] option').first().getAttribute('value');
+  await model.selectOption(first!);
   await panel.getByRole('textbox', { name: 'Prompt' }).fill('A lighthouse at dusk');
   const generate = panel.getByTitle('Generate (Ctrl or ⌘ + Enter)');
   await expect(generate).toBeEnabled();

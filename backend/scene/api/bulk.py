@@ -23,13 +23,12 @@ import re
 import time
 import uuid
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import audit, errors, sharing
 from ..comfy import workflows
 from ..comfy.workflows import WorkflowError
-from ..references import media_kind, read_upload, upload_reference
+from ..references import keep_reference, media_kind, read_upload
 from .deps import current_user, uploading
 from .studio import needs_caption
 from ..db import offload
@@ -148,16 +147,14 @@ async def bulk_run(request: Request, user: dict = Depends(admin_only)):
     resolution = int(form.get("resolution") or 0) or None
     orientation = str(form.get("orientation") or "") or None
     duration = float(form.get("duration") or 0) or None
-    # The pictures go to the render server once, and every job uses them from there.
+    # The pictures are kept once (references.keep_reference), and every job uses them: each is sent to the server that
+    # runs it when it starts.
     pictures = []
     for upload in [u for k, u in form.multi_items() if k == "picture" and hasattr(u, "filename")][:MOST_PICTURES]:
         if media_kind(upload.filename) != "image":
             raise HTTPException(400, "{} is not a picture.".format(upload.filename))
         data = await read_upload(upload)
-        try:
-            name = await upload_reference(state.comfy, upload.filename, data, upload.content_type, db=state.db, user_id=user["id"])
-        except httpx.HTTPError:
-            raise HTTPException(503, "The render server can't be reached, so the pictures can't be sent. Try again when it is on.")
+        name = await keep_reference(state.storage, upload.filename, data, db=state.db, user_id=user["id"])
         pictures.append({"comfy_name": name, "name": upload.filename[:200]})
 
     run = "bulk-" + uuid.uuid4().hex[:10]

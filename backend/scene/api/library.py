@@ -18,7 +18,7 @@ from ..catalog import KINDS
 from ..outputs import MAIN_CANVAS
 
 FIRST_MODULE = "Module 1"
-from ..references import media_kind, read_text_upload, read_upload, safe_name, text_kind, upload_reference
+from ..references import keep_reference, media_kind, read_text_upload, read_upload, safe_name, text_kind
 from .deps import costly, current_user, limited, uploading
 
 router = APIRouter(prefix="/api", tags=["library"])
@@ -419,14 +419,14 @@ async def as_reference(item_id: int, request: Request, kind: str = "image", user
     path = await offload(_path, request, row)
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
-    comfy = request.app.state.comfy
+    store = request.app.state.storage   # kept by the studio, sent to the render server when the job runs
     if kind == "image" and row["kind"] == "video":
         with tempfile.TemporaryDirectory() as tmp:
             frame = await media.last_frame(path, Path(tmp) / (path.stem + "_last.png"))
-            name = await upload_reference(comfy, frame.name, frame.read_bytes(), "image/png", db=request.app.state.db, user_id=user["id"])
+            name = await keep_reference(store, frame.name, frame.read_bytes(), db=request.app.state.db, user_id=user["id"])
         return {"comfy_name": name, "name": "End of " + row["name"]}
     if row["kind"] == kind or (kind == "audio" and row["kind"] == "video"):
-        name = await upload_reference(comfy, path.name, path.read_bytes(), db=request.app.state.db, user_id=user["id"])
+        name = await keep_reference(store, path.name, path.read_bytes(), db=request.app.state.db, user_id=user["id"])
         return {"comfy_name": name, "name": row["name"]}
     raise HTTPException(400, "{} is {}, and this needs {}.".format(
         row["name"], {"image": "an image", "video": "a video", "audio": "a sound"}.get(row["kind"], "a text"),

@@ -45,8 +45,14 @@ class Comfy:
         info = r.json()
         return (info["subfolder"] + "/" if info.get("subfolder") else "") + info["name"]
 
-    async def queue(self, prompt, client_id):
-        r = await self.http.post(self.url + "/prompt", json={"prompt": prompt, "client_id": client_id})
+    async def queue(self, prompt, client_id, extra=None):
+        """Queue a graph; returns its prompt id. `extra`, sent as extra_data: who and where the job is from
+        ({"scene": {"user", "project", "module", "job"}}). ComfyUI keeps what it does not know of it and ignores it;
+        the generation server logs, limits and sorts its jobs by it."""
+        body = {"prompt": prompt, "client_id": client_id}
+        if extra:
+            body["extra_data"] = extra
+        r = await self.http.post(self.url + "/prompt", json=body)
         try:
             body = r.json()
         except ValueError:

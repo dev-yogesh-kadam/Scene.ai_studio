@@ -1,0 +1,535 @@
+{
+  "title": "Generation voiceover",
+  "description": "A voiceover from text, in a voice from the provider's voice library, made by the generation server.",
+  "pick_when": "Spoken words: narration, a character's lines, a voice track for lip sync. Paid in provider credits, priced by the length of the text.",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:value": "Words to speak (up to 2,500 characters). [whispers], [excited], [laughs] … in brackets direct the delivery from there on.",
+    "2:value": "Voice id (optional): any voice from the provider's library; it wins over the Voice choice",
+    "4:value": "How to say the whole clip (optional, Gemini voices only), e.g. \"a late-night radio host, slow and close\""
+  },
+  "defaults": {
+    "1:value": "",
+    "2:value": "",
+    "4:value": ""
+  },
+  "options": [
+    {
+      "id": "voice",
+      "label": "Voice",
+      "default": "v_vclffec6784a18ff8a4",
+      "top": true,
+      "choices": [
+        {
+          "id": "v_vclffec6784a18ff8a4",
+          "label": "Ashford Maid",
+          "hint": "female, en"
+        },
+        {
+          "id": "v_vcld931dfaf1f1ea40a",
+          "label": "Ashford Maid",
+          "hint": "female, young, british, en, Timid, whispered maid"
+        },
+        {
+          "id": "v_vclfbe343a03eee1d25",
+          "label": "Bernard",
+          "hint": "male, en"
+        },
+        {
+          "id": "v_vcl9181c54928b29b56",
+          "label": "Bernard",
+          "hint": "male, old, british, en, Elderly theatrical butler"
+        },
+        {
+          "id": "v_vcl1406a85c2d3d097e",
+          "label": "Bianca",
+          "hint": "female, young, american, en, Breathy, seductive, scheming stepsister"
+        },
+        {
+          "id": "v_vcl19e58c2cdd469c03",
+          "label": "Bianca Ashford",
+          "hint": "female, en"
+        },
+        {
+          "id": "v_vcl01dbd6d658ee5191",
+          "label": "Blackwood Warrior",
+          "hint": "male, en"
+        },
+        {
+          "id": "v_vclb6dab731372b19d3",
+          "label": "Blackwood Warrior",
+          "hint": "male, middle_aged, british, en, Deep, resonant pack warrior"
+        },
+        {
+          "id": "v_vcl0a0bec9416f8bb0d",
+          "label": "Elara",
+          "hint": "female, young, american, en, Breathy, whispered, emotional heroine"
+        },
+        {
+          "id": "v_vcl3623fe3b518def96",
+          "label": "Elara",
+          "hint": "female, en"
+        },
+        {
+          "id": "v_vcl11fcab3eb25d2402",
+          "label": "Elara Ashford",
+          "hint": "female, en"
+        },
+        {
+          "id": "v_vcl1d8a1dc996ebe367",
+          "label": "Extra",
+          "hint": "en"
+        },
+        {
+          "id": "v_vcl489b05c449ba74d7",
+          "label": "Gerald",
+          "hint": "male, old, british, en, Frail, breathy, fawning Elder"
+        },
+        {
+          "id": "v_vcl0a30a45430c85287",
+          "label": "Gerald Ashford",
+          "hint": "male, en"
+        },
+        {
+          "id": "v_vcl8d7dc9b4e70be57c",
+          "label": "Narrator",
+          "hint": "en"
+        },
+        {
+          "id": "v_vclfa3b4fc58833011d",
+          "label": "Narrator",
+          "hint": "female, young, american, en, Warm, intimate romance-audiobook narrator"
+        },
+        {
+          "id": "v_vclb061d370b760c151",
+          "label": "Narrator",
+          "hint": "en"
+        },
+        {
+          "id": "v_vcl8bc7f77899b07a7c",
+          "label": "Overeager Mother",
+          "hint": "female, middle_aged, american, en, Theatrical, pushy society mother"
+        },
+        {
+          "id": "v_vcl24b71ec1c952861e",
+          "label": "Prestofab presenter",
+          "hint": "female, young, indian, en, Warm, confident young Indian woman, presenter of the Prestofab ads"
+        },
+        {
+          "id": "v_vclc0bec345e430aa42",
+          "label": "Ronan",
+          "hint": "male, middle_aged, british, en, Deep, gravelly, intimate Alpha"
+        }
+      ]
+    },
+    {
+      "id": "language",
+      "label": "Language",
+      "default": "en_us",
+      "top": true,
+      "choices": [
+        {
+          "id": "en_us",
+          "label": "English (US)",
+          "hint": "en-US"
+        },
+        {
+          "id": "en_gb",
+          "label": "English (UK)",
+          "hint": "en-GB"
+        },
+        {
+          "id": "en_in",
+          "label": "English (India)",
+          "hint": "en-IN"
+        },
+        {
+          "id": "hi_in",
+          "label": "Hindi",
+          "hint": "hi-IN"
+        },
+        {
+          "id": "es_mx",
+          "label": "Spanish (Mexico)",
+          "hint": "es-MX"
+        },
+        {
+          "id": "es_es",
+          "label": "Spanish (Spain)",
+          "hint": "es-ES"
+        },
+        {
+          "id": "fr_fr",
+          "label": "French",
+          "hint": "fr-FR"
+        },
+        {
+          "id": "de_de",
+          "label": "German",
+          "hint": "de-DE"
+        },
+        {
+          "id": "pt_br",
+          "label": "Portuguese (Brazil)",
+          "hint": "pt-BR"
+        },
+        {
+          "id": "it_it",
+          "label": "Italian",
+          "hint": "it-IT"
+        },
+        {
+          "id": "ja_jp",
+          "label": "Japanese",
+          "hint": "ja-JP"
+        },
+        {
+          "id": "ko_kr",
+          "label": "Korean",
+          "hint": "ko-KR"
+        },
+        {
+          "id": "zh_cn",
+          "label": "Chinese (Mandarin)",
+          "hint": "zh-CN"
+        },
+        {
+          "id": "ar_sa",
+          "label": "Arabic",
+          "hint": "ar-SA"
+        },
+        {
+          "id": "ta_in",
+          "label": "Tamil",
+          "hint": "ta-IN"
+        },
+        {
+          "id": "te_in",
+          "label": "Telugu",
+          "hint": "te-IN"
+        },
+        {
+          "id": "mr_in",
+          "label": "Marathi",
+          "hint": "mr-IN"
+        },
+        {
+          "id": "bn_in",
+          "label": "Bengali",
+          "hint": "bn-IN"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "when": {
+        "language": "en_us"
+      },
+      "set": {
+        "10.language_code": "en-US"
+      }
+    },
+    {
+      "when": {
+        "language": "en_gb"
+      },
+      "set": {
+        "10.language_code": "en-GB"
+      }
+    },
+    {
+      "when": {
+        "language": "en_in"
+      },
+      "set": {
+        "10.language_code": "en-IN"
+      }
+    },
+    {
+      "when": {
+        "language": "hi_in"
+      },
+      "set": {
+        "10.language_code": "hi-IN"
+      }
+    },
+    {
+      "when": {
+        "language": "es_mx"
+      },
+      "set": {
+        "10.language_code": "es-MX"
+      }
+    },
+    {
+      "when": {
+        "language": "es_es"
+      },
+      "set": {
+        "10.language_code": "es-ES"
+      }
+    },
+    {
+      "when": {
+        "language": "fr_fr"
+      },
+      "set": {
+        "10.language_code": "fr-FR"
+      }
+    },
+    {
+      "when": {
+        "language": "de_de"
+      },
+      "set": {
+        "10.language_code": "de-DE"
+      }
+    },
+    {
+      "when": {
+        "language": "pt_br"
+      },
+      "set": {
+        "10.language_code": "pt-BR"
+      }
+    },
+    {
+      "when": {
+        "language": "it_it"
+      },
+      "set": {
+        "10.language_code": "it-IT"
+      }
+    },
+    {
+      "when": {
+        "language": "ja_jp"
+      },
+      "set": {
+        "10.language_code": "ja-JP"
+      }
+    },
+    {
+      "when": {
+        "language": "ko_kr"
+      },
+      "set": {
+        "10.language_code": "ko-KR"
+      }
+    },
+    {
+      "when": {
+        "language": "zh_cn"
+      },
+      "set": {
+        "10.language_code": "zh-CN"
+      }
+    },
+    {
+      "when": {
+        "language": "ar_sa"
+      },
+      "set": {
+        "10.language_code": "ar-SA"
+      }
+    },
+    {
+      "when": {
+        "language": "ta_in"
+      },
+      "set": {
+        "10.language_code": "ta-IN"
+      }
+    },
+    {
+      "when": {
+        "language": "te_in"
+      },
+      "set": {
+        "10.language_code": "te-IN"
+      }
+    },
+    {
+      "when": {
+        "language": "mr_in"
+      },
+      "set": {
+        "10.language_code": "mr-IN"
+      }
+    },
+    {
+      "when": {
+        "language": "bn_in"
+      },
+      "set": {
+        "10.language_code": "bn-IN"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vclffec6784a18ff8a4"
+      },
+      "set": {
+        "10.voice_id": "VCLFFEC6784A18FF8A4"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcld931dfaf1f1ea40a"
+      },
+      "set": {
+        "10.voice_id": "VCLD931DFAF1F1EA40A"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vclfbe343a03eee1d25"
+      },
+      "set": {
+        "10.voice_id": "VCLFBE343A03EEE1D25"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl9181c54928b29b56"
+      },
+      "set": {
+        "10.voice_id": "VCL9181C54928B29B56"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl1406a85c2d3d097e"
+      },
+      "set": {
+        "10.voice_id": "VCL1406A85C2D3D097E"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl19e58c2cdd469c03"
+      },
+      "set": {
+        "10.voice_id": "VCL19E58C2CDD469C03"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl01dbd6d658ee5191"
+      },
+      "set": {
+        "10.voice_id": "VCL01DBD6D658EE5191"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vclb6dab731372b19d3"
+      },
+      "set": {
+        "10.voice_id": "VCLB6DAB731372B19D3"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl0a0bec9416f8bb0d"
+      },
+      "set": {
+        "10.voice_id": "VCL0A0BEC9416F8BB0D"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl3623fe3b518def96"
+      },
+      "set": {
+        "10.voice_id": "VCL3623FE3B518DEF96"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl11fcab3eb25d2402"
+      },
+      "set": {
+        "10.voice_id": "VCL11FCAB3EB25D2402"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl1d8a1dc996ebe367"
+      },
+      "set": {
+        "10.voice_id": "VCL1D8A1DC996EBE367"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl489b05c449ba74d7"
+      },
+      "set": {
+        "10.voice_id": "VCL489B05C449BA74D7"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl0a30a45430c85287"
+      },
+      "set": {
+        "10.voice_id": "VCL0A30A45430C85287"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl8d7dc9b4e70be57c"
+      },
+      "set": {
+        "10.voice_id": "VCL8D7DC9B4E70BE57C"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vclfa3b4fc58833011d"
+      },
+      "set": {
+        "10.voice_id": "VCLFA3B4FC58833011D"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vclb061d370b760c151"
+      },
+      "set": {
+        "10.voice_id": "VCLB061D370B760C151"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl8bc7f77899b07a7c"
+      },
+      "set": {
+        "10.voice_id": "VCL8BC7F77899B07A7C"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vcl24b71ec1c952861e"
+      },
+      "set": {
+        "10.voice_id": "VCL24B71EC1C952861E"
+      }
+    },
+    {
+      "when": {
+        "voice": "v_vclc0bec345e430aa42"
+      },
+      "set": {
+        "10.voice_id": "VCLC0BEC345E430AA42"
+      }
+    }
+  ],
+  "hints": [
+    "Made by the generation server on the provider. The words are spoken as written, never rewritten.",
+    "Voice lists a few voices of the provider's library; any other one can be typed into Voice id.",
+    "Set Language to the language and accent of the line."
+  ]
+}

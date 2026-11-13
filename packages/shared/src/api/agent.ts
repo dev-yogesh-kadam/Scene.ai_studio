@@ -51,6 +51,13 @@ export const startPlan = <T>(id: number, again: boolean, auto = false) =>
     method: 'POST',
     ...(auto && !again ? { json: { auto: true } } : {}),
   });
+/** What resuming a stopped or failed plan makes again: each step, why it was not made, what is changed, the price. */
+export type PlanRedo = {
+  plan: number;
+  steps: { step: number; name: string; kind: string; maker: string; reason: string; note: string }[];
+  total: number;
+};
+export const planRedo = (id: number) => api<PlanRedo>(`/api/agent/plans/${id}/redo`);
 export const stopPlan = (id: number) => api<unknown>(`/api/agent/plans/${id}/stop`, { method: 'POST' });
 export const getPlan = <T>(id: number) => api<T>(`/api/agent/plans/${id}`);
 

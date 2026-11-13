@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, claude_connection, edits, endpoints, errors, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
+from .. import __version__, audit, backup, claude, claude_connection, edits, endpoints, errors, generation_models, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..comfy import workflows
@@ -843,7 +843,7 @@ async def test_run(body: dict, request: Request, user: dict = Depends(admin_user
         settings["prompt"] = str(settings["values"].get(roles["prompt"]["id"], roles["prompt"]["default"]) or "")
         needs_caption(wf, settings, roles["prompt"]["id"])
     settings["details"] = [[c["label"].split(" (")[0], c["default"]] for c in schema["controls"] if not c["role"]]
-    settings["workflow_title"] = schema["title"]
+    settings["workflow_title"] = generation_models.title_of(schema, settings.get("options"))
     estimate = workflows.estimate(wf, settings, await offload(state.jobs.history))
     job_id = await offload(state.jobs.add, user["id"], "Test · " + schema["title"], wf["id"], settings, workflows.summary(schema, ctx),
                             estimate["minutes"] * 60 if estimate["minutes"] else None, 0, during_maintenance=True)
@@ -1007,8 +1007,8 @@ def _endpoints_changed(state, main_before):
 async def add_endpoint(body: dict, request: Request, user: dict = Depends(admin_user)):
     state, main = request.app.state, request.app.state.comfy.url
     row = endpoints.clean(body)
-    await state.db.arun("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                 (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["active"], time.time()))
+    await state.db.arun("INSERT INTO endpoints (kind, name, url, api_key, models, slots, active, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["slots"], row["active"], time.time()))
     await offload(_endpoints_changed, state, main)
     await offload(audit.record, request, user, "Added a server", row["name"], "{} at {}".format(endpoints.KINDS[row["kind"]], row["url"]))
     return {}
@@ -1023,8 +1023,8 @@ async def change_endpoint(endpoint_id: int, body: dict, request: Request, user: 
     if not str(body.get("api_key") or "").strip():
         body = {k: v for k, v in body.items() if k != "api_key"}   # left empty: the key it has is kept
     row = endpoints.clean(body, before)
-    await state.db.arun("UPDATE endpoints SET kind = ?, name = ?, url = ?, api_key = ?, models = ?, active = ? WHERE id = ?",
-                 (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["active"], endpoint_id))
+    await state.db.arun("UPDATE endpoints SET kind = ?, name = ?, url = ?, api_key = ?, models = ?, slots = ?, active = ? WHERE id = ?",
+                 (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["slots"], row["active"], endpoint_id))
     await offload(_endpoints_changed, state, main)
     await offload(audit.record, request, user, "Changed a server", row["name"], "{} at {}{}".format(
         endpoints.KINDS[row["kind"]], row["url"], "" if row["active"] else ", off"))
@@ -1037,7 +1037,7 @@ async def remove_endpoint(endpoint_id: int, request: Request, user: dict = Depen
     before = await state.db.aone("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
     if before is None:
         raise HTTPException(404, "There is no such server.")
-    if before["url"] in state.comfy_pool.busy:
+    if state.comfy_pool.running(before["url"]):
         raise HTTPException(400, "A render is running there. Switch it off, and remove it once the render is done.")
     await state.db.arun("DELETE FROM endpoints WHERE id = ?", (endpoint_id,))
     await offload(_endpoints_changed, state, main)
@@ -1587,6 +1587,17 @@ def _row(body, fields):
     return row
 
 
+async def _pricing_items(state):
+    """The workflow listing for the Pricing section, a generation workflow with its models (generation_models.catalog)."""
+    items = await state.catalog.listing()
+    for item in items:
+        if item.get("source") == "generation" and not item.get("error"):
+            schema = workflows.describe(await state.catalog.load(item["id"]))
+            if generation_models.has_models(schema):   # a voiceover, music, lip sync …: priced like a workflow
+                item["model_catalog"] = generation_models.catalog(schema, await state.generation_models.live(item["id"]))
+    return items
+
+
 def _pricing(state, items):
     """Everything the Pricing section shows. `items` is the workflow listing."""
     credits, db = state.credits, state.db
@@ -1602,6 +1613,9 @@ def _pricing(state, items):
             "preferred_server": own.get("preferred_server", ""), "fallback_servers": own.get("fallback_servers", ""),
             "enabled": bool(own.get("enabled", 1)), "admins_only": bool(own.get("admins_only")),
             "own_factors": credits._json(own.get("factors") or "{}"),
+            # A generation workflow: its models, each with its resolutions and the provider's prices (a starting
+            # point), and the studio's own price of each model at each resolution (credits.model_prices).
+            "models": item.get("model_catalog") or [], "model_prices": credits.model_prices(item["id"]) if item.get("model_catalog") else {},
             # What it comes to: the rate in force, and the price of one image or of five seconds.
             "base": base, "per_second": per_second, "multiplier": multiplier, "example": credits.cost(item["id"], 5)})
     return {"rates": credits.rates(), "per_job": list(PER_JOB), "inr_per_1000_credits": credits.inr_per_1000,
@@ -1613,7 +1627,7 @@ def _pricing(state, items):
 @router.get("/pricing")
 async def get_pricing(request: Request, user: dict = Depends(admin_user)):
     """The credit rates, each workflow's own pricing, the credit packages and the servers."""
-    return await offload(_pricing, request.app.state, await request.app.state.catalog.listing())
+    return await offload(_pricing, request.app.state, await _pricing_items(request.app.state))
 
 
 @router.get("/pricing/llm")
@@ -1673,7 +1687,7 @@ async def put_pricing(body: dict, request: Request, user: dict = Depends(admin_u
             changed.append("{}: {:g} to {:g}".format(label, before[key], value))
     if changed:
         await offload(audit.record, request, user, "Changed pricing", "", "; ".join(changed))
-    return await offload(_pricing, state, await state.catalog.listing())
+    return await offload(_pricing, state, await _pricing_items(state))
 
 
 @router.put("/pricing/workflow")
@@ -1699,7 +1713,25 @@ async def put_workflow_pricing(body: dict, request: Request, user: dict = Depend
     base, per_second, multiplier = await offload(state.credits.rate_for, workflow)
     await offload(audit.record, request, user, "Changed workflow pricing", workflow, "{:g} cr + {:g} cr/s × {:g}{}".format(
         base, per_second, multiplier, "" if row["enabled"] else " · switched off"))
-    return await offload(_pricing, state, await state.catalog.listing())
+    return await offload(_pricing, state, await _pricing_items(state))
+
+
+@router.put("/pricing/models")
+async def put_model_prices(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """The studio's price of each model of a generation workflow at each resolution: {"workflow", "prices": {model:
+    {resolution: credits}}}, credits a second for a video and a picture's for a picture. One left empty follows the
+    workflow's own rate."""
+    state = request.app.state
+    workflow = str(body.get("workflow") or "")
+    if workflow not in state.catalog.files():
+        raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
+    if not generation_models.has_models(workflows.describe(await state.catalog.load(workflow))):
+        raise HTTPException(400, "Only the generation server's workflows have models to price.")
+    prices = body.get("prices") if isinstance(body.get("prices"), dict) else {}
+    kept = await offload(state.credits.set_model_prices, workflow, prices)
+    await offload(audit.record, request, user, "Changed model prices", workflow,
+                  "; ".join("{} {}".format(m, ", ".join("{} {:g}".format(r, v) for r, v in res.items())) for m, res in kept.items()) or "none")
+    return await offload(_pricing, state, await _pricing_items(state))
 
 
 # ---------------------------------------------------------------- resolution and quality factors
@@ -1785,7 +1817,8 @@ async def put_workflow_factors(body: dict, request: Request, user: dict = Depend
     if workflow not in state.catalog.files():
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     table = _factor_table(body)
-    own = json.dumps(table) if any(table.values()) else ""
+    kept = await offload(state.credits.model_prices, workflow)   # a generation workflow's model prices stay as they are
+    own = json.dumps(dict(table, **({"models": kept} if kept else {}))) if any(table.values()) or kept else ""
     await state.db.arun("INSERT INTO workflow_pricing (workflow, factors) VALUES (?, ?) ON CONFLICT (workflow) DO UPDATE SET factors = excluded.factors",
                  (workflow, own))
     await offload(state.credits.pricing_changed)

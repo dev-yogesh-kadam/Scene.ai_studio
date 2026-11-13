@@ -4,13 +4,20 @@ The ComfyUI workflows the studio offers. It reads this folder fresh on every req
 the studio without a restart.
 
 ```
-image/       6 picture workflows
-video/      11 video workflows
-audio/       4 sound workflows (music, voice split, transcripts)
-upscaler/    1 video upscaler (its own action in the studio, not on the Create page)
+image/       7 picture workflows (generation_image: the generation server's 11 picture models)
+video/      13 video workflows (generation_video: the generation server's 16 video models; generation_lipsync)
+audio/       7 sound workflows (music, voice split, transcripts; generation_speech, _music, _sound_effect)
+upscaler/    2 video upscalers (its own action in the studio, not on the Create page; generation_upscale)
 archive/    handovers as they came (kept on this machine only, not in git): never read
 reports/    the ComfyUI agent's reports and model lists: never read
 ```
+
+`generation_video` and `generation_image` come from the generation server (`D:\Studio_automation\scene-ai\workflows` on
+zoro) and run only there: the load balancer sends them to the server whose Workflows say `generation_*`
+(`docs/servers.md`). They hold the generation server's models (Seedance, Kling, Wan …), one Model setting each, and are
+offered as models, apart from the ComfyUI workflows. Never one workflow per model. The generation server's single-model
+tools sit beside them: `audio/generation_speech` (voiceover), `audio/generation_music`, `audio/generation_sound_effect`,
+`video/generation_lipsync` and `upscaler/generation_upscale`; they too run only there.
 
 ## One workflow = up to three files, side by side
 

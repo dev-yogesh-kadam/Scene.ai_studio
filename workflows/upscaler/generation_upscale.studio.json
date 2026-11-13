@@ -1,0 +1,83 @@
+{
+  "title": "Generation upscale",
+  "description": "Makes a video sharper and larger on the provider; its length, motion and sound stay as they are.",
+  "pick_when": "The last step on a finished clip that should be sharper or larger, paid in provider credits (priced by the size it becomes and its length).",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:file": "Video to upscale"
+  },
+  "required_refs": [
+    "1:file"
+  ],
+  "controls": [
+    {
+      "node": "10",
+      "input": "factor",
+      "type": "float",
+      "choices": [
+        1.5,
+        2,
+        3,
+        4
+      ],
+      "label": "Scale",
+      "primary": true
+    }
+  ],
+  "defaults": {
+    "10:factor": 2
+  },
+  "options": [
+    {
+      "id": "shape",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "when": {
+        "shape": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "shape": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "shape": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    }
+  ],
+  "hints": [
+    "Made by the generation server on the provider.",
+    "Scale multiplies the size: a 480p clip at 2 comes out about 1080p tall.",
+    "Set Shape to the one the video was made with."
+  ]
+}

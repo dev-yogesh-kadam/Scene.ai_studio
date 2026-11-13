@@ -1,0 +1,52 @@
+{
+  "1": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": ""
+    },
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "2": {
+    "class_type": "PrimitiveString",
+    "inputs": {
+      "value": ""
+    },
+    "_meta": {
+      "title": "Voice id"
+    }
+  },
+  "4": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": ""
+    },
+    "_meta": {
+      "title": "Delivery"
+    }
+  },
+  "10": {
+    "class_type": "GenerationSpeech",
+    "inputs": {
+      "text": [
+        "1",
+        0
+      ],
+      "voice_id": "VCLFFEC6784A18FF8A4",
+      "custom_voice_id": [
+        "2",
+        0
+      ],
+      "language_code": "en-US",
+      "style_instructions": [
+        "4",
+        0
+      ],
+      "filename_prefix": "audio/generation_speech"
+    },
+    "_meta": {
+      "title": "Generation voiceover"
+    }
+  }
+}

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import aftercare, backup, claude, claude_connection, endpoints, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
+from . import aftercare, backup, claude, claude_connection, endpoints, generation_models, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
 from .agent import Agent, AgentError
 from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
 from .catalog import Catalog
@@ -301,6 +301,7 @@ def create_app(settings=None):
         app.state.jobs = JobManager(db, comfy, catalog, credits, app.state.outputs, notify, storage / "tmp", settings.node_path,
                                     storage / "assets")
         app.state.jobs.pool = comfy_pool
+        app.state.jobs.storage = app.state.storage   # where the files jobs use are kept (references.keep_reference)
         app.state.jobs.hold_offline = settings.hold_queue_offline
         app.state.jobs.agent = agent   # writes the captions some image models need, just before they render
         app.state.jobs.langfuse = app.state.traces.langfuse   # each finished job, as a span of its turn in Langfuse
@@ -340,6 +341,7 @@ def create_app(settings=None):
     app.state.tell_plans = app_tell_plans
     app.state.comfy = comfy
     app.state.comfy_pool = comfy_pool
+    app.state.generation_models = generation_models.ModelList(comfy_pool)   # the generation server's models (its own list)
     app.state.catalog = catalog
     app.state.hub = hub
     app.state.credits = credits
@@ -371,7 +373,8 @@ def create_app(settings=None):
     app.state.outputs = Outputs(app.state.output_dir, db)
     # Where the media are kept for good (storage.py): these folders, or Azure Blob Storage with these folders its cache.
     app.state.storage = stores.open_storage(settings, {"outputs": app.state.output_dir, "posters": app.state.output_dir,
-                                                         "kit": app.state.assets_dir, "showcase": app.state.showcase_dir})
+                                                         "kit": app.state.assets_dir, "showcase": app.state.showcase_dir,
+                                                         "references": storage / "references"})
     app.state.outputs.storage = stores.ACTIVE = app.state.storage
     media.on_removed = app.state.outputs.forget   # a result deleted here is deleted there too
     media.on_made = app.state.outputs.keep        # and a poster made here is kept there
@@ -385,7 +388,7 @@ def create_app(settings=None):
     # The files a lost disk would take with it: the finished work, the kit's uploads, the motion projects and film pages
     # (pages.root). Copied into files/ beside the backups.
     app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir, "showcase": app.state.showcase_dir,
-                              "motion": storage / "motion"}
+                              "motion": storage / "motion", "references": storage / "references"}
     # Whether the render server answered the last time anyone asked, and since when that has been so.
     app.state.server_seen = {"online": None, "since": time.time()}
     app.state.model_seen = {"online": None, "since": time.time()}   # the same for the agent's model, Claude (health.py)

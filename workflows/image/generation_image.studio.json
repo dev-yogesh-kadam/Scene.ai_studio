@@ -1,0 +1,586 @@
+{
+  "title": "Generation image",
+  "description": "Image on the provider's models (Nano Banana Pro, GPT Image 2, GPT Image 2.5 Sunburst, Seedream 5.0 Pro, GPT Image 2.5 Flare, Nano Banana 2.1, Nano Banana 2, Grok Imagine Image 2.0, Seedream 5 Lite, Seedream 5.0 Flash, Nano Banana 2 Lite), made by the generation server. Pick the model in the Model setting.",
+  "pick_when": "An image made on one of the provider's models (Nano Banana, GPT Image, Seedream, Grok, …), paid in provider credits; for edits from source images too. Choose the model in the \"Model\" setting.",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:value": "Prompt"
+  },
+  "defaults": {
+    "1:value": ""
+  },
+  "options": [
+    {
+      "id": "model",
+      "label": "Model",
+      "default": "nano_banana_pro",
+      "top": true,
+      "choices": [
+        {
+          "id": "nano_banana_pro",
+          "label": "Nano Banana Pro",
+          "hint": "Default for scenes, edits and compositing; keeps faces and products the same; legible text. Up to 14 source images. 2K 18, 4K 36 credits per image."
+        },
+        {
+          "id": "openai_gpt_image_2",
+          "label": "GPT Image 2",
+          "hint": "Characters, portraits and character sheets where identity must hold. Up to 14 source images. 2K 6, 4K 13 credits per image."
+        },
+        {
+          "id": "openai_gpt_image_2_5_sunburst",
+          "label": "GPT Image 2.5 Sunburst",
+          "hint": "Fine-detail images and precise, controlled edits. Up to 14 source images. 1K 2, 2K 2, 4K 4 credits per image."
+        },
+        {
+          "id": "seedream_5_0_pro",
+          "label": "Seedream 5.0 Pro",
+          "hint": "Top-fidelity Seedream from up to 10 references, at 1K or 2K. Up to 10 source images. 1K 11, 2K 11 credits per image."
+        },
+        {
+          "id": "openai_gpt_image_2_5_flare",
+          "label": "GPT Image 2.5 Flare",
+          "hint": "Fast everyday images and edits, including wide banners. Up to 14 source images. 1K 2, 2K 2, 4K 4 credits per image."
+        },
+        {
+          "id": "nano_banana_2_1",
+          "label": "Nano Banana 2.1",
+          "hint": "Everyday images and edits with many references. Up to 14 source images. 1K 15, 2K 15, 4K 20 credits per image."
+        },
+        {
+          "id": "nano_banana_2",
+          "label": "Nano Banana 2",
+          "hint": "Balanced quality and speed for everyday images and edits. Up to 14 source images. 2K 15, 4K 20 credits per image."
+        },
+        {
+          "id": "grok_imagine_image_2_0",
+          "label": "Grok Imagine Image 2.0",
+          "hint": "xAI images and edits at 1K or 2K, from up to 3 input images. Up to 3 source images. 1K 8, 2K 10 credits per image."
+        },
+        {
+          "id": "seedream_5_lite",
+          "label": "Seedream 5 Lite",
+          "hint": "Quick Seedream drafts and iterations. Up to 14 source images. 2K 5, 4K 5 credits per image."
+        },
+        {
+          "id": "seedream_5_0_flash",
+          "label": "Seedream 5.0 Flash",
+          "hint": "High-volume, low-cost drafts and quick edits. Up to 10 source images. 1K 4, 2K 4 credits per image."
+        },
+        {
+          "id": "nano_banana_2_lite",
+          "label": "Nano Banana 2 Lite",
+          "hint": "Fast, cheap 1K drafts for exploring concepts. Up to 14 source images. 1K 6 credits per image."
+        }
+      ]
+    },
+    {
+      "id": "resolution_1",
+      "label": "Resolution",
+      "default": "2K",
+      "top": true,
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "nano_banana_2",
+          "seedream_5_lite"
+        ]
+      },
+      "choices": [
+        {
+          "id": "2K",
+          "label": "2K"
+        },
+        {
+          "id": "4K",
+          "label": "4K"
+        }
+      ]
+    },
+    {
+      "id": "resolution_2",
+      "label": "Resolution",
+      "default": "2K",
+      "top": true,
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare",
+          "nano_banana_2_1"
+        ]
+      },
+      "choices": [
+        {
+          "id": "1K",
+          "label": "1K"
+        },
+        {
+          "id": "2K",
+          "label": "2K"
+        },
+        {
+          "id": "4K",
+          "label": "4K"
+        }
+      ]
+    },
+    {
+      "id": "resolution_3",
+      "label": "Resolution",
+      "default": "2K",
+      "top": true,
+      "when": {
+        "model": [
+          "seedream_5_0_pro",
+          "grok_imagine_image_2_0",
+          "seedream_5_0_flash"
+        ]
+      },
+      "choices": [
+        {
+          "id": "1K",
+          "label": "1K"
+        },
+        {
+          "id": "2K",
+          "label": "2K"
+        }
+      ]
+    },
+    {
+      "id": "resolution_4",
+      "label": "Resolution",
+      "default": "1K",
+      "top": true,
+      "when": {
+        "model": [
+          "nano_banana_2_lite"
+        ]
+      },
+      "choices": [
+        {
+          "id": "1K",
+          "label": "1K"
+        }
+      ]
+    },
+    {
+      "id": "shape_1",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "seedream_5_0_pro",
+          "nano_banana_2_1",
+          "nano_banana_2",
+          "grok_imagine_image_2_0",
+          "seedream_5_lite",
+          "seedream_5_0_flash",
+          "nano_banana_2_lite"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        },
+        {
+          "id": "r3x4",
+          "label": "3:4"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    },
+    {
+      "id": "shape_2",
+      "label": "Shape",
+      "default": "r16x9",
+      "top": true,
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare"
+        ]
+      },
+      "choices": [
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        },
+        {
+          "id": "r2x1",
+          "label": "2:1"
+        },
+        {
+          "id": "r3x4",
+          "label": "3:4"
+        },
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "when": {
+        "model": "nano_banana_pro"
+      },
+      "set": {
+        "10.model": "nano-banana-pro"
+      }
+    },
+    {
+      "when": {
+        "model": "openai_gpt_image_2"
+      },
+      "set": {
+        "10.model": "openai-gpt-image-2"
+      }
+    },
+    {
+      "when": {
+        "model": "openai_gpt_image_2_5_sunburst"
+      },
+      "set": {
+        "10.model": "openai-gpt-image-2.5-sunburst"
+      }
+    },
+    {
+      "when": {
+        "model": "seedream_5_0_pro"
+      },
+      "set": {
+        "10.model": "seedream-5-0-pro"
+      }
+    },
+    {
+      "when": {
+        "model": "openai_gpt_image_2_5_flare"
+      },
+      "set": {
+        "10.model": "openai-gpt-image-2.5-flare"
+      }
+    },
+    {
+      "when": {
+        "model": "nano_banana_2_1"
+      },
+      "set": {
+        "10.model": "nano-banana-2.1"
+      }
+    },
+    {
+      "when": {
+        "model": "nano_banana_2"
+      },
+      "set": {
+        "10.model": "nano-banana-2"
+      }
+    },
+    {
+      "when": {
+        "model": "grok_imagine_image_2_0"
+      },
+      "set": {
+        "10.model": "grok-imagine-image-2.0"
+      }
+    },
+    {
+      "when": {
+        "model": "seedream_5_lite"
+      },
+      "set": {
+        "10.model": "seedream-5-lite"
+      }
+    },
+    {
+      "when": {
+        "model": "seedream_5_0_flash"
+      },
+      "set": {
+        "10.model": "seedream-5-0-flash"
+      }
+    },
+    {
+      "when": {
+        "model": "nano_banana_2_lite"
+      },
+      "set": {
+        "10.model": "nano-banana-2-lite"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "nano_banana_2",
+          "seedream_5_lite"
+        ],
+        "resolution_1": "2K"
+      },
+      "set": {
+        "10.resolution": "2K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "nano_banana_2",
+          "seedream_5_lite"
+        ],
+        "resolution_1": "4K"
+      },
+      "set": {
+        "10.resolution": "4K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare",
+          "nano_banana_2_1"
+        ],
+        "resolution_2": "1K"
+      },
+      "set": {
+        "10.resolution": "1K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare",
+          "nano_banana_2_1"
+        ],
+        "resolution_2": "2K"
+      },
+      "set": {
+        "10.resolution": "2K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare",
+          "nano_banana_2_1"
+        ],
+        "resolution_2": "4K"
+      },
+      "set": {
+        "10.resolution": "4K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedream_5_0_pro",
+          "grok_imagine_image_2_0",
+          "seedream_5_0_flash"
+        ],
+        "resolution_3": "1K"
+      },
+      "set": {
+        "10.resolution": "1K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "seedream_5_0_pro",
+          "grok_imagine_image_2_0",
+          "seedream_5_0_flash"
+        ],
+        "resolution_3": "2K"
+      },
+      "set": {
+        "10.resolution": "2K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_2_lite"
+        ],
+        "resolution_4": "1K"
+      },
+      "set": {
+        "10.resolution": "1K"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "seedream_5_0_pro",
+          "nano_banana_2_1",
+          "nano_banana_2",
+          "grok_imagine_image_2_0",
+          "seedream_5_lite",
+          "seedream_5_0_flash",
+          "nano_banana_2_lite"
+        ],
+        "shape_1": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "seedream_5_0_pro",
+          "nano_banana_2_1",
+          "nano_banana_2",
+          "grok_imagine_image_2_0",
+          "seedream_5_lite",
+          "seedream_5_0_flash",
+          "nano_banana_2_lite"
+        ],
+        "shape_1": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "seedream_5_0_pro",
+          "nano_banana_2_1",
+          "nano_banana_2",
+          "grok_imagine_image_2_0",
+          "seedream_5_lite",
+          "seedream_5_0_flash",
+          "nano_banana_2_lite"
+        ],
+        "shape_1": "r3x4"
+      },
+      "set": {
+        "10.aspect_ratio": "3:4"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "nano_banana_pro",
+          "openai_gpt_image_2",
+          "seedream_5_0_pro",
+          "nano_banana_2_1",
+          "nano_banana_2",
+          "grok_imagine_image_2_0",
+          "seedream_5_lite",
+          "seedream_5_0_flash",
+          "nano_banana_2_lite"
+        ],
+        "shape_1": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare"
+        ],
+        "shape_2": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare"
+        ],
+        "shape_2": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare"
+        ],
+        "shape_2": "r2x1"
+      },
+      "set": {
+        "10.aspect_ratio": "2:1"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare"
+        ],
+        "shape_2": "r3x4"
+      },
+      "set": {
+        "10.aspect_ratio": "3:4"
+      }
+    },
+    {
+      "when": {
+        "model": [
+          "openai_gpt_image_2_5_sunburst",
+          "openai_gpt_image_2_5_flare"
+        ],
+        "shape_2": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    }
+  ],
+  "hints": [
+    "Made by the generation server on the provider, paid in provider credits per image (prices in each model's description).",
+    "Source images for edits, or to keep a face, product or style: say in the prompt what to take from each (image 1, image 2 …). Each model takes its own number of them."
+  ],
+  "refs": {
+    "mode": "dynamic",
+    "target_node": "10",
+    "target_input": "reference_image_{i}",
+    "first_index": 1,
+    "node_class": "LoadImage",
+    "node_input": "image",
+    "node_id": "ref_{n}",
+    "label": "Source image {n}",
+    "max": 14,
+    "min": 0,
+    "prompt_tag": "image {n}"
+  }
+}

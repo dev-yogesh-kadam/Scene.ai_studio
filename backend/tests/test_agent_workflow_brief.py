@@ -45,7 +45,7 @@ def test_every_workflow_is_listed_and_only_the_kinds_asked_for_in_full():
     assert "prompting" not in dict(parts)   # the video model's prompt guide goes with its workflow only when it is shown
     everything = agent.question_parts("Make a picture of a red kite", OFFERS, [], "video/h3_all_in_one")
     assert all("settings" in json.loads(line) for line in _workflows(everything))   # detailed=None: as before, all in full
-    assert dict(everything)["workflows"].startswith("Workflows:\n") and "minimax-h3" in dict(everything)["prompting"]
+    assert dict(everything)["workflows"].startswith("Workflows (ComfyUI") and "minimax-h3" in dict(everything)["prompting"]
     assert len(dict(parts)["workflows"]) < len(dict(everything)["workflows"])
 
 

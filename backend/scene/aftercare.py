@@ -1,17 +1,17 @@
 """What happens once a shot the agent planned is made: it is checked straight away, with the agent panel open or not.
 
 A job the agent planned carries a "shot" in its settings (workspace.py gives every planned generation one). When it is
-done (jobs.JobManager.finished, see install) and no other planned shot of that project is still waiting or being made,
-so that a batch is checked together, its result is checked in the background WAIT seconds later:
+done (jobs.JobManager.finished, see install) its result is checked in the background WAIT seconds later, while the
+rest of its batch is still being made (the panel asks about what the checks found once every shot is checked, so a
+batch is still dealt with together; it no longer waits for the last shot before the first is looked at):
 
 - a picture or a clip is reviewed by the agent's model (review.review_item), against the references the step used
-  ("review_refs") and the project's always-on entries;
+  ("review_refs") and the project's always-on entries, and a shot that goes on from another against that shot;
 - a sound (music, a voice track) is measured (review.review_sound): its length against what was asked, its loudness,
   its silences.
 
 The verdict is kept with the item (generations.review), where the agent panel, NeuralCore and the agent's next plan
-read it. An agent panel that is open reviews a finished shot itself, with the shot before it, inside WAIT: the
-background then finds the verdict kept and leaves it. Reviews are not charged (as on the panel); measuring costs nothing.
+read it. An agent panel that asks for the same check meanwhile waits for this one (once): it is made once. Reviews are not charged (as on the panel); measuring costs nothing.
 
 "Retry a failed shot once by itself" (retry_on; each user's own, off unless they turn it on): a picture or a clip that
 fails its review is made again once, at once, with the review's fixed prompt and a new seed, charged like any render.
@@ -25,8 +25,11 @@ import json
 from . import review, storage
 from .db import as_everyone, offload
 
-WAIT = 30              # seconds after a job is done before the background looks at its result
-BATCH_POLL = 15        # seconds between looks at whether the rest of a batch is made
+WAIT = 3               # seconds after a job is done before the background looks at its result (its item is filed)
+# Whether a picture or a clip the agent made is checked by its model. Off since 2026-11-12, by the user's choice (a made
+# shot is done; the agent panel checks nothing either: apps/web .../agent/shots.ts CHECK_RESULTS). A sound is still
+# measured: it costs nothing and takes a moment.
+REVIEW_PICTURES = False
 RETRY_KEY = "agent_retry_once.{}"   # a user's "Retry a failed shot once by itself", in the settings table
 REVIEWED = ("image", "video", "audio")
 running = {}           # item id -> the task reviewing it now, so the panel and the background never review it twice at once
@@ -51,7 +54,7 @@ def install(state):
     def finished(job, status):
         if status != "done" or not agent_made(job.get("settings")):
             return
-        task = asyncio.get_running_loop().create_task(_quietly(after_batch(state, dict(job))))
+        task = asyncio.get_running_loop().create_task(_quietly(after(state, dict(job))))
         state.jobs.working_after = getattr(state.jobs, "working_after", set())
         state.jobs.working_after.add(task)   # kept until done: a task nobody holds may be collected half-way
         task.add_done_callback(state.jobs.working_after.discard)
@@ -104,19 +107,17 @@ def references_of(state, user_id, settings, item):
     return found
 
 
-def batch_running(state, job):
-    """Whether another shot the agent planned for this user and project is still waiting or being made."""
-    with as_everyone():   # outside any request: the statement names the user itself
-        rows = state.db.all("SELECT settings, project_id FROM jobs WHERE user_id = ? AND id != ? AND status IN ('queued', 'running')",
-                            (job["user_id"], job["id"]))
-    return any(r["project_id"] == job.get("project_id") and agent_made(json.loads(r["settings"] or "{}")) for r in rows)
-
-
-async def after_batch(state, job):
-    """Check a finished job once the batch it belongs to is made, so its shots are checked together."""
-    while await offload(batch_running, state, job):
-        await asyncio.sleep(BATCH_POLL)
-    await after(state, job)
+def previous_of(state, user_id, settings):
+    """(path, kind) of the shot a clip goes on from (its "parent", a clip of the same user), for the review to check the
+    two follow each other; None for any other."""
+    parent = settings.get("parent")
+    if not isinstance(parent, int):
+        return None
+    row = state.db.one("SELECT kind, filename FROM generations WHERE id = ? AND user_id = ?", (parent, user_id))
+    if not row or row["kind"] != "video":
+        return None
+    path = storage.here(state.outputs.folder(user_id) / row["filename"])
+    return (path, row["kind"]) if path.is_file() else None
 
 
 async def after(state, job, wait=None):
@@ -133,6 +134,8 @@ async def after(state, job, wait=None):
         if item["kind"] == "audio":
             asked = job.get("seconds_requested")
             return await once(item["id"], _sound(state, user_id, item, asked if isinstance(asked, (int, float)) and asked > 0 else None))
+        if not REVIEW_PICTURES:
+            return None
         verdict = await once(item["id"], _picture(state, user_id, item, settings))
         if verdict and not verdict["passed"]:
             verdict = await failed(state, user_id, item, settings, verdict)
@@ -145,7 +148,9 @@ async def _sound(state, user_id, item, asked):
 
 
 async def _picture(state, user_id, item, settings):
-    verdict = await review.review_item(state, user_id, item, "", await offload(references_of, state, user_id, settings, item))
+    references = await offload(references_of, state, user_id, settings, item)
+    previous = await offload(previous_of, state, user_id, settings)
+    verdict = await review.review_item(state, user_id, item, "", references, previous)
     return await offload(keep, state, user_id, item, dict(verdict, by="auto"))
 
 

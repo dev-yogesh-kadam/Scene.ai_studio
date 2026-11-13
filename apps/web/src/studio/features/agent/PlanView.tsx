@@ -8,9 +8,10 @@ import { approve, revise, storyboard } from './actions';
 import type { AgentChat } from './chat';
 import { Fold } from './Fold';
 import { PlanStep } from './PlanStep';
+import { redoOpen, unfinished } from './RedoCard';
 import { allMade, checking } from './checks';
 import { AnimateBar, readyToAnimate } from './Storyboard';
-import { eligible, flagged, planCount } from './shots';
+import { CHECK_RESULTS, eligible, flagged, planCount } from './shots';
 import { Results } from './Takes';
 import type { Run } from './types';
 import s from './Plan.module.css';
@@ -24,6 +25,7 @@ export const docked = (chat: AgentChat) => [...chat.runs].reverse().find((r) => 
 
 /** They are asked about once, for the newest turn, when every shot of its plan is made and checked. */
 export const retakeOpen = (chat: AgentChat, run: Run | undefined) =>
+  CHECK_RESULTS &&
   !!run &&
   chat.runs[chat.runs.length - 1] === run &&
   run.state === 'approved' &&
@@ -185,17 +187,17 @@ export function PlanView({ chat, run }: { chat: AgentChat; run: Run }) {
       {waiting > 0 && (
         <Waiting words={`Waiting for your choice · ${waiting} ${waiting === 1 ? 'shot' : 'shots'} could be closer`} />
       )}
-      {/* an approved plan with steps still to carry out: it was interrupted, or a step failed */}
-      {run.state === 'approved' &&
-        !chat.working &&
-        run.steps.some((step) => !step.job && !step.made && !step.skipped) && (
-          <div className={s['agent-approve']}>
-            <span className={css('slate-text')}>Not every step was carried out.</span>
-            <button className="btn small primary" onClick={() => void approve(chat, run)}>
-              Resume
-            </button>
-          </div>
-        )}
+      {/* an approved plan with steps still to carry out (it was interrupted, or a step failed): they are offered again
+          for approval in the dock; once that card is put away (Not now), Resume here */}
+      {redoOpen(chat, run) && <Waiting words="Waiting for your approval · the steps not made" />}
+      {!redoOpen(chat, run) && unfinished(run) && !chat.working && (
+        <div className={s['agent-approve']}>
+          <span className={css('slate-text')}>Not every step was carried out.</span>
+          <button className="btn small primary" onClick={() => void approve(chat, run)}>
+            Resume
+          </button>
+        </div>
+      )}
     </div>
   );
 }

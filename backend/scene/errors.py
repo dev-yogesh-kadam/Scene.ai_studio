@@ -17,12 +17,17 @@ PLAIN_ERRORS = [
     ("hyperframes", "The motion graphic could not be drawn on this machine."),
     ("ffmpeg", "Joining or cutting the video failed on this machine."),
     ("seed must be between", "A setting of the workflow was out of the range one of its steps takes (the seed)."),
+    # The load balancer found no server in use that could ever make it (balancer.py).
+    ("no render server", "No render server in use can make this kind of work now. The studio's admin has to add or switch on one that can."),
+    ("switched off in the console", "The server that makes this kind of work is switched off now. The studio's admin can switch it on."),
 ]
 
 
 def explain(error):
     if not error:
         return ""
+    if error.startswith(("The provider: ", "The generation server: ")):   # written for people (jobs._execution_error, _render)
+        return error
     low = error.lower()
     for words, meaning in PLAIN_ERRORS:
         if words in low:

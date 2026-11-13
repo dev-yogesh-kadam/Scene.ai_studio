@@ -5,6 +5,11 @@ import type { Job, Run, Spent, Step, Take } from './types';
 
 export const MAX_RETAKES = 3; // under "Allow all" a failed shot is made again up to this many times; then the best goes on
 export const REVIEW_WITHIN = 24 * 3600 * 1000; // a shot finished longer ago than this is not reviewed when the panel opens
+// Whether the agent looks at the pictures and clips it made (a check by its model of each, then retakes offered).
+// Off since 2026-11-12, by the user's choice: a finished shot is done; nothing waits on a check. The server's
+// background check is off with it (backend/scene/aftercare.py REVIEW_PICTURES).
+export const CHECK_RESULTS = false;
+export const REVIEW_TIMEOUT = 120_000; // a check that has not come back by then is given up, never left holding its place
 export const REVIEWS_AT_ONCE = 3; // a batch is checked together, a few at a time so the studio's other calls get through
 export const KEPT = 60; // how many turns an agent tab keeps
 export const RECALLED = 40; // how many earlier turns are sent along (the server keeps the newest that fit its budget)
@@ -112,7 +117,8 @@ export const tagsOf = (step: Step) => {
           step.workflow_title,
           cameraOf(step),
           current.orientation && SHAPE_NAMES[current.orientation],
-          current.resolution && current.resolution + 'p',
+          current.resolution &&
+            (/\d$/.test(String(current.resolution)) ? current.resolution + 'p' : current.resolution),
           current.duration && secs(current.duration),
           (step.settings.clips ?? 0) > 1 && '× ' + step.settings.clips + ' clips',
           step.settings.options?.quality && step.settings.options.quality + ' quality',

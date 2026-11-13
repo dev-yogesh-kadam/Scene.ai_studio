@@ -12,6 +12,7 @@ A job is charged when it is queued and refunded if it fails or is cancelled.
 
 import contextvars
 import math
+import re
 import json
 import time
 
@@ -58,6 +59,12 @@ def _int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _lines(value):
+    """The lines of a resolution: 720, "720" or a choice named "768p" (the generation workflows' Resolution option)."""
+    found = re.match(r"\s*(\d{3,4})\s*p?\s*$", str(value or ""), re.I)
+    return int(found.group(1)) if found else None
 
 
 def kind_of(workflow_id):
@@ -191,12 +198,44 @@ class Credits:
 
     def costs(self, workflow_id, seconds, choices):
         """cost() of one workflow for each of several choices (an estimate prices every resolution and quality beside
-        the one picked), its rates and factors read once: they were read again for each, nine queries a price."""
+        the one picked), its rates and factors read once: they were read again for each, nine queries a price.
+
+        A generation workflow's model (the choice "model") at a resolution the console gave a price is priced at that
+        price: credits a second for a video, a picture's credits for a picture (model_prices)."""
         base, per_second, multiplier = self.rate_for(workflow_id)
         seconds = ASSUMED_SECONDS if seconds is None else seconds
         found = self.factors(workflow_id) if any(choices) else None
-        return [math.ceil(round((base + per_second * seconds) * multiplier * self.choice_factor(workflow_id, chosen, found), 6))
-                for chosen in choices]
+        by_model = self.model_prices(workflow_id) if any(c and c.get("model") for c in choices) else {}
+        priced = []
+        for chosen in choices:
+            own = (by_model.get(str((chosen or {}).get("model"))) or {}).get(str((chosen or {}).get("resolution")))
+            if own is not None:
+                priced.append(math.ceil(round(own if kind_of(workflow_id) in PER_JOB else own * seconds, 6)))
+            else:
+                priced.append(math.ceil(round((base + per_second * seconds) * multiplier * self.choice_factor(workflow_id, chosen, found), 6)))
+        return priced
+
+    def model_prices(self, workflow_id):
+        """The console's prices of a generation workflow's models: {model: {resolution: credits}}, credits a second for
+        a video and a picture's for a picture. Kept in its pricing row's factors, as "models"."""
+        found = self._json((self.pricing(workflow_id) or {}).get("factors") or "{}").get("models")
+        if not isinstance(found, dict):
+            return {}
+        return {str(m): {str(r): float(v) for r, v in res.items() if _number(v)} for m, res in found.items() if isinstance(res, dict)}
+
+    def set_model_prices(self, workflow_id, prices):
+        """Set (or, with an empty value, take away) the console's prices of a generation workflow's models."""
+        row = self.pricing(workflow_id)
+        factors = self._json((row or {}).get("factors") or "{}")
+        kept = {str(m): {str(r): float(v) for r, v in (res or {}).items() if _number(v) and float(v) >= 0}
+                for m, res in (prices or {}).items() if isinstance(res, dict)}
+        factors["models"] = {m: res for m, res in kept.items() if res}
+        if row is None:
+            self.db.run("INSERT INTO workflow_pricing (workflow, factors) VALUES (?, ?)", (workflow_id, json.dumps(factors)))
+        else:
+            self.db.run("UPDATE workflow_pricing SET factors = ? WHERE workflow = ?", (json.dumps(factors), workflow_id))
+        self.pricing_changed()
+        return factors["models"]
 
     def factors(self, workflow_id=None):
         """The resolution and quality factors in force: the studio's (setting price_factors, over FACTORS), and over them
@@ -214,7 +253,7 @@ class Credits:
         if not chosen:
             return 1.0
         found, factor = found or self.factors(workflow_id), 1.0
-        tier = RESOLUTION_TIER.get(_int(chosen.get("resolution")))
+        tier = RESOLUTION_TIER.get(_lines(chosen.get("resolution")))
         if tier and kind_of(workflow_id) not in PER_JOB:   # a picture is priced by its quality, not its size
             factor *= found["resolution"].get(tier, 1.0)
         if chosen.get("quality") is not None:
@@ -267,6 +306,8 @@ class Credits:
 
     @staticmethod
     def _json(text):
+        if isinstance(text, dict):   # a JSON column read as what it holds
+            return text
         try:
             found = json.loads(text)
         except (TypeError, ValueError):

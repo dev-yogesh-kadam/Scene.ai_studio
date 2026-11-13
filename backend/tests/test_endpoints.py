@@ -1,5 +1,5 @@
 """The console's Servers: ComfyUI servers are added, changed and removed while the app runs, and a waiting render goes
-to one that is free. The model servers and APIs of before (Ollama, Kimi, Gemini) are gone: the agent uses only Claude."""
+to one that can do it and is free (balancer.py). The model servers and APIs of before (Ollama, Kimi, Gemini) are gone: the agent uses only Claude."""
 
 import asyncio
 import time
@@ -36,17 +36,22 @@ def test_the_model_servers_of_before_are_taken_out(client):
 
 
 def test_a_render_goes_to_a_server_that_is_free(client):
+    """The load balancer (test_balancer.py has the rest): a ComfyUI server runs one render at a time."""
     register(client)
     console(client).post("/api/admin/endpoints", json={"kind": "comfy", "name": "Zoro 2", "url": "http://127.0.0.1:8"})
     pool = client.app.state.comfy_pool
+    pool.nodes = {s["url"]: (None, time.time()) for s in pool.servers()}   # nodes not known: not asked of anyone
 
     async def answers(url):
         return True
-    first, _ = asyncio.run(pool.free(answers))
+
+    def place():
+        return asyncio.run(pool.place("image/image_t2i_flux3_klein", frozenset({"KSampler"}), answers))
+    first, _, _ = place()
     assert first["url"] == "http://127.0.0.1:9"   # the main one first
-    pool.busy["http://127.0.0.1:9"] = "job1"
-    second, _ = asyncio.run(pool.free(answers))
+    pool.take("http://127.0.0.1:9", "job1")
+    second, _, _ = place()
     assert second["name"] == "Zoro 2" and pool.client(second["url"]) is not client.app.state.comfy
-    pool.busy["http://127.0.0.1:8"] = "job2"
-    assert asyncio.run(pool.free(answers)) == (None, True)   # all busy: it waits for one
+    pool.take("http://127.0.0.1:8", "job2")
+    assert place() == (None, True, "")   # all busy: it waits for one
     pool.busy.clear()

@@ -35,7 +35,7 @@ The mode the user picked in the chat decides the models, and the models decide t
 
 A video model with no prompter: tell the user which models this skill supports and stop. Chain is left out where video-to-video is weak (Seedance 2.0) or missing (MiniMax).
 
-**Studio:** `minimax_h3` is H3 All in One (`video/h3_all_in_one`), the studio's MiniMax H3 default, for a single shot made on its own; this skill's scene clips are its second option, H3 Chunk (`video/h3_chunk`), made for them (the anchor, up to five character sheets, shot keyframes); `minimax_h3_max` is not here (H3 Chunk takes a motion clip itself). The Seedance and Wan 3 rows are left out: those models are not in this studio, and neither are their prompters. The workflows the chat chose are the turn's note of available models.
+**Studio:** the user picks the video model (the studio sets none; see "The model and the resolution"). On zoro, `minimax_h3` is H3 All in One (`video/h3_all_in_one`), for a single shot made on its own; this skill's scene clips are its second option, H3 Chunk (`video/h3_chunk`), made for them (the anchor, up to five character sheets, shot keyframes). The generation server makes models, not workflows: MiniMax H3 and H3 Max, Seedance, Wan 3, Kling, Gemini, Grok and Happy Horse, each the setting model of the one workflow `video/generation_video` (`minimax_h3_max`, `minimax_h3` …); only Seedance takes a first or last frame together with reference images. The Seedance and Wan 3 rows are left out: their prompters are not in this studio, so their prompts follow the workflow's own prompt tips. The workflows the chat chose are the turn's note of available models.
 
 One AskUserQuestion round:
 1. **Convert the script into:** Video, Images, Detailed script.

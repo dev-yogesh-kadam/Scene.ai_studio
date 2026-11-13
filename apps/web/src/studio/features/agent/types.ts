@@ -55,7 +55,7 @@ export type Step = Take & {
   facts?: string;
   workflow_title?: string;
   settings?: { workflow?: string; clips?: number; options?: Record<string, string> } & Record<string, unknown>;
-  current?: { orientation?: string; resolution?: number; duration?: number };
+  current?: { orientation?: string; resolution?: number | string; duration?: number };
   menu?: StepMenu;
   uses?: Use[];
   start?: { id: number; name: string };
@@ -125,6 +125,7 @@ export type RunUi = {
   cancelled?: FoldState;
   ask?: { at: number; picks: (string | null)[]; other: string[] };
   retakes?: { off: number[]; note: string };
+  redoClosed?: boolean; // the card offering the steps not made again was put away (Not now)
 };
 
 export type RunContext = {

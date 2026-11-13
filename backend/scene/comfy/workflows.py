@@ -97,6 +97,8 @@ def load_workflow(path, object_info=None, workflow_id=None, sidecar=None):
     return {"id": workflow_id or path.stem, "nodes": nodes, "info": info, "profile": profile, "approximate": approximate}
 
 
+GENERATION_NODES = ("GenerationVideo", "GenerationImage", "GenerationSpeech", "GenerationMusic", "GenerationSoundEffect",
+                    "GenerationLipsync", "GenerationUpscale")   # the generation server's own nodes: its models, not a workflow's
 DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
 WIDGET_TYPES = ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO")
 _UNBOUND = object()
@@ -482,6 +484,9 @@ def describe(wf):
         "description": profile.get("description", ""),
         # When to pick this workflow over the others of its kind (the presets file's "pick_when"), for the agent.
         "pick_when": str(profile.get("pick_when") or ""),
+        # Where it is made: "generation" for the generation server's models (its own nodes, generation_models.py),
+        # "comfy" for a ComfyUI workflow. The two are told apart everywhere they are offered.
+        "source": "generation" if any(str(n.get("class_type") or "") in GENERATION_NODES for n in nodes.values()) else "comfy",
         "controls": controls,
         "refs": refs,
         "options": [final_first(o) for o in profile.get("options", [])],
@@ -580,10 +585,17 @@ def context(schema, settings):
         ctx["width"], ctx["height"] = video_size(resolution, ctx["orientation"], schema["size"].get("multiple", 32))
     elif "resolution" in roles:
         ctx["resolution"] = _cast("int", values.get(roles["resolution"]["id"], roles["resolution"]["default"]))
+    if "resolution" not in ctx:   # a Resolution option, one per group of models (the generation workflows): the one shown
+        option = next((o for o in schema["options"] if RESOLUTION_OPTION.match(o["id"]) and shown(o, ctx)), None)
+        if option is not None:
+            ctx["resolution"] = ctx[option["id"]]
     clips = clip_count(schema, settings)
     if clips > 1:
         ctx["clips"] = clips
     return ctx
+
+
+RESOLUTION_OPTION = re.compile(r"^resolution(_\d+)?$")   # "resolution", or "resolution_2" of a group of models
 
 
 def clip_count(schema, settings):
@@ -596,8 +608,17 @@ def clip_count(schema, settings):
 
 
 def summary(schema, ctx):
-    parts = [str(ctx[o["id"]]) for o in schema["options"]]
-    if "resolution" in ctx:
+    """The job in a few words: the options shown for its choices (a model's by their labels: "MiniMax H3 Max · 480p ·
+    16:9"), the size and the length. An option its choices hide is left out."""
+    parts = []
+    for o in schema["options"]:
+        if not shown(o, ctx):
+            continue
+        value = ctx.get(o["id"], o.get("default"))
+        if o["id"] == "model" or o.get("when") or schema.get("source") == "generation":   # read by their labels
+            value = next((c.get("label") or c["id"] for c in o["choices"] if c["id"] == value), value)
+        parts.append(str(value))
+    if "resolution" in ctx and not any(RESOLUTION_OPTION.match(o["id"]) for o in schema["options"]):   # an option says its own
         parts.append("{}p{}".format(ctx["resolution"], " " + ctx["orientation"] if "orientation" in ctx else ""))
     if "duration" in ctx:
         clips = "{} × ".format(ctx["clips"]) if ctx.get("clips", 1) > 1 else ""

@@ -9,6 +9,7 @@ import { Composer, type ComposerHandle } from './Composer';
 import { Conversation } from './Conversation';
 import { askOpen } from './Message';
 import { ApprovalCard, docked, retakeOpen } from './PlanView';
+import { RedoCard, redoOpen } from './RedoCard';
 import { AskCard, RetakeCard } from './Review';
 import type { ConversationProps } from './useConversation';
 import { useConversation } from './useConversation';
@@ -41,7 +42,16 @@ export const AgentPanel = forwardRef<PanelHandle, Props>(function AgentPanel(
   const run = chat.pending ? null : docked(chat);
   const ask = !run && askOpen(chat, newest) ? newest : null;
   const offer = !run && !ask && retakeOpen(chat, newest) ? newest : null;
-  const key = run ? String(run.at) : ask ? 'ask:' + ask.at : offer ? 'retake:' + offer.at : '';
+  const redo = !run && !ask && !offer && redoOpen(chat, newest) ? newest : null;
+  const key = run
+    ? String(run.at)
+    : ask
+      ? 'ask:' + ask.at
+      : offer
+        ? 'retake:' + offer.at
+        : redo
+          ? 'redo:' + redo.at
+          : '';
   // A plan's note, or a card, takes the focus when it first shows.
   useEffect(() => {
     if (!key || !dock.current) return;
@@ -70,12 +80,14 @@ export const AgentPanel = forwardRef<PanelHandle, Props>(function AgentPanel(
           <AskCard key={ask.at} chat={chat} run={ask} />
         ) : offer ? (
           <RetakeCard chat={chat} run={offer} />
+        ) : redo ? (
+          <RedoCard key={redo.at} chat={chat} run={redo} />
         ) : null}
       </div>
       <Composer
         ref={composer}
         chat={chat}
-        hidden={!!run || ((!!ask || !!offer) && !chat.generating())}
+        hidden={!!run || ((!!ask || !!offer || !!redo) && !chat.generating())}
         selection={selectionNow}
         pick={pick}
       />

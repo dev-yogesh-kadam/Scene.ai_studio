@@ -8,7 +8,7 @@ import { cx } from '../../../common/cx';
 import { answer } from './actions';
 import type { AgentChat } from './chat';
 import { carryOn, allMade, retake, toCheck } from './checks';
-import { OTHER, flagged, questionsOf, takesOf } from './shots';
+import { CHECK_RESULTS, OTHER, flagged, questionsOf, takesOf } from './shots';
 import { openLarge } from './TakeParts';
 import type { Run, Step } from './types';
 import s from './Ask.module.css';
@@ -20,7 +20,7 @@ const css = classesOf(css0, css1);
 
 /** One quiet line while the shots of a finished plan are checked. */
 export function CheckLine({ chat, run, steps }: { chat: AgentChat; run: Run; steps: Step[] }) {
-  if (!allMade(chat, run)) return null;
+  if (!CHECK_RESULTS || !allMade(chat, run)) return null;
   const left = steps.filter((x) => takesOf(x).some((t) => t.reviewing || toCheck(chat, t))).length;
   if (!left) return null;
   return (

@@ -157,8 +157,16 @@ class Catalog:
             kind, name = workflow_id.split("/", 1)
             item = {"id": workflow_id, "kind": kind, "title": name.replace("_", " "), "description": ""}
             try:
-                profile = (await self.load(workflow_id))["profile"]
+                loaded = await self.load(workflow_id)
+                profile = loaded["profile"]
                 item["title"] = profile.get("title") or item["title"]
+                # Where it is made: a ComfyUI workflow, or the generation server, whose models (its Model option's
+                # choices) are offered one by one, apart from the workflows (generation_models.py).
+                generation = any(str(n.get("class_type") or "") in workflows.GENERATION_NODES for n in loaded["nodes"].values())
+                item["source"] = "generation" if generation else "comfy"
+                if generation:
+                    model = next((o for o in profile.get("options", []) if o.get("id") == "model"), None)
+                    item["models"] = [{"id": c["id"], "label": c.get("label") or c["id"]} for c in (model or {}).get("choices", [])]
                 item["description"] = profile.get("description", "")
                 # how many reference pictures it takes, as its presets file lists them (0: it makes pictures from words only)
                 item["picture_refs"] = len([r for r in [*profile.get("required_refs", []), *profile.get("optional_refs", [])]

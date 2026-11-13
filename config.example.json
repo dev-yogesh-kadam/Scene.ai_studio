@@ -15,7 +15,7 @@
   "storage_dir": "storage",
   "output_dir": "",
   "backup_dir": "",
-  "default_workflow": "video/h3_all_in_one",
+  "default_workflow": "",
   "allow_signup": false,
   "signup_invite": "",
   "signup_credits": 0,

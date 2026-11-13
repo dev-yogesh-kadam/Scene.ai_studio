@@ -1,0 +1,21 @@
+{
+  "title": "Generation music",
+  "description": "A background-music track, 10 to 120 seconds, made by the generation server.",
+  "pick_when": "Background music or a song for a video, up to 2 minutes, paid in provider credits.",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:value": "Genre, mood, tempo, instruments and the scene. For a song add the lyrics and the vocal style.",
+    "2:value": "Length in seconds (10 to 120)"
+  },
+  "defaults": {
+    "1:value": "",
+    "2:value": 30
+  },
+  "pricing": {
+    "seconds": "2:value"
+  },
+  "hints": [
+    "Made by the generation server on the provider, priced by its length and the length of its prompt.",
+    "Normally the length of the video it scores."
+  ]
+}

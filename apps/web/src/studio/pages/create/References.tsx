@@ -34,7 +34,7 @@ export function withRef(form: JobForm, slot: Slot, value: File | RefValue | null
 export function References({ form, onChange }: { form: JobForm; onChange: (form: JobForm) => void }) {
   const wf = form.wf;
   const filled = wf.refs.filter((r) => r.order && form.refs[r.id]).length;
-  const shown = wf.refs.filter((r) => inUse(r, form.options) && (!r.order || r.order <= filled + 1));
+  const shown = wf.refs.filter((r) => inUse(r, form.options, wf) && (!r.order || r.order <= filled + 1));
   if (!shown.length) return <div />;
   const set = (slot: Slot, value: File | RefValue | null) => onChange(withRef(form, slot, value));
   return (

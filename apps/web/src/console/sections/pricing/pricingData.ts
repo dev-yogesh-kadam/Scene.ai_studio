@@ -44,6 +44,9 @@ export type WorkflowRow = {
   preferred_server?: string;
   enabled: boolean | number;
   admins_only?: boolean | number;
+  // A generation workflow: its models (the generation server's) and the studio's price of each at each resolution.
+  models?: { model: string; name: string; resolutions: string[]; prices?: Record<string, number> }[];
+  model_prices?: Record<string, Record<string, number>>;
 };
 export type PackageRow = {
   id: number;

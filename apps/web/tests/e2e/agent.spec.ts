@@ -167,7 +167,7 @@ test('a message goes to the agent, its work and reply show, and the box empties'
     .toEqual([['Hello agent', 'Done **thinking**.', 'answered', 0]]);
 });
 
-test('the bulb, the workflows (sliders) and the retry switch: each is kept, and goes with the message', async ({
+test('the bulb and the workflows (sliders): each is kept, and goes with the message; no retry switch', async ({
   page,
 }) => {
   const problems = watch(page);
@@ -207,22 +207,11 @@ test('the bulb, the workflows (sliders) and the retry switch: each is kept, and 
   expect(sent.at(-1)).toMatchObject({ explain: true });
   expect(sent.at(-1)!.workflows).toHaveLength(1);
 
-  // the retry switch, under the permission: the user's, on the server
-  const retry = async () =>
-    ((await (await page.request.get('/api/agent/preferences')).json()) as { retry_once: boolean }).retry_once;
-  expect(await retry()).toBe(false);
+  // no retry switch under the permission while the agent checks no results (shots.ts CHECK_RESULTS): a failed shot is
+  // found by its check, so there is nothing to retry by itself
   await page.getByRole('button', { name: /Generation permission/ }).click();
-  const item = page.getByRole('menuitemcheckbox', { name: /Retry a failed shot once by itself/ });
-  await expect(item).toHaveAttribute('aria-checked', 'false');
-  await item.click();
-  await expect.poll(retry).toBe(true);
-  await page.getByRole('button', { name: /Generation permission/ }).click();
-  await expect(page.getByRole('menuitemcheckbox', { name: /Retry a failed shot/ })).toHaveAttribute(
-    'aria-checked',
-    'true',
-  );
-  await page.getByRole('menuitemcheckbox', { name: /Retry a failed shot/ }).click();
-  await expect.poll(retry).toBe(false);
+  await expect(page.getByRole('menuitemcheckbox', { name: /Retry a failed shot/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   expect(problems.filter((p) => !p.includes('/api/agent/status'))).toEqual([]);
 });
 
@@ -323,6 +312,7 @@ test('what a plan made shows as results, with thumbs and a way to the canvas', a
 });
 
 test('a failed check asks about a retake on a card; Keep it ends it', async ({ page }) => {
+  test.skip(true, 'The agent checks no results since 2026-11-12 (agent/shots.ts CHECK_RESULTS): no retake card.');
   const id = seeded.items.Second;
   await openWith(page, 'Agent check', [
     run({

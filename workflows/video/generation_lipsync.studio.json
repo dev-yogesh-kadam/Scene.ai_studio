@@ -1,0 +1,113 @@
+{
+  "title": "Generation lip sync",
+  "description": "Makes the person in a video speak a voice track, made by the generation server.",
+  "pick_when": "A person on screen who has to say exact words: a clip with one visible speaker plus a voiceover (from the voiceover workflow). Among the more expensive tools: priced per second of the result.",
+  "output_name": "10.filename_prefix",
+  "labels": {
+    "1:file": "Video with ONE clearly visible speaker",
+    "2:audio": "Voice track: the voiceover to speak"
+  },
+  "required_refs": [
+    "1:file",
+    "2:audio"
+  ],
+  "options": [
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "default": "480p",
+      "top": true,
+      "choices": [
+        {
+          "id": "480p",
+          "label": "480p",
+          "hint": "the one the video was made at"
+        },
+        {
+          "id": "720p",
+          "label": "720p",
+          "hint": "the one the video was made at"
+        },
+        {
+          "id": "1080p",
+          "label": "1080p",
+          "hint": "the one the video was made at"
+        }
+      ]
+    },
+    {
+      "id": "shape",
+      "label": "Shape",
+      "default": "r9x16",
+      "top": true,
+      "choices": [
+        {
+          "id": "r9x16",
+          "label": "9:16"
+        },
+        {
+          "id": "r16x9",
+          "label": "16:9"
+        },
+        {
+          "id": "r1x1",
+          "label": "1:1"
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "when": {
+        "resolution": "480p"
+      },
+      "set": {
+        "10.resolution": "480p"
+      }
+    },
+    {
+      "when": {
+        "resolution": "720p"
+      },
+      "set": {
+        "10.resolution": "720p"
+      }
+    },
+    {
+      "when": {
+        "resolution": "1080p"
+      },
+      "set": {
+        "10.resolution": "1080p"
+      }
+    },
+    {
+      "when": {
+        "shape": "r9x16"
+      },
+      "set": {
+        "10.aspect_ratio": "9:16"
+      }
+    },
+    {
+      "when": {
+        "shape": "r16x9"
+      },
+      "set": {
+        "10.aspect_ratio": "16:9"
+      }
+    },
+    {
+      "when": {
+        "shape": "r1x1"
+      },
+      "set": {
+        "10.aspect_ratio": "1:1"
+      }
+    }
+  ],
+  "hints": [
+    "Made by the generation server on the provider. Set Shape and Resolution to what the video was made with.",
+    "The result runs as long as the voice track: a shorter video plays back and forth."
+  ]
+}

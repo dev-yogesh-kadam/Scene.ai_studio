@@ -2,7 +2,6 @@
 
 import hashlib
 import io
-import mimetypes
 import re
 import time
 from pathlib import Path
@@ -12,7 +11,7 @@ from fastapi import HTTPException
 from .security import content_matches
 
 UPLOAD_PREFIX = "scene_"
-# The names upload_reference gives, and nothing else: no folder, no way out of ComfyUI's input folder.
+# The names keep_reference gives, and nothing else: no folder, no way out of ComfyUI's input folder.
 UPLOAD_NAME = re.compile(r"^scene_[0-9a-f]{10}_[\w.-]{1,200}$")
 MAX_BYTES = 200 * 1024 * 1024
 KINDS = {
@@ -173,15 +172,32 @@ async def read_upload(upload):
     return data
 
 
-async def upload_reference(comfy, filename, data, mime=None, db=None, user_id=None):
-    """Put a file into the render server's input folder. The stored name includes a hash of the
-    content, so two different files with the same name never overwrite each other. With `db` and `user_id`,
-    the name is remembered as that user's, so they and nobody else can use it again (see owns_upload)."""
-    stored = "{}{}_{}".format(UPLOAD_PREFIX, hashlib.sha1(data).hexdigest()[:10], safe_name(filename)[:200])
-    name = await comfy.upload(stored, data, mime or mimetypes.guess_type(stored)[0])
+REFERENCES = "references"   # the storage kind (storage.py) the files are kept in
+
+
+async def keep_reference(store, filename, data, db=None, user_id=None):
+    """Keep a file a job uses as an input in the studio's own storage (`store`, app.state.storage) and return the name
+    the job calls it by. No render server is asked: the file is sent to the one that runs the job when it starts
+    (jobs._send_inputs), so a server that is off, or another server than the one it will run on, never stops a job
+    from being added. The name includes a hash of the content, so two different files with the same name never
+    overwrite each other, and the same file kept twice is kept once. With `db` and `user_id`, the name is remembered as
+    that user's, so they and nobody else can use it again (see owns_upload)."""
+    from .db import offload
+    name = "{}{}_{}".format(UPLOAD_PREFIX, hashlib.sha1(data).hexdigest()[:10], safe_name(filename)[:200])
+    if not await offload(store.exists, REFERENCES, name):
+        await offload(store.save, REFERENCES, name, data)
     if db is not None and user_id is not None:
         await db.arun("INSERT INTO uploads (user_id, name, created) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", (user_id, name, time.time()))
     return name
+
+
+def kept_reference(store, name):
+    """Whether the studio keeps this input file itself (one kept before keep_reference existed is only on the main
+    render server)."""
+    try:
+        return store is not None and bool(UPLOAD_NAME.match(str(name or ""))) and store.exists(REFERENCES, name)
+    except (OSError, ValueError):
+        return False
 
 
 def owns_upload(db, user_id, name):

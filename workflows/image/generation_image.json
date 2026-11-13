@@ -1,0 +1,27 @@
+{
+  "1": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": ""
+    },
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "10": {
+    "class_type": "GenerationImage",
+    "inputs": {
+      "prompt": [
+        "1",
+        0
+      ],
+      "model": "nano-banana-pro",
+      "resolution": "2K",
+      "aspect_ratio": "16:9",
+      "filename_prefix": "image/generation"
+    },
+    "_meta": {
+      "title": "Generation image"
+    }
+  }
+}

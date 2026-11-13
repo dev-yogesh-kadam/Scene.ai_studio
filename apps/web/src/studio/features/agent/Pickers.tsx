@@ -1,13 +1,15 @@
 // The choices under the message box: which model answers and how hard it thinks (ModelPicker, EffortPicker), whether a
 // plan runs at once or waits (PermissionPicker), and which workflows this chat is pinned to (PinsPicker).
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '../../../common/components/Icon/Icon';
 import { popover, s as pop } from '../../../common/components/Popover';
 import { cx } from '../../../common/cx';
-import { loadCatalog } from '../jobs/jobForm';
+import { loadCatalog, loadModelCatalog } from '../jobs/jobForm';
 import { EFFORT_NAMES, PERMISSIONS, type AgentChat } from './chat';
 import s from './Composer.module.css';
+import { CHECK_RESULTS } from './shots';
+import { clearKind, kindOfPin, pinTabs, togglePin, type PinEntry, type PinTab } from './pins';
 
 function EffortPicker({ chat, close }: { chat: AgentChat; close: () => void }) {
   const { levels } = chat.effortsOf(chat.models.current);
@@ -125,25 +127,28 @@ export function PermissionPicker({ chat }: { chat: AgentChat }) {
               {p.id === now.id ? <Icon name="check" /> : <span />}
             </button>
           ))}
-          <button
-            type="button"
-            className={pop['pop-item']}
-            role="menuitemcheckbox"
-            aria-checked={chat.retryOnce}
-            onClick={() => {
-              void chat.setRetryOnce(!chat.retryOnce);
-              close();
-            }}
-          >
-            <Icon name="retry" />
-            <span>
-              <b>Retry a failed shot once by itself</b>
-              <span className="muted small">
-                A shot that fails its check is made again once, charged like any render. Off: you are asked.
+          {/* a failed shot is found by its check: with no checks (CHECK_RESULTS) there is nothing to retry */}
+          {CHECK_RESULTS && (
+            <button
+              type="button"
+              className={pop['pop-item']}
+              role="menuitemcheckbox"
+              aria-checked={chat.retryOnce}
+              onClick={() => {
+                void chat.setRetryOnce(!chat.retryOnce);
+                close();
+              }}
+            >
+              <Icon name="retry" />
+              <span>
+                <b>Retry a failed shot once by itself</b>
+                <span className="muted small">
+                  A shot that fails its check is made again once, charged like any render. Off: you are asked.
+                </span>
               </span>
-            </span>
-            {chat.retryOnce ? <Icon name="check" /> : <span />}
-          </button>
+              {chat.retryOnce ? <Icon name="check" /> : <span />}
+            </button>
+          )}
         </>
       ),
       pop['pop-perm'],
@@ -164,71 +169,132 @@ export function PermissionPicker({ chat }: { chat: AgentChat }) {
   );
 }
 
-/** The workflows this chat uses: ticked ones are the only ones of their kind the agent plans with here. */
+/** The menu of PinsPicker: a tab for each kind, "Agent selects" first, then the generation server's models one by
+ * one, then ComfyUI's workflows. Ticking keeps the menu open; the chat keeps the pins (chat.setPins). */
+function PinsMenu({ chat, tabs, close }: { chat: AgentChat; tabs: PinTab[]; close: () => void }) {
+  const [pins, setPinsHere] = useState(chat.chatWorkflows);
+  const [kind, setKind] = useState(
+    () =>
+      tabs.find((t) => pins.some((p) => kindOfPin(p) === t.kind))?.kind ??
+      (tabs.find((t) => t.kind === 'video') || tabs[0])?.kind,
+  );
+  const tab = tabs.find((t) => t.kind === kind) || tabs[0];
+  const keep = (next: string[]) => {
+    setPinsHere(next);
+    chat.setPins(next);
+  };
+  if (!tab) return <p className="muted small">No workflows can be used yet.</p>;
+  const chosen = pins.filter((p) => kindOfPin(p) === tab.kind);
+  const row = (e: PinEntry) => {
+    const on = pins.includes(e.value);
+    return (
+      <button
+        key={e.value}
+        type="button"
+        className={cx(pop['pop-item'], s['pin-row'])}
+        role="menuitemcheckbox"
+        aria-checked={on}
+        onClick={() => keep(togglePin(pins, e.value))}
+      >
+        <i className={cx(s['pin-box'], on && s.on)} aria-hidden>
+          {on && <Icon name="check" />}
+        </i>
+        <span className={s['pin-text']}>
+          <b>{e.title}</b>
+          {e.about && <span className={s['pin-about']}>{e.about}</span>}
+          {(e.sound || e.meta.length > 0) && (
+            <span className={s['pin-meta']}>
+              {e.sound && <Icon name="audio" />}
+              {e.meta.join(' · ')}
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
+  return (
+    <>
+      <div className={pop['pop-title']}>Workflows for this chat</div>
+      <div className={s['pin-tabs']} role="tablist" aria-label="Kind">
+        {tabs.map((t) => {
+          const count = pins.filter((p) => kindOfPin(p) === t.kind).length;
+          return (
+            <button
+              key={t.kind}
+              type="button"
+              role="tab"
+              aria-selected={t.kind === tab.kind}
+              className={cx(s['pin-tab'], t.kind === tab.kind && s.on)}
+              onClick={() => setKind(t.kind)}
+            >
+              <Icon name={t.icon} />
+              {t.label}
+              {count > 0 && <span className={s['pin-count']}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        className={cx(pop['pop-item'], s['pin-row'], s['pin-auto'])}
+        role="menuitemradio"
+        aria-checked={!chosen.length}
+        onClick={() => keep(clearKind(pins, tab.kind))}
+      >
+        <i className={cx(s['pin-radio'], !chosen.length && s.on)} aria-hidden />
+        <span className={s['pin-text']}>
+          <b>
+            Agent selects <span className={s['pin-badge']}>Recommended</span>
+          </b>
+          <span className={s['pin-about']}>
+            {chosen.length
+              ? `Pick this to let the agent choose the ${tab.label.toLowerCase()} again`
+              : `The agent picks the ${tab.label.toLowerCase()} model for each step`}
+          </span>
+        </span>
+      </button>
+      <div className={s['pin-list']}>
+        {tab.models.length > 0 && <div className={s['pin-section']}>Models (generation server)</div>}
+        {tab.models.map(row)}
+        {tab.workflows.length > 0 && <div className={s['pin-section']}>Workflows (ComfyUI)</div>}
+        {tab.workflows.map(row)}
+      </div>
+      {pins.length > 0 && (
+        <button
+          type="button"
+          className={cx(pop['pop-item'], s['pin-clear'])}
+          onClick={() => {
+            keep([]);
+            close();
+          }}
+        >
+          <Icon name="skip" />
+          <span>
+            <b>Let the agent choose everything</b>
+          </span>
+        </button>
+      )}
+    </>
+  );
+}
+
+/** The workflows and models this chat uses: ticked ones are the only ones of their kind the agent plans with here. */
 export function PinsPicker({ chat }: { chat: AgentChat }) {
   const button = useRef<HTMLButtonElement>(null);
   const open = async () => {
-    let listed;
+    let tabs: PinTab[];
     try {
-      listed = (await loadCatalog()).workflows.filter((w) => (w.kind === 'video' || w.kind === 'image') && !w.error);
+      const [catalog, models] = await Promise.all([
+        loadCatalog(),
+        loadModelCatalog().catch(() => ({ models: {} })), // without the server's list the presets still name them
+      ]);
+      tabs = pinTabs(catalog.workflows, models.models);
     } catch (e) {
       chat.say((e as Error).message);
       return;
     }
     if (!button.current) return;
-    const rows = listed;
-    popover(
-      button.current,
-      (close) => (
-        <>
-          <div className={pop['pop-title']}>Workflows for this chat</div>
-          <p className="muted small" style={{ margin: '0 10px 6px' }}>
-            Tick the ones this chat uses. None ticked: the agent chooses.
-          </p>
-          {rows.map((w) => {
-            const on = chat.chatWorkflows.includes(w.id);
-            return (
-              <button
-                key={w.id}
-                type="button"
-                className={pop['pop-item']}
-                role="menuitemcheckbox"
-                aria-checked={on}
-                onClick={() => {
-                  chat.setPins(on ? chat.chatWorkflows.filter((x) => x !== w.id) : [...chat.chatWorkflows, w.id]);
-                  close();
-                  void open();
-                }}
-              >
-                <Icon name={w.kind} />
-                <span>
-                  <b>{w.title}</b>
-                  <span className="muted small">{w.kind === 'video' ? 'Video' : 'Image'}</span>
-                </span>
-                {on ? <Icon name="check" /> : <span />}
-              </button>
-            );
-          })}
-          {chat.chatWorkflows.length > 0 && (
-            <button
-              type="button"
-              className={pop['pop-item']}
-              onClick={() => {
-                chat.setPins([]);
-                close();
-              }}
-            >
-              <Icon name="skip" />
-              <span>
-                <b>Let the agent choose</b>
-              </span>
-              <span />
-            </button>
-          )}
-        </>
-      ),
-      pop['pop-perm'],
-    );
+    popover(button.current, (close) => <PinsMenu chat={chat} tabs={tabs} close={close} />, s['pin-pop']);
   };
   const title = chat.chatWorkflows.length
     ? `Workflows for this chat: ${chat.chatWorkflows.length} chosen`

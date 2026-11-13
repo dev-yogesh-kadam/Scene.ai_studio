@@ -22,6 +22,7 @@ class FakeComfy:
     def __init__(self, entry=None, held=True, down=False, cancel_fails=False):
         self.entry, self.held, self.down, self.cancel_fails = entry, held, down, cancel_fails
         self.queued, self.cancelled, self.files = [], [], {}   # files: what view(name) gives, as bytes
+        self.extras = []   # the extra_data sent with each graph
 
     def ws_url(self, client_id):
         return "ws://127.0.0.1:9/ws?clientId=" + client_id   # nothing listens: progress is best effort
@@ -31,7 +32,8 @@ class FakeComfy:
             raise httpx.ConnectError("the render PC does not answer")
         return {}
 
-    async def queue(self, prompt, client_id):
+    async def queue(self, prompt, client_id, extra=None):
+        self.extras.append(extra)
         if self.down:
             raise httpx.ConnectError("the render PC does not answer")
         self.queued.append(prompt)
@@ -49,6 +51,8 @@ class FakeComfy:
         self.cancelled.append(prompt_id)
 
     async def view(self, filename, subfolder="", kind="output"):
+        if filename not in self.files:   # as ComfyUI answers for a file it does not have
+            return httpx.Response(404, request=httpx.Request("GET", self.url + "/view"))
         return httpx.Response(200, content=self.files[filename], request=httpx.Request("GET", self.url + "/view"))
 
 

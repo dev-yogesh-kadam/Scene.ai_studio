@@ -41,9 +41,9 @@ def studio(client, monkeypatch):
 
     monkeypatch.setattr(manager, "_run", render)
     from scene.api import library
-    async def reference(comfy, filename, data, mime=None, db=None, user_id=None):
+    async def reference(store, filename, data, db=None, user_id=None):
         return "ref_" + filename
-    monkeypatch.setattr(library, "upload_reference", reference)
+    monkeypatch.setattr(library, "keep_reference", reference)
     client.post("/api/auth/register", json=USER)
     return client
 
@@ -180,6 +180,43 @@ def test_a_step_that_starts_on_another_waits_for_its_picture(studio):
     assert done["state"] == "done"
     second = studio.app.state.db.one("SELECT settings FROM jobs WHERE plan_step = 1")
     assert json.loads(second["settings"])["parent"] == done["steps"][0]["made"]
+
+
+def test_a_step_that_waits_does_not_hold_up_the_free_ones_after_it(studio):
+    """Shot two starts on shot one; shots three and four start on nothing: they are queued at once, beside shot one,
+    not after it is made (the servers run as many at once as their "Jobs at once")."""
+    let_go = hold(studio, "one")
+    steps = [step("one"), step("two", after={"step": 0, "slot": "x"}), step("three"), step("four")]
+    plan = studio.post("/api/agent/plans", json={"steps": steps}).json()
+    studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    queued = lambda: {r["plan_step"] for r in studio.app.state.db.all("SELECT plan_step FROM jobs WHERE plan_id = ?", (plan["id"],))}
+    end = time.time() + 10
+    while queued() != {0, 2, 3} and time.time() < end:
+        time.sleep(0.05)
+    assert queued() == {0, 2, 3}   # two waits for one; three and four did not
+    let_go()
+    done = wait_for(studio, plan["id"])
+    assert done["state"] == "done" and all(s["made"] for s in done["steps"])
+
+
+def test_the_steps_not_made_are_offered_again_with_why_and_their_price(studio):
+    """A failed shot, and the one that started on it, come back for approval (GET .../redo): why each was not made and
+    what they cost now. Nothing is charged until Make again resumes the plan, and then only they are made."""
+    studio.failing.add("two")
+    steps = [step("one"), step("two"), step("three", after={"step": 1, "slot": "x"})]
+    plan = studio.post("/api/agent/plans", json={"steps": steps}).json()
+    studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
+    assert wait_for(studio, plan["id"])["state"] == "failed"
+    before = balance(studio)
+    redo = studio.get("/api/agent/plans/{}/redo".format(plan["id"])).json()
+    assert [(x["step"], x["name"]) for x in redo["steps"]] == [(1, "two"), (2, "three")]
+    assert redo["steps"][0]["reason"] and redo["total"] > 0   # in words its owner reads (errors.for_user)
+    assert balance(studio) == before   # only shown
+    studio.failing.clear()
+    studio.post("/api/agent/plans/{}/resume".format(plan["id"]))
+    done = wait_for(studio, plan["id"])
+    assert done["state"] == "done" and balance(studio) == before - redo["total"]
+    assert studio.started.count("one") == 1 and studio.started.count("two") == 2   # the one made is not made again
 
 
 def test_the_cut_uses_the_take_that_was_chosen(studio, monkeypatch):
@@ -327,7 +364,8 @@ def test_a_job_that_ends_between_the_plans_look_and_its_wait_is_not_missed(studi
 
 def test_a_plans_later_shots_keep_its_place_ahead_of_what_was_asked_for_after_it(studio):
     """A plan whose next shot starts on the one being made (queued only once that is made) is not overtaken by a
-    video asked for after the plan, in another module: its shots render first, in their order."""
+    video asked for after the plan, in another module: its shots render first. Shot three starts on nothing, so it is
+    queued at once and renders before shot two, which waits for shot one."""
     release = hold(studio, "one")
     steps = [step("one"), step("two", after={"step": 0, "slot": "x"}), step("three")]
     plan = studio.post("/api/agent/plans", json={"steps": steps}).json()
@@ -342,4 +380,14 @@ def test_a_plans_later_shots_keep_its_place_ahead_of_what_was_asked_for_after_it
     until = time.time() + 10
     while "other" not in studio.started and time.time() < until:
         time.sleep(0.02)
-    assert studio.started == ["one", "two", "three", "other"]
+    assert studio.started == ["one", "three", "two", "other"]
+
+
+def test_a_steps_price_counts_every_slot_it_fills():
+    """Priced as the queue fills it: a model that renders only some resolutions with references (MiniMax H3 Max at
+    768p) is priced at the one it will be made at, not at the 480p planned before its cast was added."""
+    from scene.plans import filled_slots
+    shot = {"uses": [{"slot": "ref_1", "id": 4}, {"slot": "ref_2", "asset": "a1", "cast": True}],
+            "start": {"id": 9, "slot": "3:image"}, "after": None}
+    assert filled_slots(shot) == {"ref_1", "ref_2", "3:image"}
+    assert filled_slots({"after": {"step": 0, "slot": "3:image"}}) == {"3:image"}
