@@ -26,10 +26,13 @@ from fastapi import HTTPException
 from . import balancer, core, edits, errors, generation_models, guardrails, health, langfuse_trace, media, memory, moderation, motion, placement, sequence, sharing, traces
 from .comfy import workflows
 from .agent import AgentError
+from .providers import base as provider_base, v1 as provider_v1, workflows as provider_workflows
+from .providers import router as provider_router
+from .providers.router import NoProvider, model_of_job
 from .comfy.client import ComfyError
 from . import outputs as outputs_mod
 from .db import as_everyone, offload
-from .references import REFERENCES, kept_reference
+from .references import REFERENCES, keep_reference, kept_reference
 
 VIDEO_TYPES = {".mp4", ".webm", ".mov", ".mkv", ".gif"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -55,6 +58,9 @@ PROVIDER_CANCELLED = ("Cancelled. The provider has no cancel: if the clip had st
                       "charges the generation server for it. Your studio credits came back.")   # the node_type of the generation server's errors: a video service makes its clips
 LOOK_AHEAD = 200     # waiting renders the load balancer looks at each time (those past it wait for a later look)
 RENDER_MOST = 4 * 3600   # seconds one render may take on ComfyUI, waiting in its own queue too: past it, it is stopped
+# A provider job cancelled before it reached the provider (the provider said it is not charged).
+PROVIDER_CANCELLED_FREE = "Cancelled before the provider made it: nothing was charged there, and your studio credits came back."
+OUTPUT_KINDS = {"video": "video", "image": "image", "audio": "audio", "text": "text"}
 
 
 # The plan and step being queued now (plans.py): JobManager.add writes them into the job's own row.
@@ -65,6 +71,14 @@ QUEUEING = contextvars.ContextVar("queueing", default=None)
 # (another module's video ran between them). Every other job where it was asked for. Ahead of both: what was put first.
 QUEUE_AT = "COALESCE((SELECT approved FROM agent_plans p WHERE p.id = jobs.plan_id), jobs.created)"
 QUEUE_ORDER = "priority DESC, {}, plan_step, created".format(QUEUE_AT)
+
+
+def _kind_of_output(out, suffix):
+    """What a provider's output is: by its "type" when it says, else by its file's ending."""
+    kind = OUTPUT_KINDS.get(str(out.get("type") or ""), "")
+    if kind:
+        return kind
+    return "video" if suffix in VIDEO_TYPES else "image" if suffix in IMAGE_TYPES else "audio" if suffix in AUDIO_TYPES else "text"
 
 class Cancelled(Exception):
     pass
@@ -111,6 +125,9 @@ class JobManager:
         self.hold_offline = True    # renders wait for the render server instead of failing (settings.hold_queue_offline)
         self.down = set()           # the waiting renders none of whose servers answered at the last look (balancer.py)
         self.needs_seen = {}        # workflow id -> (the node classes it runs, when that was read): _needs
+        # Which provider and key run the providers' models (providers/router.py; main.py sets it), and in shadow mode
+        # what it would pick for the renders the load balancer places.
+        self.router = None
         # A job that was running when the app stopped can't be picked up again. Waiting jobs stay queued.
         for job in db.all("SELECT id, user_id, cost FROM jobs WHERE status = 'running'"):
             db.run("UPDATE jobs SET status = 'failed', error = ?, finished = ? WHERE id = ?",
@@ -350,6 +367,8 @@ class JobManager:
     async def _place(self, job, asked):
         """Where one waiting render goes now: (server {"name", "url", ...} or None, whether one that can do it answers
         or runs a render, why no server could ever do it, or ""). `asked`: the servers' answers during this look."""
+        if self.router is not None and provider_workflows.is_provider_id(job["workflow"]):
+            return await self._place_provider(job)
         if self.pool is None:   # one server: free when nothing of the studio runs on it
             if self.working:
                 return None, True, ""
@@ -360,6 +379,40 @@ class JobManager:
         async def answers(url):   # the main server is asked as it always was
             return await (self._render_server_up() if url == self.comfy.url else self.pool.answers(url))
         return await self.pool.place(job["workflow"], await self._needs(job), answers if self.hold_offline else None, asked)
+
+    async def _place_provider(self, job):
+        """A provider's model: the key the router picks (providers/router.py), taken for this job at once. It waits
+        while every key that could is busy, resting or over its cap; it fails now when none ever could."""
+        model = provider_workflows.model_id_of(job["workflow"])
+        choice, problem = await offload(self.router.pick, model)
+        if problem:
+            return None, False, problem
+        if choice is None:
+            return None, True, ""
+        self.router.take(choice, job["id"])
+        return {"name": choice["provider"]["name"], "url": "", "choice": choice}, True, ""
+
+    async def _shadow(self, job, server):
+        """In shadow mode, what the router would have picked for a render the load balancer placed, kept on the job
+        (jobs.provider) and in the log beside what was done. Changes nothing about where it runs."""
+        try:
+            if await offload(self.router.mode) != "shadow":
+                return
+            settings = job["settings"] if isinstance(job["settings"], dict) else {}
+            model = model_of_job(job["workflow"], settings.get("options")) or job["workflow"]
+            choice, problem = await offload(self.router.pick, model)
+            from urllib.parse import urlsplit
+            did = {"server": server.get("name") or "", "url": server.get("url") or ""}
+            would = choice.described() if choice is not None else {"problem": problem or "every key busy"}
+            where = (choice or {}).get("provider", {}).get("base_url", "")
+            agree = choice is not None and bool(where) and urlsplit(where).netloc == urlsplit(did["url"]).netloc
+            note = {"shadow": {"would": would, "did": did, "model": model, "agree": agree}}
+            await self.db.arun("UPDATE jobs SET provider = ? WHERE id = ?", (json.dumps(note), job["id"]))
+            print("Job {} (shadow): ran on {}; the router would pick {} ({}).".format(
+                job["id"], did["server"] or did["url"], would.get("provider", would.get("problem")) + (
+                    " · " + would["key"] if "key" in would else ""), "same" if agree else "different"))
+        except Exception as error:   # shadow mode only watches: it never stops a render
+            print("Job {}: the router's shadow pick failed: {}".format(job["id"], error))
 
     async def _needs(self, job):
         """The node classes a waiting render will run: its workflow's, and the voice separation's when it asks for a
@@ -391,6 +444,8 @@ class JobManager:
         self.live[job["id"]] = {"step": 0, "steps": 0, "titles": {}}
         if problem:
             job["unplaced"], name = problem, ""
+        elif server is not None and server.get("choice") is not None:
+            name = server["name"]   # the provider, as Servers & APIs → Providers names it
         elif server is None or server["url"] == self.comfy.url:
             # The machine it runs on, as the Pricing section names it (what it draws is costed by that name): the main
             # render server is the machine that renders, another server is named as its row in Servers & APIs.
@@ -398,7 +453,9 @@ class JobManager:
             name = found["name"] if found else ""
         else:
             name = server["name"]
-        if server is not None:
+        if server is not None and server.get("choice") is not None:   # a provider's model, on the key the router took
+            job["choice"] = server["choice"]
+        elif server is not None:
             self.live[job["id"]]["comfy"] = self.pool.client(server["url"]) if self.pool else self.comfy
         await self.db.arun("UPDATE jobs SET status = 'running', started = ?, server = ? WHERE id = ?",
                     (job["started"], name, job["id"]))
@@ -407,7 +464,9 @@ class JobManager:
         if local:
             await self._work(job, local)
             return
-        url = server["url"] if server is not None else None
+        if self.router is not None and server is not None and not job.get("choice"):
+            await self._shadow(job, server)
+        url = (server["url"] or None) if server is not None else None
         if self.pool and url:
             self.pool.take(url, job["id"])
         task = asyncio.ensure_future(self._work(job, local, url))
@@ -421,6 +480,8 @@ class JobManager:
         finally:
             if url is not None and self.pool:
                 self.pool.release(url, job["id"])
+            if job.get("choice") is not None and self.router is not None:   # the provider key it held
+                self.router.release(job["choice"], job["id"])
             self._woke()   # its slot is free again
 
     async def _finish(self, job, local):
@@ -433,10 +494,15 @@ class JobManager:
             await self._run(job)
         except Cancelled:
             status = "cancelled"
-            if (self.live.get(job["id"]) or {}).get("provider"):
-                error = PROVIDER_CANCELLED
+            live = self.live.get(job["id"]) or {}
+            if live.get("provider"):
+                error = PROVIDER_CANCELLED_FREE if live.get("charged") is False else PROVIDER_CANCELLED
         except (ComfyError, workflows.WorkflowError, media.MediaError, motion.MotionError, sequence.SequenceError) as e:
             status, error = "failed", str(e)
+        except NoProvider as e:   # no key could ever make it: said as the router says it
+            status, error = "failed", str(e)
+        except provider_base.ProviderError as e:   # the provider's own words (a test key: "Test mode: would cost …")
+            status, error = "failed", "{}: {}".format(PROVIDER, str(e).rstrip(".") + ".")
         except httpx.HTTPError as e:
             status, error = "failed", "Lost the connection to ComfyUI ({}).".format(e or type(e).__name__)
             # The render server went away while it ran: back to the front of the queue, its credits still held, to
@@ -552,7 +618,9 @@ class JobManager:
                 {"workflow": job["workflow"], "kind": job["kind"], "status": status, "server": job.get("server") or "",
                  "server_url": job.get("server_url") or "", "queue_seconds": round(job["started"] - job["created"], 1),
                  "render_seconds": round(ended - job["started"], 1), "credits": job["cost"] if status == "done" else 0,
-                 "job": job["id"]},
+                 "job": job["id"],
+                 # a provider's model: its provider, model, key label and the provider's request id (never the key)
+                 **({"provider": {k: v for k, v in job["provider_note"].items() if k != "key_id"}} if job.get("provider_note") else {})},
                 user=job["user_id"], error=error if status == "failed" else None, fallback=turn["name"])
         except Exception as problem:   # Langfuse is a help: the job is done all the same
             print("The job could not be readied for Langfuse: {}".format(problem))
@@ -616,6 +684,8 @@ class JobManager:
     async def _run(self, job):
         if edits.is_edit(job["workflow"]):
             return await self._run_edit(job)
+        if job.get("choice") is not None:
+            return await self._run_provider(job, self.live[job["id"]])
         live = self.live[job["id"]]
         live.setdefault("comfy", self.comfy)
         if _input_names(job["settings"]):   # the files it needs are sent to the server it runs on first
@@ -624,6 +694,205 @@ class JobManager:
             await self._send_inputs(job["settings"], live["comfy"])
             live["node"] = ""
         await self._render_job(job, live)
+
+    async def _run_provider(self, job, live):
+        """A provider's model (providers/workflows.py), made by its provider over the Scene Provider API v1 (or by the
+        tools on this PC, which answer the same way): the graph is built as any workflow's and its provider node is the
+        job's `input`; its files are uploaded, the job started with an Idempotency-Key of this job (a retry never pays
+        twice), followed until it ends, and its outputs fetched and filed. The router fails over to another key or
+        provider only before the job has started there: once it started, a problem ends this job (and its credits come
+        back). A long video of several clips is a chain (_run_provider_chain)."""
+        wf = await self.catalog.load(job["workflow"])
+        settings = await self._clean_voice_here(job, live, wf)
+        clips = workflows.clip_count(workflows.describe(wf), settings)
+        live["provider"] = True
+        if clips > 1:
+            await self._run_provider_chain(job, live, wf, settings, clips)
+            return
+        (adapter, choice, started, answer), ctx = await self._provider_clip(job, live, wf, settings)
+        outputs = [o for o in answer.get("outputs") or [] if isinstance(o, dict)]
+        live["node"] = "Fetching the result"
+        self.notify(job["user_id"])
+        folder, stem = await offload(self._target, job)
+        saved = 0
+        for n, out in enumerate(outputs):
+            suffix = Path(str(out.get("name") or "")).suffix or mimetypes.guess_extension(str(out.get("mime") or "")) or ""
+            kind = _kind_of_output(out, suffix)
+            target = folder / "{}{}{}".format(stem, "_{}".format(saved + 1) if saved else "", suffix)
+            await adapter.fetch_output(choice["secret"], started["id"], n, target, outputs)
+            found = await media.probe(target) if kind != "text" else {}
+            made = dict(ctx)
+            if kind == "audio":
+                made["duration"] = round(found.get("seconds") or 0, 1)
+            elif kind in ("image", "video") and found.get("width"):
+                made.update(width=found["width"], height=found["height"])
+            if kind == "video":
+                made["fps"] = await media.frame_rate(target)
+            # Several files of one job (a voice and the music, a transcript and its subtitles): each named by what it is
+            label = Path(str(out.get("name") or "")).stem[:40] if len(outputs) > 1 else ""
+            await offload(self._record, job, kind, target, dict(made, output=label) if label else made,
+                          name="{} · {}".format(job["name"], label)[:120] if label else None)
+            saved += 1
+        if not saved:
+            raise provider_base.ProviderProblem("The provider finished but sent no file.")
+
+    async def _provider_clip(self, job, live, wf, settings, clip=None):
+        """One call to the provider for this job (one clip of a chain when `clip` is its number): started on the key the
+        router picks (the job's own while it holds one), followed until it ended well. Returns ((adapter, Choice,
+        started, last answer), context). The job's provider note says what ran it; a chain's lists every clip."""
+        provider = wf["profile"]["provider"]
+        graph, ctx = workflows.build_prompt(wf, dict(settings, clips=1))
+        inputs = provider_workflows.provider_input(wf, graph)
+        metadata = await offload(self._who, job)   # {"scene": {"user", "project", "module", "job"}}, as ComfyUI was sent
+        live["node"] = "Sending it to the provider"
+        self.notify(job["user_id"])
+
+        async def attempt(choice):
+            adapter = await offload(self.router.adapter, choice["provider"])
+            sent = await self._provider_files(adapter, choice["secret"], inputs)
+            started = await adapter.start(choice["secret"], provider["model"], sent, metadata, provider_v1.idempotency_key(job["id"], clip))
+            return adapter, started
+
+        (adapter, started), choice = await self.router.run(provider["model"], attempt, job_id=job["id"], first=job.get("choice"))
+        job["choice"] = choice
+        note = dict(choice.described(), job=started["id"], request_id=started.get("request_id") or "",
+                    quote=started.get("quote"), test=bool(started.get("test")))
+        if clip:
+            earlier = job.get("provider_note") or {}
+            note["clips"] = list(earlier.get("clips") or []) + [{"clip": clip, "job": started["id"]}]
+        job["provider_note"] = note
+        await self.db.arun("UPDATE jobs SET provider_key = ?, provider = ?, server = ? WHERE id = ?",
+                           (choice["key"]["id"] if choice["key"]["id"] > 0 else None, json.dumps(note), choice["provider"]["name"], job["id"]))
+        print("Job {}{}: {} on {} (key {}), the provider's job {}, request {}.".format(
+            job["id"], " clip {}".format(clip) if clip else "", provider["model"], choice["provider"]["name"], choice["key"]["label"],
+            started["id"], note["request_id"] or "-"))
+        live["node"] = "Waiting for the provider"
+        self.notify(job["user_id"])
+
+        def progress(answer):
+            done = answer.get("progress")
+            if isinstance(done, (int, float)) and not isinstance(done, bool):
+                now, step = time.time(), int(max(0.0, min(1.0, done)) * 100)
+                if "first_step" not in live:
+                    live["first_step"] = (now, step)
+                live.update(step=step, steps=100, step_time=now)
+            if answer.get("message"):
+                live["node"] = str(answer["message"])[:120]
+            self.notify(job["user_id"])
+
+        answer = await adapter.follow(choice["secret"], started["id"], progress, lambda: bool(live.get("cancel")), RENDER_MOST)
+        cost = answer.get("cost") if not answer.get("studio_cancelled") else None   # cost_of'd by status()
+        if clip:
+            note["clips"][-1]["cost"] = cost
+            costs = [c.get("cost") for c in note["clips"]]
+            cost = sum(costs) if all(isinstance(c, (int, float)) for c in costs) else None   # the whole chain's, once known
+        note.update(status=answer.get("status"), cost=cost, quote=answer.get("quote") or note["quote"],
+                    request_id=answer.get("request_id") or note["request_id"])
+        await self.db.arun("UPDATE jobs SET provider = ? WHERE id = ?", (json.dumps(note), job["id"]))
+        if answer.get("studio_cancelled"):
+            live["charged"] = bool(answer.get("charged", True))
+            raise Cancelled()
+        if answer.get("status") == "failed":
+            raise provider_v1.job_problem(answer)
+        if answer.get("status") != "succeeded":
+            raise provider_base.RequestProblem("The provider cancelled the job.")
+        return (adapter, choice, started, answer), ctx
+
+    async def _run_provider_chain(self, job, live, wf, settings, clips):
+        """A long video made of several clips by a provider's model, each starting on the last frame of the one before
+        it, then joined into one video, as ComfyUI's chains were. The prompt may give each clip its own part, separated
+        by a line of dashes (CLIP_BREAK); the job's last frame is the end of the final clip only. Each clip is its own
+        call with its own Idempotency-Key (the job's and the clip's number), on the job's key."""
+        schema = workflows.describe(wf)
+        slots, roles = schema["slots"], {c["role"]: c for c in schema["controls"] if c["role"]}
+        full_ctx = workflows.context(schema, settings)
+        prompt = str((settings.get("values") or {}).get(roles["prompt"]["id"], roles["prompt"]["default"]) or "")
+        prompts = [part.strip() for part in CLIP_BREAK.split(prompt) if part.strip()] or [prompt]
+        refs = dict(settings.get("refs") or {})
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self.tmp_dir) as tmp:
+            tmp = Path(tmp)
+            parts, previous = [], None
+            for i in range(clips):
+                live.update(clip=i + 1, clips=clips, step=0, steps=0, node="")
+                live.pop("first_step", None)
+                self.notify(job["user_id"])
+                clip_settings = copy.deepcopy(settings)
+                clip_settings["values"] = dict(settings.get("values") or {})
+                clip_settings["values"][roles["prompt"]["id"]] = prompts[min(i, len(prompts) - 1)]
+                clip_refs = dict(refs)
+                if previous:
+                    clip_refs[slots["first_frame"]] = {"comfy_name": previous, "name": "end of clip {}".format(i)}
+                if i < clips - 1:
+                    clip_refs.pop(slots.get("last_frame"), None)   # only the final clip ends on the last-frame image
+                clip_settings["refs"] = clip_refs
+                (adapter, choice, started, answer), _ = await self._provider_clip(job, live, wf, clip_settings, clip=i + 1)
+                outputs = [o for o in answer.get("outputs") or [] if isinstance(o, dict)]
+                n = next((n for n, o in enumerate(outputs)
+                          if _kind_of_output(o, Path(str(o.get("name") or "")).suffix or ".mp4") == "video"), None)
+                if n is None:
+                    raise provider_base.ProviderProblem("The provider finished clip {} but sent no video.".format(i + 1))
+                part = tmp / "clip_{}.mp4".format(i)
+                live["node"] = "Fetching clip {}".format(i + 1)
+                self.notify(job["user_id"])
+                await adapter.fetch_output(choice["secret"], started["id"], n, part, outputs)
+                parts.append(part)
+                if i < clips - 1:
+                    frame = await media.last_frame(part, tmp / "frame_{}.png".format(i))
+                    previous = await keep_reference(self.storage, "chain_{}_{}.png".format(job["id"], i + 1), frame.read_bytes())
+            live.update(node="Joining the clips", step=0, steps=0)
+            self.notify(job["user_id"])
+            folder, stem = await offload(self._target, job)
+            target = folder / (stem + ".mp4")
+            await media.join(parts, target)
+        found = await media.probe(target)
+        made = dict(full_ctx, fps=await media.frame_rate(target))
+        if found.get("width"):
+            made.update(width=found["width"], height=found["height"])
+        await offload(self._record, job, "video", target, made)
+
+    async def _clean_voice_here(self, job, live, wf):
+        """A provider's job (a lip sync) whose voice track has music, effects or other people under the voice, and asks
+        for it to be taken out ("clean_voice"): the voice is separated on this PC first (providers/local.py, Demucs)
+        and its voice track becomes the voice alone, kept as a reference file of its own. The job keeps its own
+        settings, so making it again cleans the original track again."""
+        settings = job["settings"]
+        slot = (workflows.describe(wf).get("slots") or {}).get("voice_track")
+        given = (settings.get("refs") or {}).get(slot) if slot and settings.get("clean_voice") is True else None
+        if not given or not given.get("comfy_name"):
+            return settings
+        name = given["comfy_name"]
+        if not await offload(kept_reference, self.storage, name):
+            raise provider_base.RequestProblem("The voice track {} is missing: add it to the job again.".format(name))
+        tool = provider_router.local_tools(getattr(self.router, "settings", None))
+        if not ((await tool.installed()).get("separate_voice") or {}).get("ready"):
+            raise provider_base.RequestProblem("The voice can't be taken out of the music: voice separation is not set up "
+                                               "on this PC. Make it without that, or set it up (docs/servers.md).")
+        live["node"] = "Taking the voice out of the music (on this PC)"
+        self.notify(job["user_id"])
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self.tmp_dir) as tmp:
+            source = Path(tmp) / name
+            source.write_bytes(await offload(self.storage.read_bytes, REFERENCES, name))
+            made = await tool.run_now("separate_voice", {"audio": str(source)}, label="clean voice {}".format(job["id"]))
+            voice = await keep_reference(self.storage, "voice_" + Path(name).stem + ".wav", Path(made["voice.wav"]).read_bytes())
+        live["node"] = ""
+        return dict(settings, refs=dict(settings["refs"], **{slot: {"comfy_name": voice, "name": "the voice of {}".format(given.get("name") or "the track")}}))
+
+    async def _provider_files(self, adapter, secret, inputs):
+        """The job's `input` with each file ({"file": the studio's name}) uploaded to the provider and given as its
+        file id. The files are the studio's own copies (references.keep_reference)."""
+        async def one(value):
+            if isinstance(value, list):
+                return [await one(v) for v in value]
+            if not (isinstance(value, dict) and "file" in value):
+                return value
+            name = value["file"]
+            if not await offload(kept_reference, self.storage, name):
+                raise provider_base.RequestProblem("The file {} is missing: add it to the job again.".format(name))
+            data = await offload(self.storage.read_bytes, REFERENCES, name)
+            return await adapter.upload(secret, name=name, data=data)
+        return {name: await one(value) for name, value in inputs.items()}
 
     async def _send_inputs(self, settings, comfy):
         """Put the input files a render uses on the server it runs on (`comfy`), under the names the job calls them by.

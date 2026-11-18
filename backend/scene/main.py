@@ -18,8 +18,11 @@ from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddle
 
 from . import aftercare, backup, claude, claude_connection, endpoints, generation_models, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
 from .agent import Agent, AgentError
-from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, runs, shares, studio, workspace
+from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, providers as providers_api, runs, shares, studio, workspace
 from .catalog import Catalog
+from .providers import registry as provider_registry
+from .providers.router import Router
+from .providers.workflows import ProviderWorkflows
 from .comfy import workflows
 from .comfy.client import ComfyError
 from .config import load_settings
@@ -221,18 +224,23 @@ def create_app(settings=None):
     with as_everyone():
         vault.seal_stored(db)   # secrets saved before they were encrypted
     endpoints.seed(db, settings)   # the servers and APIs of the console's Servers section
+    provider_registry.seed(db, settings)   # the providers and keys (migration 0015), ComfyUI's kept in step with endpoints
     comfy_pool = endpoints.ComfyPool(db, settings.comfy_url)
     comfy = comfy_pool.main
     staff.configure(db)   # the console's roles as an admin last saved them
     catalog = Catalog(settings.path("workflows_dir"), comfy, storage / "cache" / "node_definitions.json")
+    catalog.providers = ProviderWorkflows(db)   # the providers' models, offered as workflows while the router is on
+    router = Router(db, settings, catalog, comfy_pool)   # which provider and key run each provider model
     credits = Credits(db, settings)
     # The agent tabs' Claude sessions run in a folder of the studio's storage that never changes (Claude Code finds a
-    # session by its folder), with the "api_key" connection; the LUFI bridge runs them in a folder of its own.
+    # session by its folder), with either connection (Claude on this PC, an API key).
     agent = Agent(settings.agent_model, services=list(filter(None, [
         claude.service(settings.claude_models, settings.claude_timeout, settings.claude_fast_model, storage / "claude-home",
                        settings.claude_context)])))
     claude_connection.apply(db, settings)   # how the studio reaches Claude Code, as an admin picked it in the console
     claude.GUARD = claude_connection.guard_for(db)
+    claude_connection.load_limits(db)   # the plan's limits as last reported, for the console's card
+    claude.ON_LIMITS = claude_connection.keep_limits(db)
     hub = Hub()
 
     def queue_counts():
@@ -301,6 +309,7 @@ def create_app(settings=None):
         app.state.jobs = JobManager(db, comfy, catalog, credits, app.state.outputs, notify, storage / "tmp", settings.node_path,
                                     storage / "assets")
         app.state.jobs.pool = comfy_pool
+        app.state.jobs.router = router   # the providers' models (and, in shadow mode, what it would pick for the rest)
         app.state.jobs.storage = app.state.storage   # where the files jobs use are kept (references.keep_reference)
         app.state.jobs.hold_offline = settings.hold_queue_offline
         app.state.jobs.agent = agent   # writes the captions some image models need, just before they render
@@ -313,7 +322,8 @@ def create_app(settings=None):
         app.state.plans.start()
         workers = [asyncio.create_task(app.state.jobs.run_forever()), asyncio.create_task(app.state.jobs.run_forever(local=True)),
                    asyncio.create_task(health.Watcher(app.state).run_forever()),   # alerts, sent while nobody watches
-                   asyncio.create_task(app.state.traces.langfuse.run_forever())]   # the agent's calls, to Langfuse when one is set
+                   asyncio.create_task(app.state.traces.langfuse.run_forever()),   # the agent's calls, to Langfuse when one is set
+                   asyncio.create_task(router.run_forever())]   # each provider key's whoami and models, every 10 minutes
         if settings.backup_keep > 0:
             copies = (db, app.state.backup_dir, settings.config_file, settings.backup_keep)
             if settings.backup_database:
@@ -341,6 +351,7 @@ def create_app(settings=None):
     app.state.tell_plans = app_tell_plans
     app.state.comfy = comfy
     app.state.comfy_pool = comfy_pool
+    app.state.router = router
     app.state.generation_models = generation_models.ModelList(comfy_pool)   # the generation server's models (its own list)
     app.state.catalog = catalog
     app.state.hub = hub
@@ -430,6 +441,7 @@ def create_app(settings=None):
     # The admin routes are not here: they are the admin console's, a site of its own (create_console).
     for module in (auth, studio, library, workspace, film_ops, film, runs, kit_api, bulk, mobile, shares, plans_api, client_errors):
         app.include_router(module.router)
+    app.include_router(providers_api.voices_router)   # the provider's voices, for any signed-in user (Create, the agent)
 
     built = settings.path("web_dist_dir").resolve()   # the web app's build (apps/web)
 
@@ -607,7 +619,7 @@ def create_console(studio):
     console.state = studio.state   # request.app.state is the studio's, whichever site the request came to
     _answer_errors(console)
     _guard(console)
-    for module in (console_api, admin):
+    for module in (console_api, admin, providers_api):
         console.include_router(module.router)
     console.include_router(client_errors.admin_router)   # the console's read of what browsers reported
     built = settings.path("web_dist_dir").resolve() / "console"   # a build of its own (apps/web), never in the studio's folder

@@ -98,7 +98,8 @@ def load_workflow(path, object_info=None, workflow_id=None, sidecar=None):
 
 
 GENERATION_NODES = ("GenerationVideo", "GenerationImage", "GenerationSpeech", "GenerationMusic", "GenerationSoundEffect",
-                    "GenerationLipsync", "GenerationUpscale")   # the generation server's own nodes: its models, not a workflow's
+                    "GenerationLipsync", "GenerationUpscale",   # the generation server's own nodes: its models, not a workflow's
+                    "ProviderJob")   # a provider's model offered as a workflow (providers/workflows.py): a model too
 DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
 WIDGET_TYPES = ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO")
 _UNBOUND = object()
@@ -495,7 +496,8 @@ def describe(wf):
         "size": size,
         "slots": slots,
         # A long video is made as several clips, each starting on the last frame of the one before.
-        "chain": "duration" in roles and "first_frame" in slots and "prompt" in roles,
+        # (A provider's model is chained clip by clip by the queue: jobs._run_provider_chain.)
+        "chain": "duration" in roles and "first_frame" in slots and "prompt" in roles and not profile.get("no_chain"),
         # It takes a seed: a new random one on every job, unless one is given (a fixed seed, "Reuse seed").
         "seeded": bool(targets) or "seed" in roles,
         "max_clips": MAX_CLIPS,

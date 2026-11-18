@@ -1429,6 +1429,14 @@ async def _planning(request, user, body, instruction, project):
         noted("bulb", "Read the craft notes for “{}”: {}".format(query[:60], ", ".join(n["title"] for n in found) or "none fits"))
         return agent.fit_result(craft_library.for_tool(query, tags), agent.TOOL_RESULT, "craft_search")
 
+    async def voices_tool(call):
+        found, words = await state.router.voices(call.get("query"), call.get("language"))
+        query = " ".join(str(call.get("query") or "").split())
+        noted("bulb", "Looked up voices{}: {}".format(" for “{}”".format(query[:60]) if query else "", len(found) if found else "none"))
+        if not found:
+            return words or "No voice fits: try other words, or none."
+        return agent.fit_result(json.dumps(found, ensure_ascii=False), agent.TOOL_RESULT, "voices")
+
     async def preset_search(call):
         query = " ".join(str(call.get("query") or "").split())
         noted("bulb", "Looked up presets for “{}”".format(query))
@@ -1906,7 +1914,7 @@ async def _planning(request, user, body, instruction, project):
              "render_html": render_html, "ffmpeg": ffmpeg_job, "import_url": import_url,
              "transcript": read_transcript, "timing": timing, "read_text": read_text, "read_skill": read_skill, "memory": memory_tool,
              "preset_search": preset_search, "craft_search": craft_search, "web_fetch": web_fetch, "skill_draft": skill_draft, "second_opinion": second_opinion,
-             "workflow_info": workflow_info}
+             "workflow_info": workflow_info, "voices": voices_tool}
     # Workflows in full only of the kinds the message (or the user's turn before it) is about: the rest go as one line each,
     # read in full with workflow_info (they were about 28,000 characters of every first message, the video models'
     # prompt guides most of it). A skill in use names what it needs: then every workflow goes in full, as before.

@@ -95,21 +95,21 @@ def test_the_database_check_says_how_long_it_took(client):
 # ---------------------------------------------------------------- health: the Claude connection works
 
 def test_a_claude_connection_that_does_not_work_is_a_problem_that_says_why(client, monkeypatch):
-    """The model's check is the connection's (claude_connection.status: the bridge's /health, or the API key), faked
+    """The model's check is the connection's (claude_connection.status: Claude Code's sign-in here, or the API key), faked
     here; test_claude_connection.py tests the check itself."""
     from scene import claude_connection
     register(client)
     state = client.app.state
 
-    async def status(run_claude=False):
+    async def status(run_claude=False, db=None):
         return dict(answer)
-    answer = {"mode": "lufi_bridge", "online": False, "detail": "Claude on LUFI is signed out: sign Claude Code in again on LUFI.",
+    answer = {"mode": "this_pc", "online": False, "detail": "Signed out. On this PC, run `claude`, then /login, then press Check.",
               "claude_version": "2.1.310", "signed_in": False, "key_works": None, "running": 0, "limit": 4, "testing": "x"}
     monkeypatch.setattr(claude_connection, "status", status)
     health.forget(state, "model")
     found = asyncio.run(health.problems(state))
     model = [p for p in found if p["key"] == "model"]
-    assert model and "Claude on LUFI is signed out" in model[0]["text"]
+    assert model and "Signed out. On this PC, run `claude`" in model[0]["text"]
     shown = console(client).get("/api/admin/system").json()["model_server"]
     assert shown["online"] is False and shown["signed_in"] is False and shown["models"] == ["claude/sonnet", "claude/haiku"]
 
@@ -123,7 +123,7 @@ def test_without_a_claude_or_a_key_the_model_says_what_to_do(client):
     register(client)
     health.forget(client.app.state, "model")
     shown = console(client).get("/api/admin/system").json()["model_server"]
-    assert shown["online"] is False and "not installed with the studio" in shown["detail"] and shown["mode"] == "api_key"
+    assert shown["online"] is False and "not installed on this PC" in shown["detail"] and shown["mode"] == "api_key"
 
 
 # ---------------------------------------------------------------- health: FFmpeg and HyperFrames

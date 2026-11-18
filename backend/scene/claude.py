@@ -1,24 +1,28 @@
-"""Claude as a model of the agent, through Claude Code: the `claude` program, run one of two ways, as an admin picks in
-the console ("Claude connection", claude_connection.py), and switched on the next call with no restart:
+"""Claude as a model of the agent, through Claude Code: the `claude` program of this PC, run here one of two ways, as an
+admin picks in the console (Servers & APIs → Providers, "The agent uses"; claude_connection.py), and switched on the
+next call with no restart:
 
-- "api_key": the `claude` installed with the studio (in its image; on a developer's PC, the one on PATH) runs here,
-  with an Anthropic API key in its environment (LocalProgram).
-- "lufi_bridge": the bridge on the PC LUFI runs the Claude Code signed in there, and the studio speaks to it over
-  Tailscale (BridgeProgram, docs/servers.md). For testing only, while its owner is the one user.
+- "this_pc" (Claude on this PC): with the account Claude Code is signed in with (a personal Claude subscription), and
+  never an API key, even one in the studio's environment.
+- "api_key": with an Anthropic API key in its environment.
+
+A run here is checked by claude_policy.py before it starts (its arguments and environment) and as it goes (each line
+of its stdin): Claude Code only answers, with none of this PC's own tools, settings or files.
 
 Each call runs `claude -p` once with Claude Code's own tools, settings, MCP servers and skills off (but its web search,
 when the agent may research: WEB_TOOLS): Claude only answers. The agent's tools, skills, questions and Approve all stay
 in the studio (agent.py), the same as with any other model.
 
-On the bridge, calls draw on its Claude account's usage limits (a five-hour and a seven-day window); with a key, on the
-key's rate limits. A call refused at a limit is AgentBusy in agent.py: the user is told when the limit lifts.
+On this PC's sign-in, calls draw on the Claude account's usage limits (a five-hour and a seven-day window, kept as last
+reported in LIMITS); with a key, on the key's rate limits. A call refused at a limit is AgentBusy in agent.py: the user
+is told when the limit lifts.
 
 A conversation of the studio is one session of Claude Code's (a thread, see agent.py): its first message carries
 everything, and each later one only what is new; Claude Code keeps the rest and its cache holds it, so the turns
 before are neither sent again by the studio nor read again at the full rate.
 
-A conversation's session runs in one folder that never changes (`home` here; the bridge's own folder on LUFI), since
-Claude Code finds a session by its folder. Its owner's memory is off in it, and it is compacted, still the same
+A conversation's session runs in one folder that never changes (`home`, with either connection), since Claude Code
+finds a session by its folder. Its owner's memory is off in it, and it is compacted, still the same
 session, when its context is COMPACT full (sessions.py)."""
 
 import asyncio
@@ -37,9 +41,7 @@ import time
 import uuid
 from pathlib import Path
 
-import httpx
-
-from . import guardrails
+from . import claude_policy, guardrails
 
 try:   # the Claude Agent SDK: every message of the agent runs in a live session of Claude Code (converse); service() refuses to start without it
     import claude_agent_sdk as sdk
@@ -65,23 +67,26 @@ NO_MEMORY = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}   # the owner's own notes o
 # status, a rate limit event, the error of an assistant message).
 LIMITED = re.compile(r"usage limit|rate.?limit|limit reached|out of (extra )?usage|overloaded|try again later|\b(429|529)\b", re.IGNORECASE)
 SIGNED_OUT = re.compile(r"\blog ?in\b|logged out|not signed|authenticat|oauth|invalid api key|\b401\b", re.IGNORECASE)
-API_KEY, LUFI_BRIDGE = "api_key", "lufi_bridge"   # the two connections (claude_connection.MODES)
+API_KEY, LOCAL_SIGNIN = "api_key", "this_pc"   # the connections (claude_connection.MODES)
 # How the studio reaches Claude now: claude_connection.apply() sets it from the console's choice (keys included, so it
-# is never sent to a page), read afresh by every call. The default: the studio's own `claude`, with no key.
-CONNECTION = {"mode": API_KEY, "api_key": "", "bridge_url": "", "bridge_key": ""}
+# is never sent to a page), read afresh by every call. The default: Claude on this PC, with no key.
+CONNECTION = {"mode": LOCAL_SIGNIN, "api_key": ""}
+# Variables that would make Claude Code use an API key or token instead of its sign-in: never given to it on this PC's
+# sign-in, so the subscription is what is used, and never a key that happens to be in the studio's environment.
+KEY_VARIABLES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 # Called before every call that runs Claude Code, or None: raises Failed when the user of the request may not use the
 # agent now (claude_connection.guard: only admins, while the studio tests on a personal subscription).
 GUARD = None
-NOT_INSTALLED = ("Claude Code is not installed with the studio: it is in the studio's image (Dockerfile); on a "
-                 "developer's PC, install it so `claude` is on PATH.")
-BRIDGE_UNREACHABLE = "The LUFI bridge is not reachable. Check that it runs on LUFI, and its address in Servers & APIs."
-BRIDGE_KEY_WRONG = "The bridge key is wrong. Paste the key the LUFI bridge shows in Servers & APIs, Claude connection."
+NOT_INSTALLED = ("Claude Code is not installed on this PC: install it (claude.ai/code), so `claude` is on PATH or in "
+                 "~/.local/bin.")
+NO_API_KEY = "Paste an Anthropic API key, or pick Claude on this PC, in Servers & APIs → Providers."
+SIGNED_OUT_HERE = "Signed out. Press Sign in on Claude on this PC, in Servers & APIs → Providers."
 
 
 def signed_out_said():
     """What the user is told when Claude Code is not signed in, by the connection in use."""
-    if CONNECTION.get("mode") == LUFI_BRIDGE:
-        return "Claude on LUFI is signed out: sign Claude Code in again on LUFI."
+    if CONNECTION.get("mode") == LOCAL_SIGNIN:
+        return "Claude Code on this PC is not signed in: press Sign in on Claude on this PC, in Servers & APIs → Providers."
     return ("Claude Code is not signed in: the Anthropic API key is missing or was refused. Check it in Servers & APIs, "
             "Claude connection.")
 
@@ -115,7 +120,7 @@ def failure(said="", limits=None, status=None, kind=None, default="Claude could 
         return Failed(signed_out_said())
     if kind == "billing_error":
         return Failed("Claude Code's account could not pay for this message: check its plan and extra usage on claude.ai."
-                      if CONNECTION.get("mode") == LUFI_BRIDGE else
+                      if CONNECTION.get("mode") != API_KEY else
                       "The Anthropic API key's account could not pay for this message: check its credit on console.anthropic.com.")
     if LIMITED.search(said):
         return Busy("Claude is at its usage limit{}".format(resets(limits)))
@@ -125,9 +130,15 @@ def failure(said="", limits=None, status=None, kind=None, default="Claude could 
 
 
 def find():
-    """The claude program the "api_key" connection runs: the one on PATH (installed in the studio's image; on a
-    developer's PC, theirs). "" when there is none."""
-    return shutil.which("claude") or ""
+    """The claude program a local connection runs: the one on PATH, else where Claude Code's own installer puts it
+    (~/.local/bin, not always on the PATH the studio starts with). "" when there is none."""
+    found = shutil.which("claude")
+    if found:
+        return found
+    for candidate in (Path.home() / ".local" / "bin" / "claude.exe", Path.home() / ".local" / "bin" / "claude"):
+        if candidate.is_file():
+            return str(candidate)
+    return ""
 
 
 def service(models, timeout=600, fast="", home="", window=WINDOW):
@@ -194,6 +205,20 @@ def prompt_of(messages):
 gate = None   # made on first use, inside the event loop that uses it
 
 
+@contextlib.asynccontextmanager
+async def answering():
+    """One of the PARALLEL places, held while a call to Claude runs (more wait their turn): the calls a subscription
+    takes at once are shared by everyone. RUNNING["answering"] counts the calls holding one, for the console's card."""
+    global gate
+    gate = gate or asyncio.Semaphore(PARALLEL)
+    async with gate:
+        RUNNING["answering"] += 1
+        try:
+            yield
+        finally:
+            RUNNING["answering"] -= 1
+
+
 async def ask(s, model, messages, schema, images=(), thread=None, web=False):
     """Ask Claude through Claude Code. Returns (the answer as JSON text, {"prompt", "cached", "answer"} tokens, the
     account's usage limits as Claude Code reported them or None). Raises Busy, Lost or Failed.
@@ -230,10 +255,10 @@ async def ask(s, model, messages, schema, images=(), thread=None, web=False):
         system += "\n\nAnswer with one JSON object and nothing else."
     # The system prompt goes as a file, since a long one does not fit on a Windows command line (files of _run). A call
     # of its own runs in an empty folder thrown away after, so no CLAUDE.md, settings or memory reach it; a thread runs
-    # in `home`, always the same, where Claude Code keeps its sessions. On the bridge, the bridge's folder is used.
+    # in `home`, always the same, where Claude Code keeps its sessions.
     args += ["--system-prompt-file", "@system_prompt"]
     where = s["home"] if thread is not None else None
-    async with gate:
+    async with answering():
         run = await _run(args, line, where, s["timeout"], {"system_prompt": system})
     got = read(run.stdout, run.stderr)
     if thread is not None:
@@ -244,15 +269,16 @@ async def ask(s, model, messages, schema, images=(), thread=None, web=False):
 Ran = collections.namedtuple("Ran", "stdout stderr code")
 
 
-async def _run(args, line, room, timeout, files=None):
+async def _run(args, line, room, timeout, files=None, program=None):
     """One run of Claude Code to its end, through the connection in use: `line` on its stdin, which is then closed.
     Returns what it printed (Ran). args: claude's arguments, without the program; files: {name: text} for the
-    arguments "@name" (_placed); room: the folder it runs in with the "api_key" connection (None: an empty one, thrown
-    away after). Raises Busy or Failed, also when it takes longer than `timeout` seconds."""
+    arguments "@name" (_placed); room: the folder it runs in with a local connection (None: an empty one, thrown
+    away after); program: the program to run instead of the connection's (a check of `claude -v`). Raises Busy or
+    Failed, also when it takes longer than `timeout` seconds."""
     with tempfile.TemporaryDirectory(prefix="scene-claude-") as spare:
         if room:
             Path(room).mkdir(parents=True, exist_ok=True)
-        program = connected()
+        program = program or connected()
         out, err = [], []
 
         async def whole():
@@ -285,6 +311,7 @@ def read(stdout, stderr=""):
             continue
         if event.get("type") == "rate_limit_event" and isinstance(event.get("rate_limit_info"), dict):
             limits = event["rate_limit_info"]
+            note_limits(limits)
         elif event.get("type") == "result":
             result = event
     return judged(result, limits, " ".join([str(stderr or "")] + [line for line in str(stdout or "").splitlines() if not line.startswith("{")]))
@@ -309,9 +336,9 @@ def judged(result, limits, printed="", kind=None):
             "tokens": tokens, "limits": limits, "session": result.get("session_id"), "size": size}
 
 
-# ---------------------------------------------------------------- one run of `claude`, whichever way it is reached
+# ---------------------------------------------------------------- one run of `claude`
 #
-# Every run of Claude Code goes through a program of the connection in use (connected()): a call of its own (ask), a
+# Every run of Claude Code goes through a program of the connection in use (connected(), a LocalProgram): a call of its own (ask), a
 # command (command) and a live session (the SDK's Transport, _Through). A program is started with claude's arguments,
 # without the program's name, and with files given as text ({"system_prompt": ...}, named "@system_prompt" in the
 # arguments); it is written to, its stdin closed, and its output read, a piece at a time, as ("stdout" | "stderr", text),
@@ -319,7 +346,6 @@ def judged(result, limits, printed="", kind=None):
 
 PIECE = 65536      # bytes of its output read at a time
 LET_GO = 5         # seconds a program has to end once its stdin is closed (it writes its session's file), before it is ended
-BRIDGE_WAIT = 10   # seconds the bridge has to answer an HTTP call or open a run
 RUNNING = collections.Counter()   # "now": the programs running for this studio (the console's Claude connection card)
 RUN_WITH = ()      # what runs the claude program: nothing, it is one (the tests' fake claude is a Python script: Python)
 
@@ -336,35 +362,13 @@ def connection_mark():
 
 
 def connected():
-    """A program of the connection in use (CONNECTION), not started yet."""
-    if CONNECTION.get("mode") == LUFI_BRIDGE:
-        if not CONNECTION.get("bridge_url"):
-            raise Failed("The LUFI bridge has no address yet: set it in Servers & APIs, Claude connection.")
-        return BridgeProgram(CONNECTION["bridge_url"], CONNECTION.get("bridge_key") or "")
-    return LocalProgram(CONNECTION.get("api_key") or "")
-
-
-def split_flags(args):
-    """The arguments with each "--flag=value" made two, "--flag" and "value" (the SDK's own form for --resume and
-    --setting-sources), as the bridge takes them."""
-    found = []
-    for arg in args:
-        if arg.startswith("--") and "=" in arg:
-            found += arg.split("=", 1)
-        else:
-            found.append(arg)
-    return found
-
-
-def start_frame(args, files=None, env=None):
-    """The bridge's first frame of a run: claude's arguments (split_flags) without "--system-prompt-file @system_prompt",
-    which the bridge refuses, and the system prompt's text in "system_prompt" (null without one), which the bridge
-    writes to a file of its own and gives claude."""
-    args, system = split_flags(args), (files or {}).get("system_prompt")
-    if "--system-prompt-file" in args:
-        at = args.index("--system-prompt-file")
-        del args[at:at + 2]
-    return {"type": "start", "args": args, "system_prompt": system, "env": dict(env or {})}
+    """A program of the connection in use (CONNECTION), not started yet. The API key connection with no key is refused,
+    never run on whatever account Claude Code here is signed in with: a subscription is used only when it is picked."""
+    if CONNECTION.get("mode") == API_KEY:
+        if not CONNECTION.get("api_key"):
+            raise Failed(NO_API_KEY)
+        return LocalProgram(CONNECTION["api_key"])
+    return LocalProgram(api_key="")   # Claude on this PC: its sign-in
 
 
 def _placed(args, files, folder):
@@ -380,26 +384,46 @@ def _placed(args, files, folder):
     return placed
 
 
+def refused(error):
+    """A call claude_policy.py refused, as the studio says it: a bug in how the studio builds the call, never the user's."""
+    return Failed("The studio would not let this through to Claude Code ({}). That is a bug in how the studio builds the "
+                  "call: see claude_policy.py.".format(error))
+
+
 class LocalProgram:
-    """Claude Code run here: the `claude` on PATH (find), with the connection's API key, when it has one, in its
-    environment. Without one (a developer's PC), it uses whatever account that Claude Code is signed in with."""
+    """Claude Code run here: the `claude` of this PC (find). With an API key (the "api_key" connection), the key is put
+    in its environment; without one (Claude on this PC), every key or token variable is taken out of it (KEY_VARIABLES),
+    so it uses the account it is signed in with. Either way claude_policy.py checks its arguments and environment
+    before it starts and each line written to its stdin; a control request it refuses is answered here, on claude's
+    stdout at a line's end, and the session goes on."""
 
     def __init__(self, api_key=""):
         self.api_key, self.process, self.code, self.folder, self.readers = api_key, None, None, None, []
         self.pieces = asyncio.Queue()
+        self.plan, self.pending = None, ""
+        self.mid_line, self.answers = False, []   # claude's stdout stopped inside a line; answers waiting for its end
 
     async def start(self, args, files=None, env=None, cwd=None):
         program = find()
         if not program:
             raise Failed(NOT_INSTALLED)
         self.folder = tempfile.mkdtemp(prefix="scene-claude-files-")
+        try:
+            placed = _placed(args, files, self.folder)
+            self.plan = claude_policy.parse(placed, prompt_folder=self.folder)
+            extra = claude_policy.environment(env)
+        except claude_policy.Refused as error:
+            shutil.rmtree(self.folder, ignore_errors=True)
+            raise refused(error)
         environment = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}   # the studio may itself be started from Claude Code
-        environment.update(env or {})
+        environment.update(extra)
+        for name in KEY_VARIABLES:
+            environment.pop(name, None)
         if self.api_key:
             environment["ANTHROPIC_API_KEY"] = self.api_key
         try:
             self.process = await asyncio.create_subprocess_exec(
-                *RUN_WITH, program, *_placed(args, files, self.folder), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                *RUN_WITH, program, *placed, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=cwd or None, env=environment,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as error:
@@ -415,18 +439,55 @@ class LocalProgram:
             text = decoder.decode(chunk, final=not chunk)
             if text:
                 await self.pieces.put((name, text))
+                if name == "stdout":
+                    self.mid_line = not text.endswith("\n")
+                    if not self.mid_line:
+                        await self._answered()
             if not chunk:
+                if name == "stdout":
+                    self.mid_line = False
+                    await self._answered()
                 await self.pieces.put((name, None))
                 return
 
+    async def _answered(self):
+        """The answers to refused control requests, put in claude's stdout now that it is at a line's end."""
+        while self.answers:
+            await self.pieces.put(("stdout", self.answers.pop(0)))
+
     async def write(self, text):
+        """Write to claude's stdin, a whole line at a time, each as claude_policy.stdin_line lets it through."""
+        if self.plan is not None and not self.plan.stream_input and text:
+            raise refused("this run takes no stdin")
+        self.pending += text
+        while "\n" in self.pending:
+            line, self.pending = self.pending.split("\n", 1)
+            if len(line) > claude_policy.MAX_LINE:
+                raise refused("a stdin line is longer than {} MiB".format(claude_policy.MAX_LINE // 2 ** 20))
+            await self._line(line + "\n")
+
+    async def _line(self, line):
         try:
-            self.process.stdin.write(text.encode("utf-8"))
+            forward, answer = claude_policy.stdin_line(line)
+        except claude_policy.Refused as error:
+            raise refused(error)
+        if answer is not None:
+            if self.mid_line:
+                self.answers.append(answer)
+            else:
+                await self.pieces.put(("stdout", answer))
+        if forward is None:
+            return
+        try:
+            self.process.stdin.write(forward.encode("utf-8"))
             await self.process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):   # it has ended: its output says why
             pass
 
     async def end_input(self):
+        if self.pending:   # a last line with no newline
+            line, self.pending = self.pending, ""
+            await self._line(line)
         if self.process is not None and not self.process.stdin.is_closing():
             self.process.stdin.close()
 
@@ -459,151 +520,6 @@ class LocalProgram:
             for reader in self.readers:
                 reader.cancel()
             shutil.rmtree(self.folder, ignore_errors=True)
-
-
-def bridge_refused(code, message=""):
-    """The exception for a refusal of the bridge (its error frame's code, docs/servers.md), in the studio's words."""
-    said = " ".join(str(message or "").split())[:300]
-    if code == "busy":
-        return Busy("Claude on LUFI is running as many calls as it takes at once. Try again in a moment.")
-    if code == "not_signed_in":
-        return Failed("Claude on LUFI is signed out: sign Claude Code in again on LUFI.")
-    if code in ("bad_key", "locked"):
-        return Failed(BRIDGE_KEY_WRONG)
-    if code == "off":
-        return Failed("The LUFI bridge is switched off. Switch it on on LUFI, or pick the API key connection.")
-    if code == "timeout":
-        return Failed("The LUFI bridge stopped Claude Code: it ran longer than the bridge allows.")
-    if code in ("refused", "refused_flag"):
-        return Failed("The LUFI bridge refused how the studio starts Claude Code ({}). The studio and the bridge must "
-                      "follow the same contract: update the older one.".format(said or "a flag"))
-    return Failed("The LUFI bridge could not run Claude Code: {}".format(said or code or "no reason given"))
-
-
-def bridge_address(url, path):
-    """The bridge's address for `path`: http(s) as given, ws(s) for /run."""
-    url = str(url or "").strip().rstrip("/")
-    if "://" not in url:
-        url = "http://" + url
-    if path == "/run":
-        url = "ws" + url[len("http"):] if url.startswith("http") else url
-    return url + path
-
-
-EOF = {"type": "eof"}   # the frame that closes claude's stdin on LUFI
-STREAMS = {b"\x01": "stdout", b"\x02": "stderr"}   # the first byte of a binary frame from the bridge: which output it is
-
-
-def bridge_headers(key):
-    return {"Authorization": "Bearer " + str(key or "")}
-
-
-class BridgeProgram:
-    """Claude Code on LUFI, run by its bridge: one WebSocket to /run for each run (the protocol of docs/servers.md).
-    Arguments go as the bridge takes them (split_flags), files as text, and only the "no memory" variables (NO_MEMORY):
-    never a key. Closing the socket ends the run on LUFI."""
-
-    def __init__(self, url, key):
-        self.url, self.key, self.socket, self.code = url, key, None, None
-        self.exited = asyncio.Event()
-
-    async def start(self, args, files=None, env=None, cwd=None):
-        from websockets.asyncio.client import connect
-        from websockets.exceptions import InvalidHandshake, InvalidStatus, InvalidURI
-        try:
-            self.socket = await connect(bridge_address(self.url, "/run"), additional_headers=bridge_headers(self.key), proxy=None,
-                                        open_timeout=BRIDGE_WAIT, max_size=None, ping_interval=20, ping_timeout=60)
-        except InvalidStatus as error:
-            raise Failed(BRIDGE_KEY_WRONG if error.response.status_code in (401, 403) else BRIDGE_UNREACHABLE)
-        except (OSError, asyncio.TimeoutError, InvalidHandshake, InvalidURI, ValueError):
-            raise Failed(BRIDGE_UNREACHABLE)
-        RUNNING["now"] += 1
-        await self._send(start_frame(args, files, env))
-
-    async def _send(self, frame):
-        """A frame to the bridge: a dict as JSON text, bytes as they are (claude's stdin)."""
-        from websockets.exceptions import ConnectionClosed
-        try:
-            await self.socket.send(frame if isinstance(frame, bytes) else json.dumps(frame, ensure_ascii=False))
-        except ConnectionClosed:   # the bridge ended the run: its last frames say why
-            pass
-
-    async def write(self, text):
-        await self._send(text.encode("utf-8"))
-
-    async def end_input(self):
-        if self.socket is not None and not self.exited.is_set():
-            await self._send(EOF)
-
-    async def output(self):
-        """claude's output as the bridge relays it: binary frames, the first byte saying stdout (1) or stderr (2), each
-        stream decoded on its own (a character can be split across frames); text frames for started, exit and error."""
-        from websockets.exceptions import ConnectionClosed
-        decoders = {name: codecs.getincrementaldecoder("utf-8")(errors="replace") for name in STREAMS.values()}
-        try:
-            async for raw in self.socket:
-                if isinstance(raw, bytes):
-                    name = STREAMS.get(raw[:1])
-                    text = decoders[name].decode(raw[1:]) if name else ""
-                    if text:
-                        yield name, text
-                    continue
-                try:
-                    frame = json.loads(raw)
-                except ValueError:
-                    continue
-                kind = frame.get("type") if isinstance(frame, dict) else None
-                if kind == "exit":
-                    for name, decoder in decoders.items():
-                        if rest := decoder.decode(b"", final=True):
-                            yield name, rest
-                    self.code = frame.get("code") if isinstance(frame.get("code"), int) else -1
-                    self.exited.set()
-                    return
-                elif kind == "error":
-                    self.exited.set()
-                    raise bridge_refused(frame.get("code"), frame.get("error") or frame.get("message"))
-        except ConnectionClosed:
-            pass
-        self.exited.set()
-        raise Failed("The LUFI bridge ended the run before Claude Code finished. " + BRIDGE_UNREACHABLE)
-
-    async def stop(self):
-        socket, self.socket = self.socket, None
-        if socket is None:
-            return
-        try:
-            if not self.exited.is_set():   # its session's file is written as it ends: a moment for that, then it is ended
-                with contextlib.suppress(Exception):
-                    await socket.send(json.dumps(EOF))
-                with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(self.exited.wait(), LET_GO)
-        finally:
-            RUNNING["now"] -= 1
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(socket.close(), LET_GO)
-
-
-def bridge_call(method, path, json_body=None):
-    """An HTTP call to the bridge (/health, /forget) with its key: the answer's JSON. Raises Failed when it can't be
-    reached or refuses the key."""
-    try:
-        with httpx.Client(timeout=BRIDGE_WAIT, trust_env=False) as http:
-            answer = http.request(method, bridge_address(CONNECTION.get("bridge_url"), path),
-                                  headers=bridge_headers(CONNECTION.get("bridge_key")), json=json_body)
-    except httpx.HTTPError:
-        raise Failed(BRIDGE_UNREACHABLE)
-    if answer.status_code in (401, 403):
-        raise Failed(BRIDGE_KEY_WRONG)
-    try:
-        found = answer.json()
-    except ValueError:
-        found = None
-    if not isinstance(found, dict):
-        raise Failed(BRIDGE_UNREACHABLE)
-    if found.get("type") == "error":
-        raise bridge_refused(found.get("code"), found.get("message"))
-    return found
 
 
 # ---------------------------------------------------------------- live sessions
@@ -919,7 +835,7 @@ async def _turn(entry, text, quiet=0):
     """One message to the live session; returns (its result as a result event, the last rate limit event). quiet: see
     _next."""
     result, limits = None, None
-    async with gate:
+    async with answering():
         entry.heard, entry.error_kind = time.monotonic(), None
         await entry.client.query(text)
         stream = entry.client.receive_response().__aiter__()
@@ -933,6 +849,7 @@ async def _turn(entry, text, quiet=0):
             if isinstance(message, sdk.RateLimitEvent):
                 info = message.rate_limit_info
                 limits = dict(info.raw or {"status": info.status, "resetsAt": info.resets_at})
+                note_limits(limits)
             elif isinstance(message, sdk.ResultMessage):
                 result = {"type": "result", "subtype": message.subtype, "is_error": message.is_error, "session_id": message.session_id,
                           "result": message.result or " ".join(message.errors or []), "structured_output": message.structured_output,
@@ -1084,12 +1001,13 @@ async def command(s, thread, text):
                 entry.users -= 1
     if not thread.get("id"):
         raise Failed("This conversation has no Claude session yet.")
-    # The command goes on stdin, as a message of the session, never as an argument: the bridge takes flags only.
+    # The command goes on stdin, as a message of the session, never as an argument (claude_policy takes a prompt on the
+    # command line only for these commands, and the SDK sends them so too).
     args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", thread["id"],
             "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--settings", session_settings(s)]
     # As the SDK sends one to a live session (query("/compact")): a message whose content is the command's text.
     line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}, ensure_ascii=False)
-    async with gate:
+    async with answering():
         run = await _run(args, line, s["home"], s["timeout"])
     done, session = None, thread["id"]
     for raw in str(run.stdout or "").splitlines():
@@ -1130,22 +1048,70 @@ async def rename(s, thread, title):
 
 
 def forget(s, session):
-    """Remove the file Claude Code keeps a thread's session in (the conversation was deleted): on the bridge, by its
-    /forget; here, from where Claude Code files a session: under its folder's path, every character but letters and
-    digits made a dash, in its own home (~/.claude, or CLAUDE_CONFIG_DIR). It waits on the network or the disk: run it
-    off the event loop (asyncio.to_thread)."""
+    """Remove the file Claude Code keeps a thread's session in (the conversation was deleted), from where Claude Code
+    files a session: under its folder's path, every character but letters and digits made a dash, in its own home
+    (~/.claude, or CLAUDE_CONFIG_DIR). It waits on the disk: run it off the event loop (asyncio.to_thread)."""
     if not s or not re.fullmatch(r"[0-9A-Za-z-]{8,64}", str(session or "")):
-        return
-    if CONNECTION.get("mode") == LUFI_BRIDGE:
-        try:
-            bridge_call("POST", "/forget", {"session_id": session})
-        except (Busy, Failed) as error:   # it stays on LUFI: nothing reads it again
-            print("A Claude session on LUFI was not forgotten: {}".format(error))
         return
     kept = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects" / re.sub(
         r"[^A-Za-z0-9]", "-", str(Path(s["home"]).resolve()))
     (kept / (session + ".jsonl")).unlink(missing_ok=True)
     shutil.rmtree(kept / session, ignore_errors=True)
+
+
+# ---------------------------------------------------------------- the plan's limits
+#
+# On a Claude subscription, Claude Code reports how much of the plan is used in its rate_limit_event: the 5-hour session
+# and the week, each a utilization (0..1) and when it resets. The last seen of each window is kept here, for the
+# console's card (claude_connection.status), and handed to ON_LIMITS, which keeps it in the database so it is there
+# after a restart and in the app's other processes. Ported from the SceneCloude bridge (usage.Ledger.limits).
+
+LIMITS = {}        # a window's name ("five_hour", "seven_day") -> {"utilization", "status", "resets_at", "seen"}
+ON_LIMITS = None   # called with LIMITS whenever they change (claude_connection.keep_limits), or None
+
+
+def fraction(value):
+    """Claude Code reports utilization as 0..1; a percentage is taken too."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return round(value / 100 if value > 1 else value, 4)
+
+
+def note_limits(info):
+    """Keep what a rate_limit_info says of each window: all of them (unifiedWindows), or at least the one it is about."""
+    if not isinstance(info, dict):
+        return
+    now = time.time()
+    windows = info.get("unifiedWindows") if isinstance(info.get("unifiedWindows"), dict) else {}
+    for name, window in windows.items():
+        if isinstance(window, dict):
+            LIMITS[str(name)[:40]] = {"utilization": fraction(window.get("utilization")), "status": str(window.get("status") or "")[:20],
+                                      "resets_at": window.get("resetsAt") or window.get("resets_at"), "seen": now}
+    name = info.get("rateLimitType")
+    if isinstance(name, str) and name not in windows:
+        before = LIMITS.get(name[:40], {})
+        LIMITS[name[:40]] = {"utilization": fraction(info.get("utilization")) if "utilization" in info else before.get("utilization"),
+                             "status": str(info.get("status") or "")[:20], "resets_at": info.get("resetsAt"), "seen": now}
+    if ON_LIMITS is not None:
+        try:
+            ON_LIMITS(dict(LIMITS))
+        except Exception as error:   # the card's numbers only: a failure to keep them never stops a call
+            print("The plan's limits were not kept: {}".format(error))
+
+
+def plan_windows(kept=None):
+    """{"session", "week"}: the 5-hour window and the week as last reported, {"utilization", "resets_at"}, or None
+    until a call has reported one. A window whose reset time has passed shows as 0, with no reset time."""
+    kept, now, found = LIMITS if kept is None else kept, time.time(), {}
+    for window, called in (("five_hour", "session"), ("seven_day", "week")):
+        seen = kept.get(window)
+        if not isinstance(seen, dict):
+            found[called] = None
+            continue
+        passed = isinstance(seen.get("resets_at"), (int, float)) and seen["resets_at"] < now
+        found[called] = {"utilization": 0.0 if passed else seen.get("utilization"),
+                         "resets_at": None if passed else seen.get("resets_at")}
+    return found
 
 
 def resets(limits):

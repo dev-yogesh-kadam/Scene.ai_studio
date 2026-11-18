@@ -1,6 +1,5 @@
 """Whether the studio is well: its database, its render server (ComfyUI), the agent's model (Claude, through Claude Code
-by the connection in use: the API key works, or the LUFI bridge answers and is signed in; claude_connection.py), the
-programs it renders and edits with (FFmpeg, HyperFrames for motion graphics), its disk, its backups, its queue and the
+by the connection in use: Claude Code here is signed in, or the API key works; claude_connection.py), the programs it renders and edits with (FFmpeg, HyperFrames for motion graphics), its disk, its backups, its queue and the
 sending of the agent's calls to Langfuse (`langfuse`).
 
 `problems` says what is wrong right now; the admin console's Overview lists it. The `Watcher` asks it every minute
@@ -169,7 +168,7 @@ def creative(state):
 async def model_server(state, fresh=False):
     """The agent's model: Claude, through Claude Code by the connection in use. claude_connection.status() ({"mode",
     "online", "detail", "claude_version", "signed_in", "key_works", "running", "limit", ...}) with "url": where Claude
-    Code runs (the bridge's address, or the claude program here), "models", "limits": its usage as last reported,
+    Code runs (the claude program here), "models", "limits": its usage as last reported,
     "since"."""
     return dict(await remembered(state, "model", lambda: _model_server(state), fresh))
 
@@ -178,12 +177,11 @@ async def _model_server(state):
     agent = state.agent
     s = agent.services.get("claude")
     if s and s.get("models"):
-        found = await claude_connection.status()
+        found = await claude_connection.status(db=state.db)
     else:
         found = {"mode": claude.CONNECTION.get("mode"), "online": False, "detail": "claude_models is empty in config.json: the agent has no model."}
     _mark(state.model_seen, found["online"])
-    where = claude.CONNECTION.get("bridge_url") if found["mode"] == claude.LUFI_BRIDGE else claude.find()
-    return dict(found, url=where or "", models=["claude/" + m for m in (s or {}).get("models", [])], limits=agent.claude_limits,
+    return dict(found, url=claude.find(), models=["claude/" + m for m in (s or {}).get("models", [])], limits=agent.claude_limits,
                 since=state.model_seen["since"])
 
 

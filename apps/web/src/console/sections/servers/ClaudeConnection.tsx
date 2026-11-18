@@ -1,27 +1,24 @@
-// The Servers section's Claude connection card: how the studio reaches Claude Code, an Anthropic API key or the LUFI
-// bridge, picked and keyed here and used from the next call to Claude, with no restart. A key is never shown or sent
-// back: a blank key field keeps the one there is. Once saved it reads like the other servers' cards (the address, how it
-// is, Edit and Test); Edit opens the form. See backend/scene/claude_connection.py and docs/servers.md.
+// Servers & APIs → Providers: the card of Claude on this PC (ClaudeOnThisPC), and what /api/admin/claude-connection
+// answers (backend/scene/api/admin.py, claude_connection.py): the connection picked (never a key, only whether there
+// is one) and how it is now. Which provider the agent uses is picked in Providers.tsx ("The agent uses"); an Anthropic
+// API key is added there like any provider's key. See docs/servers.md, "Claude on this PC".
 
 import { useState } from 'react';
 import { api } from '../../../common/api';
-import { Field } from '../../../common/components/AuthForm';
-import { Segmented } from '../../../common/components/Segmented';
 import { useNotice } from '../shared/context';
 import { Notice } from '../shared/ui';
+import { Field } from '../../../common/components/AuthForm';
 import { classesOf } from '../../../common/cx';
 import css0 from '../../../common/components/Shared.module.css';
 import css1 from '../../../common/components/Shared2.module.css';
 import css2 from '../../../common/components/Shared3.module.css';
 import css3 from '../../../studio/pages/create/CreatePage.module.css';
 import css4 from './Servers.module.css';
-import { MODE_NAMES, claudeWords, type ClaudeStatus } from './claude';
+import { runningWords, signInWords, usageWords, type ClaudeStatus } from './claude';
 const css = classesOf(css0, css1, css2, css3, css4);
 
 export type Connection = {
-  mode: string;
-  bridge_url: string;
-  has_bridge_key: boolean;
+  mode: string; // "this_pc" or "api_key"
   has_api_key: boolean;
   fixed: string[]; // the settings an environment variable sets (SCENE_*): shown, not changed here
   testing: string;
@@ -29,198 +26,170 @@ export type Connection = {
 export type ConnectionData = { connection: Connection; status: ClaudeStatus; test?: ClaudeStatus };
 
 const PATH = '/api/admin/claude-connection';
-const KEPT = 'Kept unless you type a new one';
 
-export function ClaudeConnectionCard({
-  data,
+/** Servers & APIs → Providers' card of Claude on this PC: no key and no address. How Claude Code here is signed in,
+ * how much of the plan's 5-hour window and week is used (as the last call reported it), the calls running, and Check,
+ * which asks Claude Code's sign-in again now (no call to Claude, nothing spent). Sign in (Switch account when signed
+ * in) opens the claude.com sign-in page and takes the code it shows; Sign out signs Claude Code here out. */
+export function ClaudeOnThisPC({
+  name,
+  inUse,
+  status,
+  testing,
   refresh,
-  adding = 0,
 }: {
-  data: ConnectionData;
+  name: string;
+  inUse: boolean; // the agent uses it: status is its own
+  status?: ClaudeStatus; // the connection in use, from /api/admin/claude-connection
+  testing: string;
   refresh: () => Promise<void>;
-  adding?: number; // counts the section's Add presses: each opens the form on the other way to reach Claude
 }) {
-  const [shown, setShown] = useState(data); // what the last save or test answered, until the section is asked again
-  const [from, setFrom] = useState(data);
-  if (from !== data) {
-    setFrom(data);
-    setShown(data);
+  const [checked, setChecked] = useState<ClaudeStatus | null>(null);
+  const [from, setFrom] = useState(status);
+  if (from !== status) {
+    setFrom(status);
+    setChecked(null);
   }
-  const c = shown.connection;
-  const [mode, setMode] = useState(c.mode);
-  const [url, setUrl] = useState(c.bridge_url);
-  const [bridgeKey, setBridgeKey] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [working, setWorking] = useState('');
-  // Saved: the way picked has what it needs. Then the form opens only on Edit.
-  const saved = c.mode === 'api_key' ? c.has_api_key : !!c.bridge_url && c.has_bridge_key;
-  const [editing, setEditing] = useState(!saved);
-  const [added, setAdded] = useState(adding);
-  if (added !== adding) {
-    setAdded(adding);
-    setEditing(true);
-    setMode(c.mode === 'api_key' ? 'lufi_bridge' : 'api_key');
-  }
+  const [working, setWorking] = useState(false);
+  const [link, setLink] = useState(''); // the claude.com page of a sign-in waiting for its code
+  const [code, setCode] = useState('');
+  const [signing, setSigning] = useState('');
   const { notice, run } = useNotice();
-  const fixed = (name: string) => c.fixed.includes(name);
-  const status = shown.status;
-
-  const act = (label: string, work: () => Promise<ConnectionData>, said: (d: ConnectionData) => string) =>
+  const s = checked ?? status ?? {};
+  const busy = working || !!signing;
+  const signIn = () =>
     run(async () => {
-      setWorking(label);
+      setSigning('Starting…');
       try {
-        const got = await work();
-        setShown(got);
-        if (label === 'Saving…') setEditing(false);
-        setBridgeKey('');
-        setApiKey('');
-        await refresh(); // the Overview and System sections show it too
-        return said(got);
+        const got = await api<{ link: string }>(PATH + '/signin', { method: 'POST' });
+        setLink(got.link);
+        setCode('');
+        window.open(got.link, '_blank', 'noopener');
+        return 'Sign in on the claude.com page that opened, then paste its code here.';
       } finally {
-        setWorking('');
+        setSigning('');
       }
     });
-  const save = () => {
-    const json: Record<string, string> = {};
-    if (!fixed('claude_connection')) json.mode = mode;
-    if (mode === 'lufi_bridge' && !fixed('claude_bridge_url')) json.bridge_url = url.trim();
-    if (bridgeKey.trim()) json.bridge_key = bridgeKey.trim();
-    if (apiKey.trim()) json.api_key = apiKey.trim();
-    return act(
-      'Saving…',
-      () => api<ConnectionData>(PATH, { method: 'PUT', json }),
-      () => 'Saved: in use from the next call.',
-    );
+  const sendCode = () =>
+    run(async () => {
+      setSigning('Signing in…');
+      try {
+        const got = await api<ConnectionData>(PATH + '/signin/code', { method: 'POST', json: { code: code.trim() } });
+        setLink('');
+        setCode('');
+        setChecked(got.status);
+        await refresh();
+        return 'Signed in' + (got.status.account ? ' as ' + got.status.account : '') + '.';
+      } finally {
+        setSigning('');
+      }
+    });
+  const cancel = () => {
+    setLink('');
+    setCode('');
+    void api(PATH + '/signin', { method: 'DELETE' }).catch(() => undefined);
   };
-  const test = () =>
-    act(
-      'Testing…',
-      () => api<ConnectionData>(PATH + '/test', { method: 'POST' }),
-      (d) =>
-        d.test?.online
-          ? 'It works: ' + claudeWords(d.test) + '.'
-          : 'It does not work: ' + (d.test?.detail || 'no reason given'),
-    );
-
+  const signOut = () =>
+    run(async () => {
+      if (!window.confirm('Sign Claude Code on this PC out? The agent stops until someone signs in again.')) return;
+      setSigning('Signing out…');
+      try {
+        const got = await api<ConnectionData>(PATH + '/signout', { method: 'POST' });
+        setChecked(got.status);
+        await refresh();
+        return 'Signed out.';
+      } finally {
+        setSigning('');
+      }
+    });
+  const check = () =>
+    run(async () => {
+      setWorking(true);
+      try {
+        const got = await api<ConnectionData>(PATH + '/test', { method: 'POST' });
+        setChecked(got.test ?? got.status);
+        await refresh();
+        return got.test?.online ? 'Checked: it works.' : 'Checked: ' + (got.test?.detail || 'it does not work.');
+      } finally {
+        setWorking(false);
+      }
+    });
   return (
-    <div className={css('card')}>
+    <div className={css('card')} data-testid="claude-on-this-pc">
       <div className={css('card-head')} style={{ justifyContent: 'flex-start', gap: 10 }}>
-        <span className={css('dot ' + (status.online ? 'online' : 'offline'))} />
-        <h2>{MODE_NAMES[c.mode] ?? 'Claude connection'}</h2>
-        {c.testing ? <span className={css('pill')}>{c.testing}</span> : null}
+        <span className={css('dot ' + (inUse ? (s.online ? 'online' : 'offline') : ''))} />
+        <h2>{name}</h2>
+        {inUse ? <span className={css('pill')}>The agent uses it</span> : null}
+        {inUse && testing ? <span className={css('pill')}>{testing}</span> : null}
       </div>
-      <p className="small" data-testid="claude-status">
-        {status.online ? claudeWords(status) : 'Not working: ' + (status.detail || 'not checked yet')}
-      </p>
-      {c.testing ? (
-        <p className="muted small">
-          While the LUFI bridge is picked, sign-up is closed and only admins can use the agent. Picking the API key
-          lifts both.
-        </p>
-      ) : null}
-      {editing ? null : (
+      {inUse ? (
         <>
-          <div className={css('endpoint-url')}>
-            <code>{c.mode === 'api_key' ? 'Anthropic API key · kept' : c.bridge_url}</code>
-            {c.mode === 'api_key' ? null : (
-              <button className="btn small quiet" onClick={() => void navigator.clipboard.writeText(c.bridge_url)}>
-                Copy
-              </button>
-            )}
-          </div>
+          <p className={'small' + (s.online ? '' : ' error')} data-testid="claude-signin">
+            {signInWords(s)}
+          </p>
+          <p className="muted small" data-testid="claude-usage">
+            {usageWords(s)}
+          </p>
+          <p className="muted small">{runningWords(s)}</p>
           <Notice notice={notice} />
-          <div className="row">
-            <button className="btn small" onClick={() => setEditing(true)}>
-              Edit
-            </button>
-            <button className="btn small" disabled={!!working} onClick={() => void test()}>
-              {working === 'Testing…' ? working : 'Test'}
-            </button>
-          </div>
-        </>
-      )}
-      {editing ? (
-        <>
-          <div className="field">
-            <div className="label">Connection</div>
-            <Segmented
-              choices={Object.entries(MODE_NAMES).map(([id, label]) => ({ id, label }))}
-              current={mode}
-              onPick={(id) => {
-                if (!fixed('claude_connection')) setMode(id);
-              }}
-            />
-          </div>
-          {/* No autofill: a browser would put the console's sign-in email and password in the address and the keys. */}
-          {mode === 'api_key' ? (
-            <Field label="Anthropic API key">
-              <input
-                type="password"
-                autoComplete="new-password"
-                disabled={fixed('anthropic_api_key')}
-                placeholder={
-                  fixed('anthropic_api_key') ? 'Set by SCENE_ANTHROPIC_API_KEY' : c.has_api_key ? KEPT : 'sk-ant-…'
-                }
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
-            </Field>
-          ) : (
-            <div className={css('grid2')}>
-              <Field label="Bridge address">
+          {link ? (
+            <div data-testid="claude-signin-code">
+              <p className="muted small">
+                1. Sign in on{' '}
+                <a href={link} target="_blank" rel="noopener noreferrer">
+                  the claude.com sign-in page
+                </a>{' '}
+                with the Claude account the agent should use. 2. Paste the code it shows here.
+              </p>
+              <Field label="Code">
                 <input
                   type="text"
                   autoComplete="off"
-                  disabled={fixed('claude_bridge_url')}
-                  placeholder="http://100.64.0.7:8765"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  spellCheck={false}
+                  aria-label="Code"
+                  maxLength={512}
+                  placeholder="Paste the code from claude.com"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && code.trim()) void sendCode();
+                  }}
                 />
               </Field>
-              <Field label="Bridge key">
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  disabled={fixed('claude_bridge_key')}
-                  placeholder={
-                    fixed('claude_bridge_key')
-                      ? 'Set by SCENE_CLAUDE_BRIDGE_KEY'
-                      : c.has_bridge_key
-                        ? KEPT
-                        : 'The key LUFI shows'
-                  }
-                  value={bridgeKey}
-                  onChange={(e) => setBridgeKey(e.target.value)}
-                />
-              </Field>
+              <div className="row">
+                <button className="btn small" disabled={busy || !code.trim()} onClick={() => void sendCode()}>
+                  {signing || 'Sign in'}
+                </button>
+                <button className="btn small ghost" disabled={busy} onClick={cancel}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="row">
+              <button className="btn small" disabled={busy} onClick={() => void check()}>
+                {working ? 'Checking…' : 'Check'}
+              </button>
+              <button className="btn small" disabled={busy} onClick={() => void signIn()}>
+                {signing || (s.signed_in ? 'Switch account' : 'Sign in')}
+              </button>
+              {s.signed_in ? (
+                <button className="btn small ghost" disabled={busy} onClick={() => void signOut()}>
+                  Sign out
+                </button>
+              ) : null}
             </div>
           )}
-          <Notice notice={notice} />
-          <div className="row" style={{ marginTop: 12 }}>
-            <button className="btn primary" disabled={!!working} onClick={() => void save()}>
-              {working === 'Saving…' ? working : 'Save'}
-            </button>
-            <button className="btn" disabled={!!working} onClick={() => void test()}>
-              {working === 'Testing…' ? working : 'Test'}
-            </button>
-            {saved ? (
-              <button
-                className="btn quiet"
-                disabled={!!working}
-                onClick={() => {
-                  setMode(c.mode);
-                  setUrl(c.bridge_url);
-                  setBridgeKey('');
-                  setApiKey('');
-                  setEditing(false);
-                }}
-              >
-                Cancel
-              </button>
-            ) : null}
-          </div>
+          <p className="muted small">
+            This is the Claude Code sign-in on this PC, so it is also the account Claude Code in a terminal here uses.
+          </p>
         </>
-      ) : null}
+      ) : (
+        <p className="muted small">
+          Not in use. Pick it under The agent uses, and the agent runs on the account Claude Code is signed in with on
+          this PC.
+        </p>
+      )}
     </div>
   );
 }

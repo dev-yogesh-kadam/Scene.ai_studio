@@ -28,6 +28,7 @@ from .deps import CONSOLE_COOKIE, admin_user
 from .library import poster_response
 from .studio import current_announcement, needs_caption
 from ..db import offload
+from ..providers import registry as provider_registry, workflows as provider_workflows
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 DAY = 86400
@@ -38,7 +39,7 @@ DONE_FAILED = COUNT_IF.format("status = 'done'") + " AS done, " + COUNT_IF.forma
 
 
 def _settings(state):
-    # allow_signup: the admin's choice, kept while the LUFI bridge closes sign-up anyway (signup_testing)
+    # allow_signup: the admin's choice, kept while a personal Claude subscription closes sign-up anyway (signup_testing)
     return {"comfy_url": state.comfy.url, "allow_signup": signup_chosen(state), "signup_testing": claude_connection.testing(),
             "signup_credits": state.credits.signup, "daily_cap": state.credits.daily_cap,
             "admin_mfa": state.db.setting("admin_mfa", "0") == "1",
@@ -995,6 +996,8 @@ async def list_endpoints(request: Request, fresh: bool = False, user: dict = Dep
 
 
 def _endpoints_changed(state, main_before):
+    provider_registry.mirror_endpoints(state.db)   # the Providers list keeps ComfyUI's servers in step
+    state.router.forget()
     state.comfy_pool.reload()
     health.forget(state, "endpoints")   # the section shows the change at once
     health.forget(state, "status")
@@ -1075,12 +1078,59 @@ async def put_claude_connection(body: dict, request: Request, user: dict = Depen
 
 @router.post("/claude-connection/test")
 async def test_claude_connection(request: Request, user: dict = Depends(admin_user)):
-    """The connection in use, checked now: on the bridge, its /health and a run of `claude -v` through it; with a key,
-    the key asked of Anthropic's API and `claude -v` here."""
+    """The connection in use, checked now (the console's Check): Claude on this PC, its sign-in asked again; with a key,
+    the key asked of Anthropic's API. Either way `claude -v` here."""
     state = request.app.state
-    found = await claude_connection.status(run_claude=True)
+    found = await claude_connection.status(run_claude=True, db=state.db)
     health.forget(state, "model")
     return dict(await _claude_connection(state, fresh=True), test=found)
+
+
+@router.post("/claude-connection/signin")
+async def start_claude_signin(request: Request, user: dict = Depends(admin_user)):
+    """Sign Claude Code on this PC in to a Claude account: starts `claude auth login` here and returns {"link"}, the
+    claude.com page to sign in on; its code then goes to /signin/code."""
+    try:
+        found = await claude_connection.login_start()
+    except claude.Failed as error:
+        raise HTTPException(502, str(error))
+    await offload(audit.record, request, user, "Started signing Claude Code in", "", "")
+    return found
+
+
+@router.post("/claude-connection/signin/code")
+async def finish_claude_signin(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """The code claude.com showed, to the waiting sign-in. Answers the card as GET does, once it went through."""
+    state = request.app.state
+    try:
+        said = await claude_connection.login_code((body or {}).get("code"))
+    except ValueError as error:
+        raise HTTPException(400, str(error))
+    except claude.Failed as error:
+        raise HTTPException(409, str(error))
+    health.forget(state, "model")
+    await offload(audit.record, request, user, "Signed Claude Code in", said.get("account") or "", said.get("plan") or "")
+    return await _claude_connection(state, fresh=True)
+
+
+@router.delete("/claude-connection/signin")
+async def cancel_claude_signin(request: Request, user: dict = Depends(admin_user)):
+    await claude_connection.login_cancel()
+    return {}
+
+
+@router.post("/claude-connection/signout")
+async def claude_signout(request: Request, user: dict = Depends(admin_user)):
+    """Sign Claude Code on this PC out (`claude auth logout`). Answers the card as GET does."""
+    state = request.app.state
+    before = await claude_connection.signin()
+    try:
+        await claude_connection.logout()
+    except claude.Failed as error:
+        raise HTTPException(502, str(error))
+    health.forget(state, "model")
+    await offload(audit.record, request, user, "Signed Claude Code out", before.get("account") or "", "")
+    return await _claude_connection(state, fresh=True)
 
 
 # ---------------------------------------------------------------- settings
@@ -1595,6 +1645,9 @@ async def _pricing_items(state):
             schema = workflows.describe(await state.catalog.load(item["id"]))
             if generation_models.has_models(schema):   # a voiceover, music, lip sync …: priced like a workflow
                 item["model_catalog"] = generation_models.catalog(schema, await state.generation_models.live(item["id"]))
+            if item.get("provider"):   # a provider's model: its provider's price, a starting point for the studio's
+                wf = await state.catalog.load(item["id"])
+                item["provider_price"] = provider_workflows.price_words((wf["profile"].get("provider") or {}).get("pricing") or {})
     return items
 
 
@@ -1616,6 +1669,7 @@ def _pricing(state, items):
             # A generation workflow: its models, each with its resolutions and the provider's prices (a starting
             # point), and the studio's own price of each model at each resolution (credits.model_prices).
             "models": item.get("model_catalog") or [], "model_prices": credits.model_prices(item["id"]) if item.get("model_catalog") else {},
+            "provider_price": item.get("provider_price") or "",
             # What it comes to: the rate in force, and the price of one image or of five seconds.
             "base": base, "per_second": per_second, "multiplier": multiplier, "example": credits.cost(item["id"], 5)})
     return {"rates": credits.rates(), "per_job": list(PER_JOB), "inr_per_1000_credits": credits.inr_per_1000,
@@ -1695,7 +1749,7 @@ async def put_workflow_pricing(body: dict, request: Request, user: dict = Depend
     """Give one workflow its own pricing, or switch it off. A rate left empty follows the rate of the workflow's kind."""
     state = request.app.state
     workflow = str(body.get("workflow") or "")
-    if workflow not in (MOTION, OVERLAY) and workflow not in state.catalog.files():
+    if workflow not in (MOTION, OVERLAY) and not state.catalog.known(workflow):
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     row = {
         "credits_per_second": _amount(body.get("credits_per_second"), "Credits per second", maximum=1e6),
@@ -1814,7 +1868,7 @@ async def put_workflow_factors(body: dict, request: Request, user: dict = Depend
     empty ones follow the studio's."""
     state = request.app.state
     workflow = str(body.get("workflow") or "")
-    if workflow not in state.catalog.files():
+    if not state.catalog.known(workflow):
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     table = _factor_table(body)
     kept = await offload(state.credits.model_prices, workflow)   # a generation workflow's model prices stay as they are
@@ -2106,11 +2160,11 @@ def _session_state(row):
 
 def _session_out(request, row):
     """A session row as the console shows it, with what it is doing now, how full it is, and, while Claude Code runs
-    here (the "api_key" connection), the command that opens it in a terminal: from the folder its sessions run in
-    (Claude Code finds a session by its folder). On the LUFI bridge, it runs in the bridge's folder there."""
+    here (either local connection), the command that opens it in a terminal: from the folder its sessions run in
+    (Claude Code finds a session by its folder)."""
     hosted = (getattr(request.app.state.agent, "services", None) or {}).get("claude") or {}
     out = dict(row, state=_session_state(row), percent=round(100 * sessions.fullness(row["context_tokens"], row["context_window"])))
-    if row["claude_id"] and hosted.get("home") and not claude_connection.testing():
+    if row["claude_id"] and hosted.get("home"):
         out["resume"] = 'cd "{}" && claude --resume {}'.format(hosted["home"], row["claude_id"])
     return out
 

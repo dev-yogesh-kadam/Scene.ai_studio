@@ -19,12 +19,10 @@ class Settings:
     claude_timeout: int = 600     # seconds one call to Claude may take
     claude_context: int = 1000000   # tokens of context the Claude models have; a session is compacted at 90% of it
     # How the studio reaches Claude Code (claude_connection.py), set in the admin console's Servers & APIs, which then
-    # wins over config.json; SCENE_* environment variables win over both. "api_key": the `claude` installed with the
-    # studio runs here with anthropic_api_key. "lufi_bridge": the bridge on the PC LUFI runs the Claude Code signed in
-    # there, at claude_bridge_url with claude_bridge_key; for testing only (sign-up closed, the agent for admins).
-    claude_connection: str = "api_key"
-    claude_bridge_url: str = ""
-    claude_bridge_key: str = ""
+    # wins over config.json; SCENE_* environment variables win over both. "this_pc": the `claude` on this PC runs here
+    # with the account it is signed in with (a personal subscription: sign-up closed, the agent for admins). "api_key":
+    # the same `claude` with anthropic_api_key.
+    claude_connection: str = "this_pc"
     anthropic_api_key: str = ""
     host: str = "0.0.0.0"
     port: int = 8080
@@ -39,6 +37,10 @@ class Settings:
     share_days: int = 30          # how long a share link opens its item without signing in; 0 turns share links off
     workflows_dir: str = "workflows"
     storage_dir: str = "storage"
+    # The tools that run on this PC (transcription, voice separation: providers/local.py): the Python they run with,
+    # kept apart from the studio's own because it holds PyTorch (docs/servers.md, "Tools on this PC"). Missing: those
+    # tools are simply not offered.
+    local_tools_python: str = ".venv-audio/Scripts/python.exe"
     # PostgreSQL, the only database, as postgresql://<account>:<password>@localhost:5432/scene: the account the app works
     # as, which only reads and writes rows. The owner account makes and changes the tables, through the migrations
     # (scripts/migrate.py), never when the app starts.
@@ -115,10 +117,10 @@ class Settings:
         return path if path.is_absolute() else ROOT / path
 
 
-# Settings that hold a password or a key: they belong in the environment (SCENE_*, an env file, Key Vault on Azure),
+# Settings that hold a password or a key: they belong in the environment (SCENE_*, an env file),
 # not in config.json. One there is still read, for one more release, with a warning at start.
 SECRETS = ("database_url", "database_owner_url", "restore_test_url", "azure_storage_connection_string", "redis_url",
-           "embedding_api_key", "claude_bridge_key", "anthropic_api_key")
+           "embedding_api_key", "anthropic_api_key")
 
 
 def read_env_file(path):

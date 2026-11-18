@@ -12,9 +12,11 @@ file to be added.
 
 You need Python 3.10 or newer and a running ComfyUI server. Two things are optional:
 
-- [Claude Code](https://claude.com/claude-code) on PATH, with an Anthropic API key pasted in the admin console
-  (Servers & APIs, Claude connection): the agent and "Improve prompt" use Anthropic's Claude models through it, and
-  no other language model. The studio's Docker image has Claude Code in it.
+- [Claude Code](https://claude.com/claude-code), signed in on this PC (run `claude`, then `/login`): the agent and
+  "Improve prompt" use Anthropic's Claude models through it, and no other language model. The studio runs that
+  `claude` itself ("Claude on this PC", the default: your own subscription, so sign-up stays closed and only admins
+  use the agent), or the same `claude` with an Anthropic API key added to the Anthropic provider. Pick one in the
+  admin console, Servers & APIs → Providers, "The agent uses". See [docs/servers.md](docs/servers.md).
 - Node.js 22 or newer, for motion graphics. See [docs/motion.md](docs/motion.md).
 
 | System | Start |
@@ -30,7 +32,8 @@ and, when Node.js is there, installs HyperFrames into `motion/`. Then:
    lands on All projects.
 3. Open the admin console at http://localhost:8090 (or **Admin console** in the studio's menu) and
    sign in with the same email and password. In its Settings section, check the ComfyUI address. The
-   dot in the studio's sidebar turns green when it answers.
+   dot in the studio's sidebar turns green when it answers. In Servers & APIs → Providers, the "Claude on this PC"
+   card says who Claude Code is signed in as; press Check after signing it in.
 
 The admin console is a site of its own: its own port, its own sign-in (admins only, with their
 second step when it is on), and it is the only place the admin routes are. By default it listens on
@@ -93,9 +96,8 @@ from `apps/mobile/` (`npm run build`; `scripts/start.bat` does it the first time
 | `claude_fast_model` | `haiku` | The model for small jobs: captions, notes, checks. Empty uses the one in use. |
 | `claude_timeout` | `600` | Seconds one call to Claude may take. |
 | `claude_context` | `1000000` | Tokens of context the Claude models have; a session is compacted at 90% of it. |
-| `claude_connection` | `api_key` | How the studio reaches Claude Code: `api_key` (the `claude` installed with the studio, with `anthropic_api_key`) or `lufi_bridge` (Claude Code on the PC LUFI through its bridge, for testing only: sign-up closed, the agent for admins). Set in the admin console's Servers & APIs, which wins over `config.json`. |
-| `claude_bridge_url` | `""` | The LUFI bridge's address, `http://<Tailscale address>:<port>`. |
-| `claude_bridge_key`, `anthropic_api_key` | `""` | The bridge's key and the Anthropic API key: secrets, so the console or `SCENE_CLAUDE_BRIDGE_KEY` / `SCENE_ANTHROPIC_API_KEY`, never `config.json`. A `SCENE_*` variable wins over the console. |
+| `claude_connection` | `this_pc` | How the studio reaches Claude Code: `this_pc` (Claude on this PC: the `claude` signed in here, a personal subscription, so sign-up is closed and the agent is for admins) or `api_key` (the same `claude` with `anthropic_api_key`). Set in the admin console's Servers & APIs → Providers, which wins over `config.json`. |
+| `anthropic_api_key` | `""` | The Anthropic API key: a secret, so the console or `SCENE_ANTHROPIC_API_KEY`, never `config.json`. A `SCENE_*` variable wins over the console. |
 | `host`, `port` | `0.0.0.0`, `8080` | Where the app listens. Use `127.0.0.1` to keep it to this computer. |
 | `console_host`, `console_port` | `127.0.0.1`, `8090` | Where the admin console listens. `127.0.0.1` is this computer alone; a Tailscale address (`100.x.y.z`) lets your other machines in; several, comma-separated, listen on each (`127.0.0.1,100.x.y.z`). Never point a public tunnel at it. `console_port` `0` turns it off. |
 | `console_url` | `""` | The console's address as an admin's browser reaches it, for the studio's link. Empty means the studio's host on `console_port`. |

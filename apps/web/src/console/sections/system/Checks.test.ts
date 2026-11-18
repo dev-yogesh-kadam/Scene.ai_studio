@@ -9,13 +9,15 @@ describe('the checks card', () => {
       database: { online: true, seconds: 0.002, detail: '' },
       render: { online: false, url: 'http://render:8188', detail: '' },
       model: {
-        mode: 'lufi_bridge',
+        mode: 'this_pc',
         online: true,
         detail: '',
         claude_version: '2.1.3',
         signed_in: true,
+        account: 'owner@example.com',
+        plan: 'pro',
         running: 1,
-        limit: 4,
+        limit: 3,
       },
       programs: { ffmpeg: { ready: true, detail: '' }, motion: { ready: false, detail: 'npm install in motion/' } },
       disk: { folder: 'C:/Scene/Outputs', free: 5, total: 100 },
@@ -33,7 +35,7 @@ describe('the checks card', () => {
     expect(String(by['Render server'].words)).toContain('http://render:8188');
     expect(by['Agent model']).toMatchObject({
       state: 'ok',
-      words: 'LUFI bridge · Claude Code 2.1.3 · signed in · 1 of 4 calls running',
+      words: 'Claude on this PC · Claude Code 2.1.3 · signed in as owner@example.com · Pro · 1 of 3 calls running',
     });
     expect(by['Motion pages (HyperFrames)']).toMatchObject({ state: 'problem', words: 'npm install in motion/' });
     expect(by['Disk'].state).toBe('problem'); // 5% free
@@ -46,12 +48,16 @@ describe('the checks card', () => {
 
   it('the content check fails open, and says so for an hour after it could not run', () => {
     const gates = ['continuity', 'shot variety'];
-    const failing = rowsOf({ creative: { content_check: { mode: 'warn', failed_at: now - 60, error: 'busy' }, gates } });
+    const failing = rowsOf({
+      creative: { content_check: { mode: 'warn', failed_at: now - 60, error: 'busy' }, gates },
+    });
     expect(failing.find((r) => r.name === 'Content check')?.state).toBe('problem');
     expect(String(failing.find((r) => r.name === 'Content check')?.words)).toContain('fails open');
     const fine = rowsOf({ creative: { content_check: { mode: 'block', failed_at: now - 7200 }, gates } });
     expect(fine.find((r) => r.name === 'Content check')).toMatchObject({ state: 'ok' });
-    expect(rowsOf({ creative: { content_check: { mode: 'off' } } }).find((r) => r.name === 'Content check')?.state).toBe('off');
+    expect(
+      rowsOf({ creative: { content_check: { mode: 'off' } } }).find((r) => r.name === 'Content check')?.state,
+    ).toBe('off');
     expect(String(fine.find((r) => r.name === 'Quality gates')?.words)).toContain('never blocks');
   });
 

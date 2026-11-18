@@ -106,7 +106,7 @@ def _kit_per_module(db):
 ID_TABLES = {"agent_calls", "agent_plans", "alerts", "assets", "audit_log", "boards", "claude_events", "claude_sessions",
              "conversation_messages", "conversations",
              "client_errors", "credit_events", "credit_packages", "endpoints", "generations", "moderation", "projects",
-             "servers", "users", "workflow_versions"}
+             "provider_keys", "providers", "servers", "users", "workflow_versions"}
 
 @functools.lru_cache(maxsize=1024)
 def postgres_sql(sql):

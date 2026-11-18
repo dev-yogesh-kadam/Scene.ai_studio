@@ -324,6 +324,13 @@ TOOLS = {
         "Call it before you plan a step with a workflow the message lists in one line only.",
         {"type": "object", "required": ["op"], "properties": {
             "op": _field(S, "The workflow's id, as the message lists it.")}}),
+    "voices": (
+        "Lists the voices of the voiceover model a provider offers (a workflow whose settings have a \"Voice id\"): each "
+        "voice's id, name, language and gender. Put the chosen id in that setting; without one the provider's default "
+        "voice speaks.",
+        {"type": "object", "required": ["query"], "properties": {
+            "query": _field(S, "Words to look for in the voices' names (\"warm\", \"narrator\", a name), or \"\" for all."),
+            "language": _field(S, "A language and region (\"en-US\", \"hi-IN\"), or \"\" for any.")}}),
     "memory": (
         "The user's memory across all their projects (see Memory).",
         {"type": "object", "required": ["op"], "properties": {

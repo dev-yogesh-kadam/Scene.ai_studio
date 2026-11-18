@@ -107,9 +107,9 @@ def claude_works(monkeypatch):
     studio that is set up; test_claude_connection.py tests the check itself."""
     from scene import claude_connection
 
-    async def status(run_claude=False):
+    async def status(run_claude=False, db=None):
         return {"mode": "api_key", "online": True, "detail": "", "claude_version": "2.1.3", "signed_in": None,
-                "key_works": True, "running": 0, "limit": None, "bridge_version": "", "testing": ""}
+                "key_works": True, "running": 0, "limit": None, "testing": ""}
     monkeypatch.setattr(claude_connection, "status", status)
 
 

@@ -17,6 +17,7 @@ from .. import balancer, generation_models, guardrails, sharing, health, kit, me
 from ..db import as_everyone, offload
 from ..catalog import KINDS
 from ..comfy import workflows
+from ..providers import workflows as provider_workflows
 from ..references import REFERENCES, kept_reference, keep_reference, media_kind, owns_upload, read_upload
 from ..security import same_origin
 from .deps import COOKIE, current_user, limited, uploading, user_for_token
@@ -110,6 +111,11 @@ async def price(state, wf, settings, user_id=None):
 
 
 def switched_on(state, workflow_id, user):
+    if state.credits._comfyui_off(workflow_id):   # its capability is made by the providers now (What makes what)
+        from ..providers.base import CAPABILITY_WORDS
+        from ..providers.comfyui import capability_of
+        what = CAPABILITY_WORDS.get(capability_of(workflow_id), "This")
+        raise HTTPException(400, "{} is no longer made on ComfyUI: pick one of the providers' models.".format(what))
     if not state.credits.enabled(workflow_id, user):
         raise HTTPException(400, "This workflow is switched off for now.")
 
@@ -187,14 +193,20 @@ async def unreachable(state, rows):
     the console, or it switched off): offered nowhere, so none is picked only to fail at once (balancer.route says
     why). The servers' node definitions are read first when they are not known (at most once in a while)."""
     pool = getattr(state, "comfy_pool", None)
-    generation = [w for w in rows if w.get("source") == "generation" and not w.get("error")]
+    found = {}
+    router = getattr(state, "router", None)
+    for w in rows:   # a provider's model: offered while some key could ever make it (the router says why not)
+        if w.get("provider") and router is not None:
+            _, problem = await offload(router.pick, w["model"])
+            if problem:
+                found[w["id"]] = problem
+    generation = [w for w in rows if w.get("source") == "generation" and not w.get("error") and not w.get("provider")]
     if pool is None or not generation:
-        return {}
+        return found
     try:   # a server that does not answer holds the page LEARN_WAIT at most; it is read on in the background
         await asyncio.wait_for(asyncio.shield(pool.learn([s["url"] for s in pool.servers() if not s["patterns"]])), LEARN_WAIT)
     except Exception:   # unknown nodes count as there: the queue still says why when it can't place a job
         pass
-    found = {}
     for w in generation:
         try:
             _, problem = pool.route(w["id"], balancer.needs_of(await state.catalog.load(w["id"])))
@@ -395,6 +407,10 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     _, ctx = workflows.build_prompt(wf, dict(settings, clips=1))  # fails here, not in the queue, if a setting is wrong
     if generation_models.has_models(schema):   # what the chosen model can't take, said now (its lengths, references, frames)
         problem = generation_models.problem(schema, settings, await state.generation_models.live(wf["id"]))
+        if problem:
+            raise HTTPException(400, problem)
+    if wf["profile"].get("provider"):   # a provider's model: its limits, said now rather than by the provider in the queue
+        problem = provider_workflows.limits_problem(wf, schema, settings)
         if problem:
             raise HTTPException(400, problem)
     ctx = dict(workflows.context(schema, settings), seed=ctx.get("seed"))

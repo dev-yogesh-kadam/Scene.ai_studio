@@ -2,11 +2,13 @@
 // the rewrite): tables, filters, the drawer of a person or a job, dialogs, forms that save, and the search.
 
 import { expect, test, type Cookie, type Locator, type Page } from '@playwright/test';
-import { CONSOLE } from '../../playwright.config';
+import { CONSOLE, PORT_BASE } from '../../playwright.config';
+import { LIVE_KEY } from '../support/fake-v1.mjs';
 import { ACCOUNTS } from './accounts';
 import { axe } from './axe';
 import { done, makeImage, signIn } from './signin';
 
+const FAKE_V1 = `http://127.0.0.1:${PORT_BASE + 198}`; // global-setup.ts starts it there
 let kept: Cookie[] | null = null; // one sign-in for the file: the console allows only so many
 
 async function open(page: Page, section: string) {
@@ -133,25 +135,112 @@ test('Roles: a new role made with what it may see, then deleted', async ({ page 
   await expect(main(page).locator('details', { hasText: 'Tester' })).toHaveCount(0);
 });
 
-test('Servers: a form opens to add one, and Cancel leaves it', async ({ page }) => {
+test('Servers: Add key opens its form, and Langfuse its own; Cancel leaves each', async ({ page }) => {
   await open(page, 'endpoints');
-  await main(page).getByRole('button', { name: 'Add' }).nth(1).click(); // the first is Claude's
+  await main(page).getByRole('button', { name: 'Add key' }).click();
+  await expect(main(page).getByLabel('Key', { exact: true })).toBeVisible();
+  await main(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(main(page).getByLabel('Key', { exact: true })).toBeHidden();
+  await main(page).getByRole('button', { name: 'Add', exact: true }).click(); // Langfuse's
   await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeVisible();
   await main(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeHidden();
 });
 
-test('Servers: the Claude connection card, and the bridge refused without its key', async ({ page }) => {
+test('Servers, Providers: a key that fails is not saved; one that works shows its models and credits, never itself', async ({
+  page,
+}) => {
   await open(page, 'endpoints');
-  const claude = card(page, 'Anthropic API key'); // the way in use names the card
-  // the test studio has no `claude` and no key: it says so, and nothing reaches Anthropic or LUFI
-  await expect(claude.getByTestId('claude-status')).toContainText('Not working');
-  await expect(claude.getByLabel('Anthropic API key')).toHaveValue('');
-  await claude.getByRole('button', { name: 'LUFI bridge' }).click();
-  await claude.getByLabel('Bridge address').fill('http://127.0.0.1:9');
-  await claude.getByRole('button', { name: 'Save' }).click();
-  await expect(claude.getByText('The LUFI bridge needs its address and its key.')).toBeVisible();
-  await expect(main(page).getByText('Testing on a personal Claude subscription')).toHaveCount(0); // nothing changed
+  // the agent's Claude is one of the providers: the test studio has no `claude` and no key, and says so
+  await expect(main(page).getByLabel('The agent uses')).toHaveValue(/\d+/);
+  await expect(main(page).getByTestId('claude-status')).toContainText('Not working');
+  const form = main(page).getByTestId('add-key');
+  await main(page).getByRole('button', { name: 'Add key' }).click();
+  await form.getByLabel('Provider').selectOption('new:scene_provider_v1');
+  await form.getByLabel('Name').fill('Fake generation server');
+  await form.getByLabel('Address').fill(FAKE_V1);
+  await form.getByLabel('Key', { exact: true }).fill('sa_live_notakey0000');
+  await form.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(form.getByText('It does not work: This key is not known.')).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Save anyway' })).toBeVisible();
+  await form.getByLabel('Key', { exact: true }).fill(LIVE_KEY);
+  await form.getByLabel('Label').fill('e2e A');
+  await form.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(form).toBeHidden(); // it worked: the form closes
+  const provider = main(page).locator('[data-testid^="provider-"]', { hasText: 'Fake generation server' });
+  await expect(provider.getByText('2 models · 1 key')).toBeVisible();
+  await expect(provider.getByText('Works · 91,296 credits')).toBeVisible();
+  await expect(provider.getByText('…1234')).toBeVisible();
+  await expect(main(page)).not.toContainText(LIVE_KEY);
+  await expect(main(page).getByTestId('router-words')).toContainText('Off:');
+  await provider.getByRole('button', { name: 'Remove' }).last().click(); // the provider's own, after its key's
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /^(OK|Remove|Yes)/ })
+    .last()
+    .click();
+  await expect(provider).toHaveCount(0);
+});
+
+test('Servers, Providers: Claude on this PC is one card, signed in with its usage, and Check asks again', async ({
+  page,
+}) => {
+  // The test studio has no signed-in `claude`: the agent's provider and its status are put in the answers here.
+  const signedIn = {
+    mode: 'this_pc',
+    online: true,
+    detail: '',
+    claude_version: '2.1.322',
+    signed_in: true,
+    account: 'owner@example.com',
+    plan: 'pro',
+    session: { utilization: 0.27, resets_at: null },
+    week: { utilization: 0.34, resets_at: null },
+    key_works: null,
+    running: 2,
+    limit: 3,
+    testing: 'Personal Claude subscription',
+  };
+  const connection = { mode: 'this_pc', has_api_key: false, fixed: [], testing: 'Personal Claude subscription' };
+  await page.route('**/api/admin/providers', async (route) => {
+    const real = await route.fetch();
+    const json = (await real.json()) as { providers: { id: number; kind: string; agent: boolean }[] };
+    const local = json.providers.find((p) => p.kind === 'claude_local');
+    for (const p of json.providers) p.agent = p === local;
+    await route.fulfill({
+      response: real,
+      json: { ...json, agent_provider: local?.id, testing: 'Personal Claude subscription' },
+    });
+  });
+  await page.route('**/api/admin/claude-connection**', (route) =>
+    route.fulfill({
+      json:
+        route.request().method() === 'POST'
+          ? { connection, status: signedIn, test: signedIn }
+          : {
+              connection,
+              status: {
+                ...signedIn,
+                online: false,
+                signed_in: false,
+                detail:
+                  'Signed out. On this PC, run `claude`, then /login, then press Check in Servers & APIs → Providers.',
+              },
+            },
+    }),
+  );
+  await open(page, 'endpoints');
+  const local = main(page).getByTestId('claude-on-this-pc');
+  await expect(local.getByTestId('claude-signin')).toContainText('Signed out. On this PC, run `claude`, then /login');
+  await expect(local.getByRole('textbox')).toHaveCount(0); // no key, no address
+  await local.getByRole('button', { name: 'Check' }).click();
+  await expect(local.getByText('Checked: it works.')).toBeVisible();
+  await expect(local.getByTestId('claude-signin')).toContainText(
+    'Signed in as owner@example.com · Pro · Claude Code 2.1.322',
+  );
+  await expect(local.getByTestId('claude-usage')).toContainText('This 5-hour window: 27% · This week: 34%');
+  await expect(local.getByText('2 of 3 running')).toBeVisible();
+  await expect(local.getByText('Personal Claude subscription')).toBeVisible();
 });
 
 test('Moderation: what is made is listed, and the words are saved', async ({ page }) => {
@@ -206,13 +295,15 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
         database: { online: true, seconds: 0.002, detail: '' },
         render: { online: false, url: 'http://render:8188', since: now - 600, detail: '' },
         model: {
-          mode: 'lufi_bridge',
+          mode: 'this_pc',
           online: true,
           detail: '',
           claude_version: '2.1.3',
           signed_in: true,
+          account: 'owner@example.com',
+          plan: 'pro',
           running: 1,
-          limit: 4,
+          limit: 3,
         },
         programs: {
           ffmpeg: { ready: true, detail: '' },
@@ -236,7 +327,9 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
   await expect(checks.getByRole('row', { name: /Render server.*Problem.*http:\/\/render:8188/ })).toBeVisible();
   await expect(checks.getByRole('row', { name: /Motion pages.*Run npm install in motion/ })).toBeVisible();
   await expect(
-    checks.getByRole('row', { name: /Agent model.*OK.*LUFI bridge · Claude Code 2\.1\.3 · signed in · 1 of 4/ }),
+    checks.getByRole('row', {
+      name: /Agent model.*OK.*Claude on this PC · Claude Code 2\.1\.3 · signed in as owner@example\.com · Pro · 1 of 3/,
+    }),
   ).toBeVisible();
   await expect(checks.getByRole('row', { name: /Restore test.*Not run yet/ })).toBeVisible();
   await page.waitForLoadState('networkidle');

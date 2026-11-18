@@ -1,6 +1,6 @@
 """Claude as a model of the agent, through Claude Code (claude.py). Claude Code is faked at the run of it (_run): each
 test says what its run prints, and what it was started with is recorded. The two connections themselves, with a fake
-`claude` and a fake LUFI bridge, are test_claude_connection.py's."""
+`claude`, are test_claude_connection.py's and test_claude_local.py's."""
 
 import asyncio
 import json
@@ -34,7 +34,7 @@ def fake_claude(monkeypatch, *outputs):
     """Claude Code prints `outputs` in turn; returns the runs it was started for: {"args", "message", "system"}."""
     runs, left = [], list(outputs)
 
-    async def run(args, line, room, timeout, files=None):
+    async def run(args, line, room, timeout, files=None, program=None):
         assert args[args.index("--system-prompt-file") + 1] == "@system_prompt"   # the prompt goes as a file's text
         runs.append({"args": args, "message": json.loads(line)["message"], "system": files["system_prompt"], "room": room})
         out = left.pop(0)
@@ -503,7 +503,7 @@ def test_compact_now_goes_on_in_the_same_session(monkeypatch):
     claude.live.clear()
     started = []
 
-    async def run(args, line, room, timeout, files=None):
+    async def run(args, line, room, timeout, files=None, program=None):
         started.append((args, line))
         return Run(printed({"type": "system", "subtype": "compact_boundary", "compact_metadata": {"trigger": "manual", "post_tokens": 9_000}},
                            {"type": "result", "subtype": "success", "is_error": False, "session_id": "s-1", "result": ""}))
@@ -513,7 +513,7 @@ def test_compact_now_goes_on_in_the_same_session(monkeypatch):
     assert asyncio.run(claude.compact(dict(s, window=1_000_000), thread)) == 9_000
     args, line = started[0]
     assert args[args.index("--resume") + 1] == "s-1" and told == ["compact"]
-    # the command goes on stdin, as the session's message, never as an argument (the bridge takes flags only)
+    # the command goes on stdin, as the session's message, never as an argument (claude_policy takes a prompt on the command line only for a command)
     assert "/compact" not in args and json.loads(line)["message"] == {"role": "user", "content": "/compact"}
 
     async def lost(*a, **k):

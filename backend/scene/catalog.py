@@ -37,6 +37,17 @@ class Catalog:
         # What was read, kept until a file changes: (the folders' times, the files); (their sidecars' times, replaced);
         # path -> (the file's and its sidecar's times, the node definitions it was read with, the workflow).
         self._files, self._replaced, self._read = (None, {}), (None, {}), {}
+        # The providers' models offered as workflows while the router is on (providers/workflows.ProviderWorkflows;
+        # main.py sets it). Then the generation server's own workflow files (the ComfyUI disguise) are not offered.
+        self.providers = None
+
+    def known(self, workflow_id):
+        """Whether a workflow id is one there is: a file, or a provider's model offered now."""
+        return workflow_id in self.files() or (self.providers is not None and workflow_id in self.providers.workflows())
+
+    def is_provider(self, workflow_id):
+        from .providers.workflows import is_provider_id
+        return is_provider_id(workflow_id)
 
     @staticmethod
     def _time(path):
@@ -112,6 +123,13 @@ class Catalog:
         return workflow_id if workflow_id in self.files() else self.replaced().get(workflow_id, workflow_id)
 
     async def load(self, workflow_id):
+        if self.providers is not None and self.is_provider(workflow_id):
+            await self.providers.refresh()
+            wf = self.providers.get(workflow_id)
+            if wf is None:
+                raise workflows.WorkflowError("{} is not offered now: no provider key in use has it, or the provider router "
+                                              "is not on.".format(workflow_id))
+            return wf
         workflow_id = self.current(workflow_id)
         path = self.files().get(workflow_id)
         if path is None:
@@ -153,7 +171,13 @@ class Catalog:
 
     async def listing(self):
         items = []
+        on = False
+        if self.providers is not None:
+            await self.providers.refresh()
+            on = self.providers.active()
         for workflow_id in self.files():
+            if on and workflow_id.rsplit("/", 1)[-1].startswith("generation_"):
+                continue   # the router is on: the generation server's models come as its provider's, not this way
             kind, name = workflow_id.split("/", 1)
             item = {"id": workflow_id, "kind": kind, "title": name.replace("_", " "), "description": ""}
             try:
@@ -179,4 +203,13 @@ class Catalog:
             except workflows.WorkflowError as e:
                 item["error"] = str(e)
             items.append(item)
+        if on:
+            for workflow_id, wf in self.providers.workflows().items():
+                profile = wf["profile"]
+                listed = profile.get("refs") if isinstance(profile.get("refs"), dict) else {}
+                items.append({"id": workflow_id, "kind": workflow_id.split("/", 1)[0], "title": profile["title"],
+                              "description": profile.get("description", ""), "source": "generation", "provider": True,
+                              "model": profile["provider"]["model"],
+                              "picture_refs": int(listed.get("max", 0)) + len([r for r in profile.get("optional_refs", [])
+                                                                               + profile.get("required_refs", []) if r.endswith(":image")])})
         return items

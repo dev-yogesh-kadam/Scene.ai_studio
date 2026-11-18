@@ -18,7 +18,7 @@ const css = classesOf(css0, css1, css2, css3, css4);
 
 type Current = {
   allow_signup: boolean;
-  signup_testing?: boolean; // the LUFI bridge is in use: sign-up is closed whatever is chosen here
+  signup_testing?: boolean; // a personal Claude subscription is in use: sign-up is closed whatever is chosen here
   signup_credits: number;
   daily_cap: number;
   admin_mfa: boolean;
@@ -62,8 +62,8 @@ function Accounts({
       </p>
       {current.signup_testing && (
         <p className="notice error" style={{ margin: '6px 0 0 25px' }}>
-          Closed for now whatever is chosen here: the studio is testing on a personal Claude subscription (the LUFI
-          bridge, Servers &amp; APIs). This choice is used again once the API key is picked.
+          Closed for now whatever is chosen here: the agent runs on a personal Claude subscription (Claude on this PC,
+          Servers &amp; APIs → Providers). This choice is used again once Anthropic, with an API key, is picked.
         </p>
       )}
       <label className="check">
@@ -205,9 +205,9 @@ function Langfuse({ current }: { current: Current }) {
         Keep the words in Langfuse only
       </label>
       <p className="muted small" style={{ margin: '6px 0 0 25px' }}>
-        A call&apos;s words file is deleted here once Langfuse has it, and the agent&apos;s session events older than
-        30 days go to Langfuse and are kept here only in short. Works only while a Langfuse is set and the words are
-        sent (docs/observability.md).
+        A call&apos;s words file is deleted here once Langfuse has it, and the agent&apos;s session events older than 30
+        days go to Langfuse and are kept here only in short. Works only while a Langfuse is set and the words are sent
+        (docs/observability.md).
       </p>
       <Field label="Turns graded by the fast model (%)">
         <input type="number" min={0} max={100} step={1} value={share} onChange={(e) => setShare(e.target.value)} />

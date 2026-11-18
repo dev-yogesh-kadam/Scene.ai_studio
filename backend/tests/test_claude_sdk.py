@@ -239,7 +239,7 @@ def test_a_compaction_in_the_middle_of_a_turn_is_told(fake_sdk):
     (sdk.ProcessError("Command failed", exit_code=1, stderr="Invalid API key · Please run /login"), AgentError, "not signed in"),
     (Exception("No conversation found with session ID: s-1"), ContextLost, "gone"),
     (RuntimeError("the pipe broke"), AgentError, "Claude Code stopped: the pipe broke"),
-    (sdk.CLINotFoundError(cli_path="claude.exe"), AgentError, "not installed with the studio"),
+    (sdk.CLINotFoundError(cli_path="claude.exe"), AgentError, "not installed on this PC"),
 ])
 def test_an_error_in_the_middle_of_the_stream_closes_the_program_and_says_what_it_means(fake_sdk, error, raised, words):
     made, scripts = fake_sdk

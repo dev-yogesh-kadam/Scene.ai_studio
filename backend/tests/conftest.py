@@ -37,13 +37,16 @@ def _claude_fresh():
         if getattr(_claude, name) is not value:
             setattr(_claude, name, value)
     # No test runs this machine's own `claude`, nor asks Anthropic's API for its key: there is none on PATH here, and
-    # the connection is the "api_key" one with no key (test_claude_connection.py puts a fake `claude` in its place).
+    # the connection is Claude on this PC (test_claude_connection.py puts a fake `claude` in its place).
     _claude.find = lambda: ""
     _claude.RUN_WITH = ()
     _claude.CONNECTION = dict(_CLAUDE_CONNECTION)
     _claude.GUARD = None
     _claude.RUNNING.clear()
     _claude_connection._versions.clear()
+    _claude_connection._signins.clear()
+    _claude.LIMITS.clear()
+    _claude.ON_LIMITS = None
     _claude.live.clear()
     _claude.held.clear()
     _claude._slots_of.clear()
@@ -243,8 +246,10 @@ def client(tmp_path):
     empty_postgres()
     # Claude Code is never run by a test: the real one is switched off, and the agent is given a Claude of its own
     # with no `claude` to run (a test that reaches it fails, fresh_claude), as faked by each test (fake_claude, hosted,
-    # model).
+    # model). It reaches Claude by an API key (with none): a studio open to other users, as most tests need (sign-up
+    # open, the agent for everyone); Claude on this PC, a personal subscription, is test_claude_local.py's.
     settings = Settings(database_url=POSTGRES, database_loop_guard=LOOP_GUARD, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
+                        claude_connection="api_key",
                         storage_dir=str(tmp_path), allow_signup=True, signup_credits=500, first_account_local=False,
                         workflows_dir=str(ROOT / "workflows"), web_dist_dir=str(built(tmp_path / "web")))
     from scene import claude

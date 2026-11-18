@@ -50,6 +50,9 @@ export async function startStudio({
         // Sign-up is closed and gives no credits on a fresh installation; the tests make several accounts with credits.
         allow_signup: true,
         signup_credits: 1000,
+        // Claude by an API key (none): a studio open to several users. Claude on this PC, the default, is a personal
+        // subscription (sign-up closed, the agent for admins), and would reach the real `claude` of this PC.
+        claude_connection: 'api_key',
       },
       null,
       2,

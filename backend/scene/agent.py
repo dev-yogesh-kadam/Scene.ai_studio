@@ -185,11 +185,18 @@ What the studio does (what you can make is exactly what the listed workflows and
   text, or words in a video, go on screen as a page you design (the render_html tool) instead.
 - Videos from words, or starting on a picture, some with sound; several shots chained so each goes on from the last
   one; one longer video in several clips.
-- A talking person from a portrait and a voice track, and lip-sync of a clip to a voice track.
-- A video given a new look that keeps its motion and camera (restyle), and a character from a picture performing
-  the motion of a driving video.
+- Lip-sync of a clip to a voice track (a talking person: a clip of them first, then that clip lip-synced to the voice).
+- A clip the user has, edited by a video model that takes a reference video and edits it (its description says it
+  continues or edits a clip: Seedance, Wan): a new look that keeps its motion and camera (restyle), something changed,
+  added or taken away, the light or the weather changed, or the clip continued. And a character from a picture
+  performing the motion of a driving video, on the same models: the picture as a reference picture, the driving clip
+  as the reference video. In such a model's prompt, its files are called @Image1, @Image2 … (its reference pictures,
+  in order) and @Video1 (its reference video): "@Video1 at night in heavy rain, the same shot and motion", "The
+  character in @Image1 does exactly the movement of the person in @Video1, in the same room". A model whose reference
+  video only guides (its description says it is not edited) makes a new clip in its spirit, never an edit.
 - Music, a song or an instrumental, from a description and lyrics.
-- Work on sound: the voice separated from music and effects, and a transcript with times and speakers.
+- Work on sound: the voice separated from music and effects, and a transcript with times (each line's speaker is
+  SPEAKER_00 until speaker labels are set up: then tell the narrator from the others by what they say).
 - Edits of videos the user has: trim, split, join, a sound put on a video, and the finished cut (shots in order,
   music, a title and an end card).
 - Words and shapes on screen: titles, kinetic text, intros, outros, explainers, and lower thirds over a video.
@@ -197,7 +204,7 @@ What the studio does (what you can make is exactly what the listed workflows and
 - Reviews of shots after they are made, with a retake when one fails; NeuralCore, which keeps characters,
   places, props, outfits, voices and styles for every shot of the project.
 - A video in another shape (16:9 to 9:16, 1:1 or 4:5): cropped to the window that holds what matters, or extended,
-  the new space filled in around it (see the film tool).
+  the new space filled in around it by a video model that edits a clip (see below).
 - Making a video larger and sharper is the "Upscale video" action on the canvas, not a step you plan: point the user
   to it.
 - Not in the studio now, unless a workflow listed under "Workflows" does it: speech or a voiceover made from text (a
@@ -741,7 +748,7 @@ class AgentError(Exception):
 
 TOOLS = ("find_assets", "look", "check_shots", "review", "save_note", "book_save", "book_import", "page_build", "page_write", "page_read", "state_read", "state_write", "state_check",
          "film", "render_html", "ffmpeg", "import_url", "transcript", "timing", "read_text", "read_skill", "memory", "preset_search", "web_fetch",
-         "skill_draft", "second_opinion", "workflow_info", "craft_search")
+         "skill_draft", "second_opinion", "workflow_info", "craft_search", "voices")
 TOOL_ROUNDS = 6   # a message is answered in at most this many calls to the model
 RUN_ROUNDS = 40   # ...or this many while a long skill runs: it reads and writes its state and cuts its media as it goes
 TOOL_RESULT = 8000   # characters of a tool's result the model is given back
@@ -847,12 +854,13 @@ hyperframes skill (and brand-motion for a brand), write it with page_build, rend
 "project"), look at its review sheets, fix, show. It needs no script and no video model. When the user leaves the
 subject open, choose one and say what you chose.
 A video in another shape: look at it first. When what matters fits the new window, crop it: film reframe, with "x" and
-"y" (0 to 1, 0.5 the middle) where the window sits. Otherwise extend it: film outpaint_prep gives, for each part in
-order, the part and then its mask; plan one "generate" step per part with the workflow video/video_outpaint_wan_vace
-(the part in "299:file", its mask in "303:file", and a prompt that says what lies around the frame: the room, the
-street, the sky, in the same light), and once they are made, outpaint_join with the original and the filled-in parts
-in order. Say that extending invents what was never filmed, and that a small change (16:9 to 4:5) looks better than a
-large one.
+"y" (0 to 1, 0.5 the middle) where the window sits. Otherwise extend it: plan one "generate" step on a video model that
+edits a clip and lets you pick its shape (Seedance 2.5 first, else Wan 3.0), the video in its reference video slot,
+the new shape, the clip's own length (a model takes 4 to 30 s of source: a longer video is cut into parts first, each
+extended, then joined), and a prompt that keeps the clip and says what lies around it: "Extend @Video1 to a tall
+frame: keep everything in it exactly as it is, and show more of the room above and below, in the same light". Say
+that the model makes the whole clip again, so the original part can change a little and what is around it is
+invented; and that a small change (16:9 to 4:5) looks better than a large one.
 Nothing is generated by these tools (film, render_html and ffmpeg only cut and draw on what exists): generating starts
 only when the user approves the steps you answer with. Answer as soon as you know enough; most messages need one or two
 tool calls, or none."""
@@ -1127,7 +1135,7 @@ def _unfenced(text):
 
 class Agent:
     """The language model behind the agent: Anthropic's Claude, through Claude Code (claude.py), by the connection an
-    admin picked (an API key, or the LUFI bridge). A model is named "claude/<name>" ("claude/sonnet"); the user picks
+    admin picked (Claude on this PC, or an API key). A model is named "claude/<name>" ("claude/sonnet"); the user picks
     one by name."""
 
     def __init__(self, model="", services=()):

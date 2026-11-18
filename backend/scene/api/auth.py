@@ -53,8 +53,8 @@ def signup_chosen(state):
 
 
 def signup_open(state):
-    """Whether strangers may make accounts now: as chosen (signup_chosen), but never while the studio is tested on the
-    LUFI bridge, a personal Claude subscription (claude_connection.py). The choice is kept for when that ends."""
+    """Whether strangers may make accounts now: as chosen (signup_chosen), but never while the agent runs on a personal
+    Claude subscription, Claude on this PC (claude_connection.py). The choice is kept for when that ends."""
     return signup_chosen(state) and not claude_connection.testing()
 
 

@@ -64,7 +64,7 @@ def start_studio(backend, database, home):
         "host": "127.0.0.1", "port": PORT, "console_host": "127.0.0.1", "console_port": CONSOLE_PORT,
         "comfy_url": "http://127.0.0.1:{}".format(COMFY_PORT), "storage_dir": str(Path(home) / "storage"),
         "secret_key_file": str(Path(home) / "secret.key"), "database_url": database, "backup_keep": 0,
-        "signups_per_day": 0, "allow_signup": True, "signup_credits": 1000, "first_account_local": False, "claude_models": "off",
+        "signups_per_day": 0, "allow_signup": True, "signup_credits": 1000, "claude_connection": "api_key", "first_account_local": False, "claude_models": "off",
         "web_dist_dir": str(ROOT / "apps/web/dist"), "workflows_dir": str(ROOT / "workflows")}), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("SCENE_")}
     env.update(SCENE_CONFIG=str(config), PYTHONUNBUFFERED="1")
