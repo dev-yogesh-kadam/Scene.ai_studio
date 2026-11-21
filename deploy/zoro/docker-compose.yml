@@ -1,0 +1,106 @@
+# Scene.ai on Zoro (Ubuntu Server, Docker). The repo's own docker-compose.yml stays the throwaway test stack; this is
+# the real one. Commands: deploy/zoro/README.md. Every password and the vault key come from deploy/zoro/.env
+# (gitignored; .env.example says how to make each value).
+#
+#   db        PostgreSQL 18 with pgvector, in the volume `db` (never published on a port)
+#   migrate   runs the migrations once, as the owner account, then stops
+#   app       the studio and the admin console; data, outputs and backups in folders outside the repo
+#
+# Docker-published ports bypass ufw: everything here is published on 127.0.0.1 only (SCENE_BIND and SCENE_CONSOLE_BIND
+# may name the Tailscale address instead). The app also joins the external network `web`, where Caddy can proxy the
+# studio (scene-studio:<SCENE_STUDIO_PORT>), and `scene-langfuse`, where it reaches Langfuse (http://langfuse-web:3000).
+# Caddy must never proxy the console's port: it is for this machine (or Tailscale) alone.
+
+name: scene
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-image: &image
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  image: scene-ai:zoro
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.1-pg18
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/zoro/.env}
+      SCENE_OWNER_PASSWORD: ${SCENE_OWNER_PASSWORD:?Set SCENE_OWNER_PASSWORD in deploy/zoro/.env}
+      SCENE_APP_PASSWORD: ${SCENE_APP_PASSWORD:?Set SCENE_APP_PASSWORD in deploy/zoro/.env}
+    volumes:
+      - db:/var/lib/postgresql   # PostgreSQL 18 images keep their data in a folder of their own below this
+      # Made once, on an empty volume: the database, its two accounts, and the pg_trgm and vector extensions
+      - ../../scripts/docker/postgres-init.sh:/docker-entrypoint-initdb.d/scene.sh:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "scene"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    <<: *image
+    command: ["python", "/app/scripts/migrate.py", "upgrade"]
+    environment: &settings
+      SCENE_DATABASE_URL: postgresql://scene_app:${SCENE_APP_PASSWORD}@db:5432/scene
+      SCENE_DATABASE_OWNER_URL: postgresql://scene_owner:${SCENE_OWNER_PASSWORD}@db:5432/scene
+      SCENE_SECRET_KEY: ${SCENE_SECRET_KEY:?Set SCENE_SECRET_KEY (a Fernet key) in deploy/zoro/.env}
+      # Inside the container the ports are the same as outside, so the studio's link to the console is right.
+      SCENE_PORT: ${SCENE_STUDIO_PORT:-8080}
+      SCENE_CONSOLE_PORT: ${SCENE_CONSOLE_PORT:-8090}
+      # /data is ~/scene/data: the media library (storage), Claude Code's own folder (CLAUDE_CONFIG_DIR=/data/claude,
+      # its sessions), HyperFrames' fonts. Finished outputs and the backups have folders of their own.
+      SCENE_STORAGE_DIR: /data/storage
+      SCENE_OUTPUT_DIR: /outputs
+      SCENE_BACKUP_DIR: /backups
+      SCENE_BACKUP_DATABASE: "true"
+      SCENE_BACKUP_FILES: "true"
+      SCENE_BACKUP_KEEP: ${SCENE_BACKUP_KEEP:-14}
+      # true once Caddy serves the studio over https
+      SCENE_SECURE_COOKIES: ${SCENE_SECURE_COOKIES:-false}
+      # The first account (the admin) is never made through the sign-in page here: no browser is on "this machine"
+      # behind Docker, so the page refuses it, and a stranger arriving through Caddy can't take it either. It is made
+      # with `python -m scene.manage create-admin` (README.md).
+      SCENE_FIRST_ACCOUNT_LOCAL: "true"
+      SCENE_TIME_ZONE: ${SCENE_TIME_ZONE:-Asia/Kolkata}
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+
+  app:
+    <<: *image
+    environment: *settings
+    ports:
+      - "${SCENE_BIND:-127.0.0.1}:${SCENE_STUDIO_PORT:-8080}:${SCENE_STUDIO_PORT:-8080}"
+      - "${SCENE_CONSOLE_BIND:-127.0.0.1}:${SCENE_CONSOLE_PORT:-8090}:${SCENE_CONSOLE_PORT:-8090}"
+    volumes:
+      - ${SCENE_DATA_DIR:?Set SCENE_DATA_DIR in deploy/zoro/.env}:/data
+      - ${SCENE_OUTPUTS_DIR:?Set SCENE_OUTPUTS_DIR in deploy/zoro/.env}:/outputs
+      - ${SCENE_BACKUPS_DIR:?Set SCENE_BACKUPS_DIR in deploy/zoro/.env}:/backups
+    networks:
+      default:
+      web:
+        aliases: [scene-studio]   # Caddy: reverse_proxy scene-studio:8080 (the studio's port; never the console's)
+      scene-langfuse:
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging: *logging
+    # No GPU: nothing in this image uses CUDA. The transcription and voice tools (faster-whisper, Demucs) run from
+    # .venv-audio on a Windows PC and are simply not offered here.
+
+networks:
+  web:
+    external: true       # Caddy's (made with Caddy)
+  scene-langfuse:
+    external: true       # made once: docker network create scene-langfuse
+
+volumes:
+  db:

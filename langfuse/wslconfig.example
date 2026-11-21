@@ -1,0 +1,4 @@
+# Windows only: copy to %UserProfile%\.wslconfig (then `wsl --shutdown`) to cap Docker's VM so Ollama keeps most of the RAM.
+[wsl2]
+memory=12GB
+processors=6

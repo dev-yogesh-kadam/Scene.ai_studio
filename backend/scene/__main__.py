@@ -30,7 +30,7 @@ def stop_langfuse():
     SCENE_NO_LANGFUSE=1 (Langfuse never started by the studio) leaves them alone."""
     if os.environ.get("SCENE_NO_LANGFUSE") == "1":
         return
-    folder = Path(os.environ.get("SCENE_LANGFUSE_DIR") or Path(__file__).resolve().parents[3] / "langfuse")
+    folder = Path(os.environ.get("SCENE_LANGFUSE_DIR") or Path(__file__).resolve().parents[2] / "langfuse")
     if not (folder / "docker-compose.yml").is_file():
         return
     docker = shutil.which("docker") or str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/DockerDesktop/resources/bin/docker.exe")

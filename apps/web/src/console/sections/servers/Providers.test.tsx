@@ -69,7 +69,7 @@ const WITH_V1: ProvidersData = {
       kind: 'scene_provider_v1',
       kind_name: 'Scene provider (v1)',
       name: 'Zoro',
-      base_url: 'http://100.123.221.34:8189',
+      base_url: 'http://100.64.0.30:8189',
       active: true,
       priority: 0,
       legacy: '',
@@ -175,7 +175,7 @@ describe('the Providers part', () => {
     await user.click(screen.getByRole('button', { name: 'Add key' }));
     await user.selectOptions(screen.getByLabelText('Provider'), 'new:scene_provider_v1');
     await user.type(screen.getByLabelText('Name'), 'Zoro');
-    await user.type(screen.getByLabelText('Address'), 'http://100.123.221.34:8189');
+    await user.type(screen.getByLabelText('Address'), 'http://100.64.0.30:8189');
     await user.type(screen.getByLabelText('Label'), 'studio A');
     await user.type(screen.getByLabelText('Key'), 'sa_live_alpha1234');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -185,7 +185,7 @@ describe('the Providers part', () => {
       body: {
         kind: 'scene_provider_v1',
         name: 'Zoro',
-        base_url: 'http://100.123.221.34:8189',
+        base_url: 'http://100.64.0.30:8189',
         label: 'studio A',
         secret: 'sa_live_alpha1234',
         save_anyway: false,
@@ -256,13 +256,13 @@ describe('the Providers part', () => {
     await user.selectOptions(screen.getByLabelText('Provider'), 'new:scene_provider_v1');
     await user.click(screen.getByRole('button', { name: 'Several keys' }));
     expect(screen.queryByLabelText('Label')).not.toBeInTheDocument(); // labels come with the lines
-    await user.type(screen.getByLabelText('Address'), 'http://100.71.159.106:8189');
+    await user.type(screen.getByLabelText('Address'), 'http://100.64.0.20:8189');
     await user.type(screen.getByLabelText('Keys'), 'Video key\tsa_live_alpha1234{enter}sa_live_wrong0000');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(sent[0]).toMatchObject({
       url: '/api/admin/providers/keys/many',
       method: 'POST',
-      body: { kind: 'scene_provider_v1', base_url: 'http://100.71.159.106:8189', save_anyway: false },
+      body: { kind: 'scene_provider_v1', base_url: 'http://100.64.0.20:8189', save_anyway: false },
     });
     expect(String(sent[0].body.text)).toContain('sa_live_wrong0000');
     const said = screen.getByTestId('paste-results');

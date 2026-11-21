@@ -311,7 +311,7 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
           ffmpeg: { ready: true, detail: '' },
           motion: { ready: false, detail: 'Run npm install in motion/' },
         },
-        disk: { folder: 'C:/Scene/Outputs', free: 50e9, total: 100e9 },
+        disk: { folder: '/data/outputs', free: 50e9, total: 100e9 },
         backup: {
           folder: 'E:/b',
           last: now - 3600,

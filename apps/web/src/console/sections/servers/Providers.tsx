@@ -36,7 +36,7 @@ const css = classesOf(css0, css1, css2, css3, css4);
 
 const PATH = '/api/admin/providers';
 const PLACEHOLDER: Record<string, string> = {
-  scene_provider_v1: 'http://100.71.159.106:8189',
+  scene_provider_v1: 'http://127.0.0.1:8189',
 };
 const KEY_HINT: Record<string, string> = {
   scene_provider_v1: 'sa_live_… or sa_test_…',

@@ -1,0 +1,44 @@
+# Langfuse on Zoro, on top of docker-compose.yml and docker-compose.override.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.zoro.yml up -d
+#
+# - Docker-published ports bypass ufw, so only what a browser needs is published, on 127.0.0.1 alone (reach it with
+#   an SSH tunnel: ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 zoro). ClickHouse, Redis and the worker are
+#   reached inside Docker only.
+# - langfuse-web joins the network `scene-langfuse` (made once: docker network create scene-langfuse), which the
+#   studio's app also joins (deploy/zoro/docker-compose.yml): the studio reaches it at http://langfuse-web:3000.
+# - Restarts unless stopped by hand, like the studio; logs kept to 5 files of 10 MB.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  langfuse-web:
+    restart: unless-stopped
+    logging: *logging
+    networks: [default, scene-langfuse]
+  langfuse-worker:
+    ports: !reset []
+    restart: unless-stopped
+    logging: *logging
+  clickhouse:
+    ports: !reset []
+    restart: unless-stopped
+    logging: *logging
+  minio:
+    restart: unless-stopped
+    logging: *logging
+  redis:
+    ports: !reset []
+    restart: unless-stopped
+    logging: *logging
+  postgres:
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  scene-langfuse:
+    external: true

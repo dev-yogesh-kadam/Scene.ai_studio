@@ -42,3 +42,31 @@ scene.env
 
 # Coverage data (pytest-cov), made by scripts/gate.* -Coverage
 .coverage
+
+# ---- The repo is public: nothing private, no database and no media, at any depth.
+# Env files hold passwords and keys (langfuse/.env, deploy/zoro/.env, scene.env). Their *.example copies, with
+# placeholders only, are kept.
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+langfuse/.env
+deploy/*/.env
+secrets/
+*.pem
+*.key
+# Database files and copies of them (the migrations' own .sql files are not matched)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.dump
+*.bak
+# The studio's data, outputs and backups, if one is ever pointed inside the repo
+/data/
+/outputs/
+/backups/
+# The Python of the tools on this PC (PyTorch, models)
+.venv-*/

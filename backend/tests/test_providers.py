@@ -49,8 +49,8 @@ def bridge_kind_allowed(db):
 def test_the_migration_copies_the_servers_and_the_claude_connection_once(database):
     db = database
     db.run("INSERT INTO endpoints (kind, name, url, api_key, models, slots, active, created) VALUES "
-           "('comfy', 'Zoro', 'http://100.123.221.34:8188', '', '', 1, 1, ?), "
-           "('comfy', 'Generation server', 'http://100.123.221.34:8189', ?, 'generation_*', 4, 1, ?), "
+           "('comfy', 'Zoro', 'http://100.64.0.30:8188', '', '', 1, 1, ?), "
+           "('comfy', 'Generation server', 'http://100.64.0.30:8189', ?, 'generation_*', 4, 1, ?), "
            "('langfuse', 'Langfuse', 'http://127.0.0.1:3000', 'pk:sk', '', 1, 1, ?)",
            (time.time(), vault.seal("gen-key-123456"), time.time(), time.time()))
     for key, value in (("claude_connection", "lufi_bridge"), ("claude_bridge_url", "http://100.64.0.7:8765"),
@@ -67,8 +67,8 @@ def test_the_migration_copies_the_servers_and_the_claude_connection_once(databas
 def the_copy_of_0015(db):
     providers = db.all("SELECT * FROM providers ORDER BY id")
     assert [(p["kind"], p["name"], p["base_url"], p["legacy"]) for p in providers] == [
-        ("comfyui", "Zoro", "http://100.123.221.34:8188", "endpoints:1"),
-        ("comfyui", "Generation server", "http://100.123.221.34:8189", "endpoints:2"),
+        ("comfyui", "Zoro", "http://100.64.0.30:8188", "endpoints:1"),
+        ("comfyui", "Generation server", "http://100.64.0.30:8189", "endpoints:2"),
         ("anthropic", "Anthropic", "", "claude:anthropic"),
         ("claude_bridge", "LUFI bridge", "http://100.64.0.7:8765", "claude:bridge")]   # Langfuse stays in endpoints
     keys = db.all("SELECT * FROM provider_keys ORDER BY id")
@@ -96,7 +96,7 @@ def test_an_installation_without_a_claude_connection_gets_anthropic_for_the_agen
 # ---------------------------------------------------------------- the router
 
 def a_v1(db, name="Generation server", priority=0, keys=1, model="seedance_2_5", **key_fields):
-    provider_id = registry.add_provider(db, "scene_provider_v1", name, "http://100.123.221.34:8189", priority)
+    provider_id = registry.add_provider(db, "scene_provider_v1", name, "http://100.64.0.30:8189", priority)
     made = []
     for n in range(keys):
         key_id = registry.add_key(db, provider_id, "sa_live_{}{:08d}".format(name[:3].lower(), n), "key {}".format(n + 1), **key_fields)

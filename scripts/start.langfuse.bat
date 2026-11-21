@@ -1,12 +1,12 @@
 @echo off
-rem Start Langfuse (C:\Scene\langfuse, docs/langfuse.md) for start.bat, in a window of its own so the studio does not
+rem Start Langfuse (langfuse\ in the repo, docs/langfuse.md) for start.bat, in a window of its own so the studio does not
 rem wait for it. Starts Docker Desktop when its engine is not answering, waits for it (at most 3 minutes), then
 rem "docker compose up -d". Langfuse is optional: anything missing is said here and the studio runs on without it
 rem (what it sends waits in its queue until Langfuse answers).
-rem The folder is ..\..\langfuse from this script (C:\Scene\langfuse), or SCENE_LANGFUSE_DIR when it is set.
+rem The folder is ..\langfuse from this script (the repo's langfuse\), or SCENE_LANGFUSE_DIR when it is set.
 setlocal
 set "LF=%SCENE_LANGFUSE_DIR%"
-if "%LF%"=="" set "LF=%~dp0..\..\langfuse"
+if "%LF%"=="" set "LF=%~dp0..\langfuse"
 if not exist "%LF%\docker-compose.yml" ( echo Langfuse: no docker-compose.yml in %LF%; not started. & goto :done )
 
 set "DOCKER=docker"

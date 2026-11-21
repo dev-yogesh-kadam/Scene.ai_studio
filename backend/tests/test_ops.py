@@ -269,14 +269,41 @@ def test_the_compose_stack_is_its_own_project_on_ports_that_can_move_and_its_log
     assert re.search(r"(?m)^name: scene-docker$", compose)                 # never mixed with the langfuse project
     block = compose.split("\nservices:\n", 1)[1].split("\nvolumes:\n", 1)[0]
     services = re.findall(r"(?m)^  ([a-z]+):$", block)
-    assert services == ["db", "blob", "redis", "migrate", "app"]
+    assert services == ["db", "migrate", "app"]
     assert compose.count("logging: *logging") == len(services)
     assert 'max-size: "10m"' in compose and 'max-file: "5"' in compose
-    for port in ("SCENE_DOCKER_PORT:-8080", "SCENE_DOCKER_CONSOLE_PORT:-8090", "SCENE_DOCKER_BLOB_PORT:-10000"):
+    for port in ("SCENE_DOCKER_PORT:-8080", "SCENE_DOCKER_CONSOLE_PORT:-8090"):
         assert "127.0.0.1:${%s}:${%s}" % (port, port) in compose
     assert "SCENE_PORT: ${SCENE_DOCKER_PORT:-8080}" in compose
-    assert "BlobEndpoint=http://127.0.0.1:${SCENE_DOCKER_BLOB_PORT:-10000}/" in compose
     assert not re.search(r'"(127\.0\.0\.1:)?\d+:\d+"', compose)            # no port fixed in place
+
+
+def test_the_zoro_stack_publishes_nothing_beyond_its_bind_addresses_and_keeps_its_secrets_in_its_env_file():
+    """deploy/zoro: Docker-published ports bypass ufw, so each is on SCENE_BIND / SCENE_CONSOLE_BIND (127.0.0.1 unless
+    set); the database is never published; every password and the vault key come from deploy/zoro/.env; backups are
+    on; the first account is never made through the sign-in page (scene.manage create-admin makes it)."""
+    compose = (ROOT / "deploy" / "zoro" / "docker-compose.yml").read_text(encoding="utf-8")
+    block = compose.split("\nservices:\n", 1)[1].split("\nnetworks:\n", 1)[0]
+    services = dict(re.findall(r"(?ms)^  ([a-z]+):\n(.*?)(?=^  [a-z]+:\n|\Z)", block))
+    assert list(services) == ["db", "migrate", "app"]
+    assert "ports:" not in services["db"] and "ports:" not in services["migrate"]
+    published = re.findall(r'(?m)^      - "(.+)"$', services["app"].split("ports:", 1)[1].split("volumes:", 1)[0])
+    assert published == ["${SCENE_BIND:-127.0.0.1}:${SCENE_STUDIO_PORT:-8080}:${SCENE_STUDIO_PORT:-8080}",
+                         "${SCENE_CONSOLE_BIND:-127.0.0.1}:${SCENE_CONSOLE_PORT:-8090}:${SCENE_CONSOLE_PORT:-8090}"]
+    assert "0.0.0.0" not in compose
+    for secret in ("POSTGRES_PASSWORD", "SCENE_OWNER_PASSWORD", "SCENE_APP_PASSWORD", "SCENE_SECRET_KEY"):
+        assert "${%s:?" % secret in compose, secret                         # no default: missing stops compose
+    values = re.findall(r"(?m)^\s+\w*PASSWORD\w*: (.*)$", compose)
+    assert len(values) == 3 and all(value.startswith("${") for value in values), values
+    for setting in ('SCENE_BACKUP_DATABASE: "true"', 'SCENE_FIRST_ACCOUNT_LOCAL: "true"', "SCENE_OUTPUT_DIR: /outputs",
+                    "SCENE_BACKUP_DIR: /backups"):
+        assert setting in compose, setting
+    assert compose.count("restart: unless-stopped") == 2 and compose.count("logging: *logging") == 3
+    assert "external: true" in compose.split("\nnetworks:\n", 1)[1]
+    example = (ROOT / "deploy" / "zoro" / ".env.example").read_text(encoding="utf-8")
+    for line in example.splitlines():
+        if re.match(r"(POSTGRES|SCENE_OWNER|SCENE_APP)_PASSWORD=|SCENE_SECRET_KEY=", line):
+            assert line.split("=", 1)[1].startswith("<"), line              # placeholders only
 
 
 def test_the_image_has_hyperframes_with_its_chrome_and_node():

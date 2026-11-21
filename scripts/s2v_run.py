@@ -3,7 +3,7 @@ SCENE_TEST_DATABASE_URL's, kept in state.json for the next run) and storage (not
 real Claude, and the render PC's ComfyUI. It does what the agent panel does under "Allow all" (agent.js): sends the
 message, answers each question as a click would, queues the plan's steps (their references, a shot that starts on an
 earlier one, the cut), waits for them, has each picture and clip checked, and tells the agent what they made in the
-panel's own "Continue the run" words. Every turn goes to C:/Scene/workbench/prompt-ab/s2v-run/log.md; its state.json lets it go on after a stop.
+panel's own "Continue the run" words. Every turn goes to log.md in its folder (HERE); its state.json lets it go on after a stop.
 
     python scripts/s2v_run.py"""
 
@@ -13,9 +13,10 @@ import sys
 import time
 from pathlib import Path
 
-HERE = Path("C:/Scene/workbench/prompt-ab/s2v-run")   # the throwaway studio, outside the repo
-HERE.mkdir(exist_ok=True)
-ROOT = Path(r"C:\Scene\Scene.ai")
+ROOT = Path(__file__).resolve().parents[1]
+# the throwaway studio, outside the repo: SCENE_S2V_DIR, else workbench/prompt-ab/s2v-run beside the repo's folder
+HERE = Path(os.environ.get("SCENE_S2V_DIR") or ROOT.parent / "workbench" / "prompt-ab" / "s2v-run")
+HERE.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / "backend"))
 KEY = HERE / "secret.txt"   # the throwaway studio's own vault key: never secret.key in the project
 if not KEY.is_file():

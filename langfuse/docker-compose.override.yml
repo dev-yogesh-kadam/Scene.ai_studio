@@ -1,0 +1,27 @@
+# Changes to Langfuse's own docker-compose.yml (kept separate so theirs can be updated as is). docker compose reads
+# this file by itself on the studio PC. On Zoro, docker-compose.zoro.yml is added on top (see deploy/zoro/README.md).
+# - The project is named "langfuse" whatever this folder is called, so its volumes (traces, settings) are always found.
+# - Postgres is not published: a local Postgres already holds 127.0.0.1:5432, and Langfuse reaches its own inside Docker.
+# - The web UI and MinIO (the browser uploads media to it) listen on this PC only.
+# - Memory caps leave the rest of the 32 GB to Ollama.
+name: langfuse
+
+services:
+  langfuse-web:
+    ports: !override
+      - 127.0.0.1:3000:3000
+    mem_limit: 2g
+  langfuse-worker:
+    mem_limit: 2g
+  clickhouse:
+    mem_limit: 5g
+  redis:
+    mem_limit: 512m
+  minio:
+    ports: !override
+      - 127.0.0.1:9090:9000
+      - 127.0.0.1:9091:9001
+    mem_limit: 512m
+  postgres:
+    ports: !reset []
+    mem_limit: 1g

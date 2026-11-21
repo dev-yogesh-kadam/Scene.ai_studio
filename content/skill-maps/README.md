@@ -13,7 +13,7 @@ browser (double-click it); nothing else is needed.
 | [craft-skills-map.html](craft-skills-map.html) | How the 24 skills in `craft skills/` connect as one system: a connection map (who loads whom, who hands data to whom, which guides are missing), what passes along each link, each skill's links in and out, the run order, which continuity skill and prompter run when, which scene presets mix with which, the loose ends found, and where each one is now in the studio. | https://claude.ai/artifact/BrCDmE56rR24FoMVm8KqRA |
 
 The online copies are private claude.ai pages: they open only for the account they were published from
-(yogesh.k@dashverse.ai) and anyone it shares them with.
+and anyone it shares them with.
 
 ## Related notes elsewhere in the repo
 

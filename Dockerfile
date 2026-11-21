@@ -75,7 +75,7 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN pip install -r backend/requirements.txt
 COPY backend backend
 COPY workflows workflows
-COPY scripts/migrate.py scripts/move_media.py scripts/backfill_embeddings.py scripts/
+COPY scripts/migrate.py scripts/backfill_embeddings.py scripts/
 COPY --from=web /src/apps/web/dist apps/web/dist
 COPY --from=web /src/apps/mobile/dist apps/mobile/dist
 COPY apps/web/public/fonts apps/web/public/fonts

@@ -19,7 +19,7 @@ describe('the checks card', () => {
         limit: 3,
       },
       programs: { ffmpeg: { ready: true, detail: '' }, motion: { ready: false, detail: 'npm install in motion/' } },
-      disk: { folder: 'C:/Scene/Outputs', free: 5, total: 100 },
+      disk: { folder: '/data/outputs', free: 5, total: 100 },
       backup: {
         folder: 'E:/b',
         last: now - 3600,

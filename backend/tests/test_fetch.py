@@ -16,7 +16,7 @@ def run(coro):
 
 
 @pytest.mark.parametrize("url", ["http://127.0.0.1/a.png", "http://10.0.0.5/a.png", "http://192.168.1.4/a.png", "http://169.254.169.254/latest",
-                                 "http://[::1]/a.png", "http://[::ffff:127.0.0.1]/a.png", "http://100.123.221.34:8188/view"])
+                                 "http://[::1]/a.png", "http://[::ffff:127.0.0.1]/a.png", "http://100.64.0.30:8188/view"])
 def test_private_addresses_are_never_fetched(url):
     with pytest.raises(fetch.FetchError, match="not a public address"):
         run(fetch._check_host(url))
@@ -99,7 +99,7 @@ def test_the_agent_brings_in_a_link_from_the_chat(client, monkeypatch):
 # ---------------------------------------------------------------- the guard's gaps (hardening, Nov 2026)
 
 @pytest.mark.parametrize("address", ["::127.0.0.1", "::7f00:1", "64:ff9b::7f00:1", "64:ff9b::a00:5", "::ffff:0:7f00:1",
-                                     "fec0::1", "fe80::1%12", "fd12:3456::1", "::", "0.0.0.0", "100.64.0.1", "::ffff:100.123.221.34"])
+                                     "fec0::1", "fe80::1%12", "fd12:3456::1", "::", "0.0.0.0", "100.64.0.1", "::ffff:100.64.0.30"])
 def test_ipv6_forms_of_a_private_address_are_private(address):
     assert not fetch._public(address)
 
