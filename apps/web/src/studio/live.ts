@@ -1,5 +1,5 @@
 // The live connection (packages/shared/live) for the signed-in studio: what it hears goes into the Query cache (the jobs,
-// the render server's state) and the session (the credits); "the library changed" makes the library's queries stale.
+// the page files' version) and the session (the credits); "the library changed" makes the library's queries stale.
 // A busy queue says where its jobs stand several times a second: what is heard before the next frame is put in at once,
 // and only what changed is written, so a page is drawn again only for a change it shows.
 
@@ -13,7 +13,7 @@ import type { Job } from '@scene/shared/types/api';
 import { api } from '../common/api';
 import { useSession } from './session';
 
-export type StudioStatus = { online: boolean | null; page?: number };
+export type StudioStatus = { page?: number };
 
 export const JOBS = ['jobs'] as const;
 export const STATUS = ['status'] as const;
@@ -28,11 +28,10 @@ export function useJobs() {
   return useQuery({ queryKey: JOBS, queryFn: fetchJobs, staleTime: Infinity }).data ?? [];
 }
 
-/** Whether the render server answers (null until known), and the version of the page files on the server. */
+/** The version of the page files on the server (none until known). */
 export function useStatus(): StudioStatus {
   return (
-    useQuery<StudioStatus>({ queryKey: STATUS, queryFn: () => ({ online: null }), staleTime: Infinity, enabled: false })
-      .data ?? { online: null }
+    useQuery<StudioStatus>({ queryKey: STATUS, queryFn: () => ({}), staleTime: Infinity, enabled: false }).data ?? {}
   );
 }
 
@@ -74,15 +73,9 @@ export function useStudioLive() {
       onMessage: batch.add,
       pollJobs: () => fetchJobs().then(setJobs),
       pollStatus: () =>
-        api<{ online: boolean; page?: number }>('/api/status').then(
-          (found) => {
-            client.setQueryData<StudioStatus>(STATUS, { online: found.online, page: found.page });
-          },
-          (error) => {
-            client.setQueryData<StudioStatus>(STATUS, (was) => ({ ...was, online: false }));
-            throw error;
-          },
-        ),
+        api<{ page?: number }>('/api/status').then((found) => {
+          client.setQueryData<StudioStatus>(STATUS, { page: found.page });
+        }),
       page: () => window.location.pathname.replace(/\/+$/, '') || '/',
     });
     void fetchJobs()

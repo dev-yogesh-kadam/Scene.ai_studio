@@ -87,7 +87,6 @@ function HealthStrip({ h, queue }: { h: Health; queue: Queue }) {
   const gbFree = h.disk_free / 1024 ** 3;
   return (
     <div className={css('health-strip')}>
-      {chip(h.render ? 'good' : 'bad', 'Render server', h.render ? 'Online' : 'Offline', 'system')}
       {h.model !== null && chip(h.model ? 'good' : 'bad', 'Model server', h.model ? 'Online' : 'Offline', 'system')}
       {chip(
         queue.paused ? 'warn' : 'good',
@@ -103,12 +102,6 @@ function HealthStrip({ h, queue }: { h: Health; queue: Queue }) {
         'Backup',
         !h.backups_on ? 'Off' : h.last_backup ? ago(h.last_backup) : 'None yet',
         'system',
-      )}
-      {chip(
-        !h.node_list || age(h.node_list) > 3 ? 'warn' : 'good',
-        'Node list',
-        h.node_list ? ago(h.node_list) : 'None',
-        'workflows',
       )}
     </div>
   );
@@ -274,7 +267,7 @@ export default function Overview() {
               <Signups s={o.signups} />
             </div>
             <div className={css('grid-2')}>
-              <QueueCard q={o.queue} server={o.server} />
+              <QueueCard q={o.queue} />
               <Activity rows={o.activity} />
             </div>
             <Earnings money={o.economics} days={days} />

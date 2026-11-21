@@ -17,19 +17,19 @@ from test_agent_shots import hosted
 from test_api import register
 
 V2 = Path(__file__).resolve().parents[2] / "content" / "craft-skills" / "v2" / "craft skills"
-SEEDANCE_AND_WAN_ROWS = {"`": 6, "|": 12, "seedance_2_5": 2, "seedream-5-0-pro": 1, "craft-prompter-seedance-2-5": 1, "Board": 2,
-                         "Chain": 1, "Recall": 2, "seedance_2_0": 1, "seedance_2_0_fast": 1, "seedance_2_0_mini": 1,
-                         "craft-prompter-seedance-2": 1, "wan_3_0": 1, "wan_3_0_prime": 1, "craft-prompter-wan-3": 1}
-PORTED = {   # studio skill: (its v2 file, the v2 words it may leave out: the models the studio does not have)
-    "script-to-video": ("Header skills/script-to-video.md", SEEDANCE_AND_WAN_ROWS),
-    "script-writer": ("script writer/craft-script-writer.md", {}),
-    "asset-designer": ("asset creation/craft-asset-designer.md", {"seedream-5-0-pro": 1}),
-    "director": ("director/craft-director.md", {}),
-    "anchor": ("continuity/craft-anchor.md", {"model_name": 1, "seedream-5-0-pro": 1}),
-    "continuity-chain": ("continuity/craft-continuity-chain.md", {}),
-    "continuity-board": ("continuity/craft-continuity-board.md", {}),
-    "continuity-recall": ("continuity/craft-continuity-recall.md", {}),
-    "prompter-minimax-h3": ("prompters/craft-prompter-minimax-h3.md", {}),
+PORTED = {   # studio skill: its v2 file. Since 20 November (the providers' models) every v2 word is kept, models included
+    "script-to-video": "Header skills/script-to-video.md",
+    "script-writer": "script writer/craft-script-writer.md",
+    "asset-designer": "asset creation/craft-asset-designer.md",
+    "director": "director/craft-director.md",
+    "anchor": "continuity/craft-anchor.md",
+    "continuity-chain": "continuity/craft-continuity-chain.md",
+    "continuity-board": "continuity/craft-continuity-board.md",
+    "continuity-recall": "continuity/craft-continuity-recall.md",
+    "prompter-minimax-h3": "prompters/craft-prompter-minimax-h3.md",
+    "prompter-seedance-2-5": "prompters/craft-prompter-seedance-2-5.md",
+    "prompter-seedance-2": "prompters/craft-prompter-seedance-2.md",
+    "prompter-wan-3": "prompters/craft-prompter-wan-3.md",
 }
 
 
@@ -39,23 +39,25 @@ def words(text):
 
 @pytest.mark.skipif(not V2.is_dir(), reason="the craft skills v2 folder is not here")
 @pytest.mark.parametrize("sid", list(PORTED))
-def test_a_ported_skill_keeps_every_v2_word_but_the_models_the_studio_lacks(sid):
-    source, may_go = PORTED[sid]
+def test_a_ported_skill_keeps_every_v2_word(sid):
+    source = PORTED[sid]
     raw = (V2 / source).read_text(encoding="utf-8").replace("\r\n", "\n")
     v2_body = raw[raw.index("\n---\n", 4) + 5:]
     ours = skills.find(sid)
     gone = words(v2_body) - words(ours["text"])
-    assert all(gone[w] <= may_go.get(w, 0) for w in gone), (sid, {w: n for w, n in gone.items() if n > may_go.get(w, 0)})
+    assert not gone, (sid, dict(gone))
     assert ours["craft"] == (sid != "script-to-video") and ours["title"].startswith(("Craft ", "Script to Video"))
 
 
 def test_the_studio_adds_its_own_lines_to_the_header_and_keeps_its_steps():
     header = skills.find("script-to-video")["text"]
     assert "## 0 — Is this a film? (Studio)" in header and "## 9 — The cut (Studio)" in header      # D3, D2
-    assert "a fifth kind, Audio" in header and "480p and 768p (Default)" in header                  # D1, D8
-    assert "on H3 Chunk that is Board (Default) and Recall" in header                               # D4
-    assert "use `minimax_h3` and FLUX.2 dev." in header and "seedance" not in header.split("Chain is left out")[0]
-    assert skills.find("anchor")["text"].count("FLUX.2 dev") >= 2                                   # D7
+    assert "a fifth kind, Audio" in header and "480p (Default), 720p and 1080p" in header           # D1, D8
+    assert "Chain puts the clip before in the model's Reference video slot (@Video1)" in header     # D4
+    assert "use `seedance_2_5` and `seedream-5-0-pro`." in header and "| `wan_3_0`, `wan_3_0_prime` | craft-prompter-wan-3 |" in header
+    assert "video/@lip_sync" in header and "h3_chunk" not in header and "FLUX.2" not in header       # the models are the providers'
+    assert "audio/@speech" in header and "/s2v/setup/narrator_voice" in header                     # the narrator is voiced
+    assert "Nano Banana" not in skills.find("anchor")["text"] and "image/@seedream-5-0-pro" in skills.find("anchor")["text"]   # D7
     assert "Studio: on its own" in skills.find("director")["text"]                                  # D5
     assert not skills.find("script-to-video")["next"]   # the craft skills it loads are craft: no hand-off line after it
     guide = Path(skills.__file__).with_name("prompters") / "minimax-h3.md"

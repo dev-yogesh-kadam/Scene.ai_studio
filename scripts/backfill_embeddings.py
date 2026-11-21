@@ -28,7 +28,7 @@ def main():
     db = Database(settings.database_url, seed=False, loop_guard="off", time_zone=settings.time_zone)
     if not semantic.available(db):
         raise SystemExit("The database has no embeddings table: install pgvector, CREATE EXTENSION vector, then "
-                         "migrate.py downgrade 0010 and upgrade (docs/azure.md).")
+                         "migrate.py downgrade 0010 and upgrade (docs/database.md, Embeddings).")
     embedder = semantic.Embedder(settings.embedding_provider, settings.embedding_api_key, settings.embedding_endpoint,
                                  settings.embedding_model)
     with as_everyone():

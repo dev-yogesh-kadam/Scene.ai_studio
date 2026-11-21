@@ -10,7 +10,7 @@ words: \b(chain continuity|v2v continuity|carry (it )?on from (the )?(last|previ
 
 Every clip after the first is a forward extension of the one before it. The model sees the earlier clip and starts the new one where it stopped, so motion, space and sound carry over on their own.
 
-**Studio:** no workflow here extends a clip yet (`video_extend_wan_vace` is not connected), so script-to-video does not offer Chain on H3. When the user asks for it anyway, a clip after the first is a "generate" step with "after" the clip before: it starts on that clip's last frame, so motion and sound do not carry over, and faces can drift; say so once. `mode: extend`, `source_video` and `role: extend` are that "after".
+**Studio:** Chain is offered on the video models script-to-video's table gives it (Seedance 2.5 and Wan 3: their Reference video slot, cited as @Video1). A clip after the first is a "generate" step with the kept clip before in that slot ("uses"); `mode: extend`, `source_video` and `role: extend` are that slot. A clip before that is too long for the slot is trimmed first, as the prompter's §5 says (Seedance 2.5: its last 29 s; Wan 3: its last 15 s), with the ffmpeg tool, keeping its end; the studio refuses a step whose reference video is over the model's seconds and says so. On a model without Chain (Seedance 2.0, MiniMax H3), when the user asks for Chain anyway, the clip is a "generate" step with "after" the clip before: it starts on that clip's last frame, so motion and sound do not carry over, and faces can drift; say so once.
 
 ## First clip of a scene
 A normal generation: mode `generate`.

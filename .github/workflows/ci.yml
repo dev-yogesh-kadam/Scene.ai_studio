@@ -1,9 +1,10 @@
 # The checks every push and pull request must pass (T4): the code (types, lint, design tokens, unit tests of the web
 # app, the shared package and the phone site), the backend (pytest on PostgreSQL), the web app built (with its bundle
-# budget) and driven end to end by Playwright against the fake ComfyUI, the phone site built for the smoke test's /m/,
-# the smoke test, the agent's evals in replay (recorded answers: free, never the real Claude), the order check of two test
-# files, and the audits (pip-audit, npm audit, a secret scan). scripts/gate.ps1 and gate.sh run the same on a PC.
-# Nothing here reaches the real render server or anyone's data: every studio is started on a database of its own.
+# budget) and driven end to end by Playwright against the fake Scene provider (apps/web/tests/support/fake-v1.mjs), the
+# phone site built for the smoke test's /m/, the smoke test (against the same fake provider), the agent's evals in replay
+# (recorded answers: free, never the real Claude), the order check of two test files, and the audits (pip-audit,
+# npm audit, a secret scan). scripts/gate.ps1 and gate.sh run the same on a PC.
+# Nothing here reaches a real provider or anyone's data: every studio is started on a database of its own.
 
 name: CI
 
@@ -132,13 +133,13 @@ jobs:
       - name: Playwright's browser
         working-directory: apps/web
         run: npx playwright install --with-deps chromium
-      - name: Playwright, against the fake ComfyUI
+      - name: Playwright, against the fake Scene provider
         working-directory: apps/web
         run: npx playwright test
       - name: The phone site, built (the smoke test opens /m/)
         run: npm run build -w apps/mobile
-      - name: Smoke test, against the fake ComfyUI
-        run: node apps/web/tests/smoke/smoke.mjs --fake-comfy
+      - name: Smoke test, against the fake Scene provider
+        run: node apps/web/tests/smoke/smoke.mjs
       - name: What Playwright saw when a test failed
         if: failure()
         uses: actions/upload-artifact@v4

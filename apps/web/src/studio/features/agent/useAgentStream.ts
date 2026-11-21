@@ -79,7 +79,7 @@ export async function sendMessage(chat: AgentChat, typed?: Typed) {
         model: userPrefs.agent().model,
         effort: chat.effortOf(chat.models.current) || null,
         direction: chat.direction,
-        run: chat.env.session || 'main',
+        ...(chat.env.session ? { run: chat.env.session } : {}),
         tab: chat.env.tabName(),
         explain: chat.explain,
         workflows: chat.chatWorkflows,

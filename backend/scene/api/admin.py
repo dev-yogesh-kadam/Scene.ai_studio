@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import __version__, audit, backup, claude, claude_connection, edits, endpoints, errors, generation_models, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, storage, vault, versions
+from .. import __version__, audit, backup, claude, claude_connection, edits, endpoints, errors, guardrails, health, kit, langfuse_trace, media, moderation, phone, roles, sessions, showcase, skills, staff, vault, versions
 from ..agent import AgentError
 from ..catalog import KINDS
 from ..comfy import workflows
@@ -40,7 +40,7 @@ DONE_FAILED = COUNT_IF.format("status = 'done'") + " AS done, " + COUNT_IF.forma
 
 def _settings(state):
     # allow_signup: the admin's choice, kept while a personal Claude subscription closes sign-up anyway (signup_testing)
-    return {"comfy_url": state.comfy.url, "allow_signup": signup_chosen(state), "signup_testing": claude_connection.testing(),
+    return {"allow_signup": signup_chosen(state), "signup_testing": claude_connection.testing(),
             "signup_credits": state.credits.signup, "daily_cap": state.credits.daily_cap,
             "admin_mfa": state.db.setting("admin_mfa", "0") == "1",
             # Langfuse (docs/langfuse.md): whether the words are sent with the numbers, and the share of the agent's turns
@@ -148,7 +148,7 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
         return _daily(db, calendar, "SELECT {} AS day, {} AS n FROM {} WHERE {} > ? {} GROUP BY day".format(
             db.local_day(column), value, table, column, extra), since)
 
-    server, model = await asyncio.gather(health.render_server(state), health.model_server(state))
+    model = await health.model_server(state)
     running = await db.aone("SELECT j.id, j.name, j.workflow, j.started, j.est_seconds, u.name AS user_name "
                      "FROM jobs j JOIN users u ON u.id = j.user_id WHERE j.status = 'running'")
     if running:
@@ -159,7 +159,7 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
                      "JOIN users u ON u.id = j.user_id WHERE j.status = 'queued' ORDER BY j.priority DESC, j.created LIMIT 8")
 
     # Things an admin should act on: what the watcher checks for (health.py), then what only matters here.
-    attention = [{k: p[k] for k in ("level", "text", "tab")} for p in await health.problems(state, server, model)]
+    attention = [{k: p[k] for k in ("level", "text", "tab")} for p in await health.problems(state, model)]
     closed = await offload(health.maintenance, db)
     if closed:
         left = (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')"))["n"]
@@ -183,9 +183,8 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
     broke = (await db.aone("SELECT COUNT(*) n FROM users WHERE credits <= 0 AND disabled = 0"))["n"]
     if broke:
         attention.append({"level": "warning", "text": "{} user{} out of credits.".format(broke, " is" if broke == 1 else "s are"), "tab": "users"})
-    unreadable = [w["title"] for w in await state.catalog.listing() if w.get("error")]
-    if unreadable:
-        attention.append({"level": "warning", "text": "Workflows that can't be read: {}.".format(", ".join(unreadable)), "tab": "workflows"})
+    if not await state.catalog.listing():
+        attention.append({"level": "serious", "text": "No models are offered: add a provider key in Servers & APIs.", "tab": "servers"})
 
     activity = [
         {"time": a["created"], "who": a["actor_name"] or a["target"], "text": a["action"] + (": " + a["detail"] if a["detail"] else ""), "kind": "audit"}
@@ -226,12 +225,10 @@ async def overview(request: Request, days: int = 30, user: dict = Depends(admin_
             "WHERE status = 'failed' AND created > ? GROUP BY substr(error, 1, 140) ORDER BY jobs DESC, last_seen DESC LIMIT 5", (since,)),
         "queue": {"running": running, "waiting": waiting, "paused": await offload(state.jobs.paused),
                   "waiting_total": (await db.aone("SELECT COUNT(*) n FROM jobs WHERE status = 'queued'"))["n"]},
-        "server": {"online": server["online"], "version": server.get("system", {}).get("comfyui_version"), "since": server["since"]},
         "model_server": {"online": model["online"], "since": model["since"] if model["url"] else None},
-        "health": {"render": server["online"], "model": model["online"], "disk_free": shutil.disk_usage(state.output_dir).free,
+        "health": {"model": model["online"], "disk_free": shutil.disk_usage(state.output_dir).free,
                    "last_backup": backup.newest(state.backup_dir), "backups_on": state.settings.backup_keep > 0,
-                   "alerts": len(await db.aall("SELECT id FROM alerts WHERE ended IS NULL")), "maintenance": bool(closed),
-                   "node_list": state.catalog.nodes_saved()},
+                   "alerts": len(await db.aall("SELECT id FROM alerts WHERE ended IS NULL")), "maintenance": bool(closed)},
         "online": await offload(_online, state),
         "signups": signups,
         "economics": {"workflows": money["workflows"][:6], "totals": money["totals"], "unmeasured": money["unmeasured"]},
@@ -506,12 +503,6 @@ async def pause_queue(body: dict, request: Request, user: dict = Depends(admin_u
     return {"paused": paused}
 
 
-@router.post("/server/check")
-async def check_server(request: Request, user: dict = Depends(admin_user)):
-    found = await health.render_server(request.app.state, fresh=True)
-    return {"online": found["online"], "since": found["since"], "url": found["url"]}
-
-
 @router.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str, request: Request, user: dict = Depends(admin_user)):
     """Cancel any user's waiting or running job. The user gets the credits back."""
@@ -581,9 +572,6 @@ async def list_library(request: Request, kind: str = "", q: str = "", owner: str
 @router.get("/library/{item_id}/file")
 async def library_file(item_id: int, request: Request, download: bool = False, user: dict = Depends(admin_user)):
     _, path = await offload(_item, request, item_id)
-    elsewhere = storage.signed(request.app.state, "outputs", path, path.name if download else None)
-    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
-        return elsewhere
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path, filename=path.name if download else None)
@@ -623,7 +611,6 @@ async def add_to_showcase(body: dict, request: Request, user: dict = Depends(adm
     """Put a library item on every user's Home page: {item_id, section?, name?}. Its file is copied."""
     try:
         row, path = await offload(_item, request, int(body.get("item_id") or 0))
-        path = await offload(storage.here, path)   # the file is copied: here first, when the media are kept elsewhere
         item = await offload(showcase.add, request.app.state.db, request.app.state.showcase_dir, row, path, body.get("section") or "", body.get("name") or "")
     except (TypeError, ValueError) as error:
         raise HTTPException(400, str(error) or "No such item.")
@@ -658,9 +645,6 @@ async def remove_from_showcase(key: str, request: Request, user: dict = Depends(
 async def showcase_file(key: str, request: Request, user: dict = Depends(admin_user)):
     item = await offload(showcase.find, request.app.state.db, key)
     path = item and showcase.path_of(request.app.state.showcase_dir, item)
-    elsewhere = path and storage.signed(request.app.state, "showcase", path)
-    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
-        return elsewhere
     if not path or not path.is_file():
         raise HTTPException(404, "No such item on the Home page.")
     return FileResponse(path)
@@ -725,41 +709,23 @@ async def credits_for_everyone(body: dict, request: Request, user: dict = Depend
 
 @router.get("/workflows")
 async def workflow_report(request: Request, user: dict = Depends(admin_user)):
-    """Each workflow file: whether it can be read, who it is offered to, what it needs that the render server lacked
-    when its node list was saved, its versions, and how much it is used. Also what the render PC changed lately."""
+    """Each model offered now (a provider's, as a workflow): who it is offered to, an example price, the resolutions
+    switched off, and how much it is used."""
     state = request.app.state
-    await offload(versions.look, state)
     usage = {r["workflow"]: r for r in await state.db.aall(
         "SELECT workflow, COUNT(*) AS jobs, " + DONE_FAILED + ", "
         "AVG(CASE WHEN status = 'done' THEN extract(epoch FROM finished - started) END) AS avg_seconds, MAX(created) AS last_used "
         "FROM jobs GROUP BY workflow")}
-    kept = {r["workflow"]: r for r in await state.db.aall(
-        "SELECT workflow, COUNT(*) AS versions, MAX(seen) AS changed FROM workflow_versions GROUP BY workflow")}
-    nodes = state.catalog.object_info or state.catalog.saved
-    files = state.catalog.files()
-    items = await state.catalog.listing()
     switches = await offload(state.credits.resolutions_off)
+    items = await state.catalog.listing()
     for item in items:
-        path = files[item["id"]]
         used = usage.get(item["id"], {})
-        try:
-            needs = versions.missing(await state.catalog.load(item["id"]), nodes)
-        except WorkflowError:
-            needs = None
-        item.update(file=path.name, presets=state.catalog.sidecar_of(path).is_file(),
-                    jobs=used.get("jobs", 0), done=used.get("done", 0) or 0, failed=used.get("failed", 0) or 0,
+        item.update(jobs=used.get("jobs", 0), done=used.get("done", 0) or 0, failed=used.get("failed", 0) or 0,
                     avg_seconds=used.get("avg_seconds"), last_used=used.get("last_used"),
-                    audience=versions.audience(await offload(state.credits.pricing, item["id"])), example=await offload(state.credits.cost, item["id"], 5),
-                    missing=needs, versions=kept.get(item["id"], {}).get("versions", 0), changed=kept.get(item["id"], {}).get("changed"),
-                    resolutions_off=switches.get(item["id"], []))
-    return {"workflows": items, "folder": str(state.catalog.directory), "nodes_saved": state.catalog.nodes_saved(),
-            "new_admins_only": await state.db.asetting("new_workflows_admins_only", "0") == "1", "resolutions_off": switches, **await offload(state.versions.drops)}
-
-
-@router.get("/workflows/history")
-async def workflow_history(workflow: str, request: Request, user: dict = Depends(admin_user)):
-    """Every version of one workflow, newest first, each with what changed from the one before."""
-    return {"workflow": workflow, "versions": await offload(request.app.state.versions.history, workflow)}
+                    audience=versions.audience(await offload(state.credits.pricing, item["id"])),
+                    example=await offload(state.credits.cost, item["id"], 5), resolutions_off=switches.get(item["id"], []))
+    return {"workflows": items, "new_admins_only": await state.db.asetting("new_workflows_admins_only", "0") == "1",
+            "resolutions_off": switches}
 
 
 @router.put("/workflows/audience")
@@ -767,7 +733,7 @@ async def workflow_audience(body: dict, request: Request, user: dict = Depends(a
     """Offer a workflow to everyone, to admins alone (to try it before users see it), or to nobody."""
     state = request.app.state
     workflow, audience = str(body.get("workflow") or ""), body.get("audience")
-    if workflow not in state.catalog.files():
+    if not await state.catalog.known(workflow):
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     if audience not in versions.AUDIENCES:
         raise HTTPException(400, "Offer it to everyone, admins or nobody.")
@@ -779,7 +745,8 @@ async def workflow_audience(body: dict, request: Request, user: dict = Depends(a
 
 @router.put("/workflows/settings")
 async def workflow_settings(body: dict, request: Request, user: dict = Depends(admin_user)):
-    """{new_admins_only}: whether a workflow the render PC adds is offered to admins alone until one offers it to everyone."""
+    """{new_admins_only}: whether a model a provider key newly offers is offered to admins alone until one offers it
+    to everyone (providers/workflows.ProviderWorkflows)."""
     hold = body.get("new_admins_only") is True
     await request.app.state.db.aset_setting("new_workflows_admins_only", "1" if hold else "0")
     await offload(audit.record, request, user, "New workflows start for admins only" if hold else "New workflows start for everyone")
@@ -798,7 +765,7 @@ async def set_workflow_resolutions(body: dict, request: Request, user: dict = De
     kind, or for the one workflow. A job asked at one of them is made at the next one allowed, and says so."""
     state = request.app.state
     key, off = str(body.get("key") or ""), body.get("off")
-    if key not in KINDS and key != "upscaler" and key not in state.catalog.files():
+    if key not in KINDS and key != "upscaler" and not await state.catalog.known(key):
         raise HTTPException(404, "There is no workflow or kind named '{}'.".format(key))
     if not isinstance(off, list) or any(str(t) not in credits_module.TIERS for t in off):
         raise HTTPException(400, "Name the resolutions to switch off: 480, 720 or 1080.")
@@ -808,14 +775,6 @@ async def set_workflow_resolutions(body: dict, request: Request, user: dict = De
     await offload(audit.record, request, user, "Switched resolutions off" if tiers else "Switched every resolution on", key,
                  ", ".join(t + "p" for t in tiers) or "all on")
     return {"key": key, "off": tiers}
-
-
-@router.post("/workflows/nodes")
-async def refresh_nodes(request: Request, user: dict = Depends(admin_user)):
-    """Fetch the render server's node list again: which node types and model files it has now."""
-    state = request.app.state
-    await state.catalog.refresh_nodes()   # an unreachable server is answered as such (main._answer_errors)
-    return {"nodes_saved": state.catalog.nodes_saved()}
 
 
 # A prompt for a test run of a workflow whose own prompt is empty.
@@ -844,7 +803,7 @@ async def test_run(body: dict, request: Request, user: dict = Depends(admin_user
         settings["prompt"] = str(settings["values"].get(roles["prompt"]["id"], roles["prompt"]["default"]) or "")
         needs_caption(wf, settings, roles["prompt"]["id"])
     settings["details"] = [[c["label"].split(" (")[0], c["default"]] for c in schema["controls"] if not c["role"]]
-    settings["workflow_title"] = generation_models.title_of(schema, settings.get("options"))
+    settings["workflow_title"] = schema["title"]
     estimate = workflows.estimate(wf, settings, await offload(state.jobs.history))
     job_id = await offload(state.jobs.add, user["id"], "Test · " + schema["title"], wf["id"], settings, workflows.summary(schema, ctx),
                             estimate["minutes"] * 60 if estimate["minutes"] else None, 0, during_maintenance=True)
@@ -857,12 +816,7 @@ async def test_run(body: dict, request: Request, user: dict = Depends(admin_user
 async def system(request: Request, user: dict = Depends(admin_user)):
     state, db = request.app.state, request.app.state.db
     storage = state.storage_dir
-    server, model = await asyncio.gather(health.render_server(state), health.model_server(state))
-    if server["online"]:
-        try:
-            server["queue"] = await state.comfy.queue_state()
-        except (httpx.HTTPError, ValueError):
-            server["queue"] = None
+    model = await health.model_server(state)
     disk = shutil.disk_usage(storage)
     try:
         ffmpeg = media.ffmpeg_path()
@@ -870,7 +824,6 @@ async def system(request: Request, user: dict = Depends(admin_user)):
         ffmpeg = None
     closed = await offload(health.maintenance, db)
     return {
-        "server": server,
         "model_server": model,
         "checks": await health.checks(state),   # every check in one answer: database, Claude, programs, disk, backup, Langfuse
         "maintenance": dict(closed, on=True, left=(await db.aone("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued', 'running')"))["n"])
@@ -957,8 +910,8 @@ async def verify_audit(request: Request, user: dict = Depends(admin_user)):
 
 @router.get("/storage")
 async def storage_report(request: Request, user: dict = Depends(admin_user)):
-    """Disk space per user (their finished work and saved assets), the largest files, and the reference files the
-    studio has put on the render server."""
+    """Disk space per user (their finished work and saved assets), the largest files, and the reference files each
+    user added to jobs (kept by the studio, references.keep_reference)."""
     state, db = request.app.state, request.app.state.db
     people = []
     for person in await db.aall("SELECT id, name, email FROM users ORDER BY id"):
@@ -988,47 +941,46 @@ async def audit_log(request: Request, q: str = "", user: dict = Depends(admin_us
 
 @router.get("/endpoints")
 async def list_endpoints(request: Request, fresh: bool = False, user: dict = Depends(admin_user)):
-    """The ComfyUI servers, each with whether it answers (endpoints.py): as found in the
-    last few seconds, or now (`fresh`, the section's Check again)."""
+    """Langfuse, with whether it answers (endpoints.py): as found in the last few seconds, or now (`fresh`, the
+    section's Check again)."""
     state = request.app.state
     found = await health.remembered(state, "endpoints", lambda: endpoints.status(state), fresh)
     return {"kinds": endpoints.KINDS, "endpoints": found}
 
 
-def _endpoints_changed(state, main_before):
-    provider_registry.mirror_endpoints(state.db)   # the Providers list keeps ComfyUI's servers in step
-    state.router.forget()
-    state.comfy_pool.reload()
+def _endpoints_changed(state):
     health.forget(state, "endpoints")   # the section shows the change at once
-    health.forget(state, "status")
-    if state.comfy.url != main_before:   # another main server: its nodes are read again
-        state.catalog.forget_nodes()
-    state.jobs._wake()   # a new free server takes the waiting renders (this runs on a database thread)
 
 
 @router.post("/endpoints")
 async def add_endpoint(body: dict, request: Request, user: dict = Depends(admin_user)):
-    state, main = request.app.state, request.app.state.comfy.url
-    row = endpoints.clean(body)
+    state = request.app.state
+    try:
+        row = endpoints.clean(body)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
     await state.db.arun("INSERT INTO endpoints (kind, name, url, api_key, models, slots, active, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                  (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["slots"], row["active"], time.time()))
-    await offload(_endpoints_changed, state, main)
+    await offload(_endpoints_changed, state)
     await offload(audit.record, request, user, "Added a server", row["name"], "{} at {}".format(endpoints.KINDS[row["kind"]], row["url"]))
     return {}
 
 
 @router.put("/endpoints/{endpoint_id}")
 async def change_endpoint(endpoint_id: int, body: dict, request: Request, user: dict = Depends(admin_user)):
-    state, main = request.app.state, request.app.state.comfy.url
+    state = request.app.state
     before = await state.db.aone("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
     if before is None:
         raise HTTPException(404, "There is no such server.")
     if not str(body.get("api_key") or "").strip():
         body = {k: v for k, v in body.items() if k != "api_key"}   # left empty: the key it has is kept
-    row = endpoints.clean(body, before)
+    try:
+        row = endpoints.clean(body, before)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
     await state.db.arun("UPDATE endpoints SET kind = ?, name = ?, url = ?, api_key = ?, models = ?, slots = ?, active = ? WHERE id = ?",
                  (row["kind"], row["name"], row["url"], vault.seal(row["api_key"]), row["models"], row["slots"], row["active"], endpoint_id))
-    await offload(_endpoints_changed, state, main)
+    await offload(_endpoints_changed, state)
     await offload(audit.record, request, user, "Changed a server", row["name"], "{} at {}{}".format(
         endpoints.KINDS[row["kind"]], row["url"], "" if row["active"] else ", off"))
     return {}
@@ -1036,14 +988,12 @@ async def change_endpoint(endpoint_id: int, body: dict, request: Request, user: 
 
 @router.delete("/endpoints/{endpoint_id}")
 async def remove_endpoint(endpoint_id: int, request: Request, user: dict = Depends(admin_user)):
-    state, main = request.app.state, request.app.state.comfy.url
+    state = request.app.state
     before = await state.db.aone("SELECT * FROM endpoints WHERE id = ?", (endpoint_id,))
     if before is None:
         raise HTTPException(404, "There is no such server.")
-    if state.comfy_pool.running(before["url"]):
-        raise HTTPException(400, "A render is running there. Switch it off, and remove it once the render is done.")
     await state.db.arun("DELETE FROM endpoints WHERE id = ?", (endpoint_id,))
-    await offload(_endpoints_changed, state, main)
+    await offload(_endpoints_changed, state)
     await offload(audit.record, request, user, "Removed a server", before["name"], before["url"])
     return {}
 
@@ -1178,7 +1128,7 @@ async def admins_without_mfa(request: Request, user: dict = Depends(admin_user))
 
 # ---------------------------------------------------------------- projects
 
-# A project's own rows and its modules' (a module is a project inside a project, sharing its kit).
+# A project's own rows and its modules' (a module is a project inside a project, with a NeuralCore of its own).
 IN_PROJECT = "({0}.project_id = p.id OR {0}.project_id IN (SELECT m.id FROM projects m WHERE m.parent_id = p.id))"
 
 
@@ -1231,8 +1181,6 @@ async def asset_file(asset_id: int, request: Request, user: dict = Depends(admin
     state = request.app.state
     row = await state.db.aone("SELECT user_id, filename FROM assets WHERE id = ?", (asset_id,))
     path = row and (state.assets_dir / str(row["user_id"]) / row["filename"]).resolve()
-    if path and path.is_relative_to(state.assets_dir.resolve()) and state.storage.name != "local":
-        return storage.signed(state, "kit", path)   # kept in Blob Storage: fetched from there (storage.py)
     if not path or not path.is_relative_to(state.assets_dir.resolve()) or not path.is_file():
         raise HTTPException(404, "No such file.")
     return FileResponse(path)
@@ -1638,16 +1586,12 @@ def _row(body, fields):
 
 
 async def _pricing_items(state):
-    """The workflow listing for the Pricing section, a generation workflow with its models (generation_models.catalog)."""
+    """The workflow listing for the Pricing section: each model with its provider's price, a starting point for the
+    studio's."""
     items = await state.catalog.listing()
     for item in items:
-        if item.get("source") == "generation" and not item.get("error"):
-            schema = workflows.describe(await state.catalog.load(item["id"]))
-            if generation_models.has_models(schema):   # a voiceover, music, lip sync …: priced like a workflow
-                item["model_catalog"] = generation_models.catalog(schema, await state.generation_models.live(item["id"]))
-            if item.get("provider"):   # a provider's model: its provider's price, a starting point for the studio's
-                wf = await state.catalog.load(item["id"])
-                item["provider_price"] = provider_workflows.price_words((wf["profile"].get("provider") or {}).get("pricing") or {})
+        wf = await state.catalog.load(item["id"])
+        item["provider_price"] = provider_workflows.price_words((wf["profile"].get("provider") or {}).get("pricing") or {})
     return items
 
 
@@ -1749,7 +1693,7 @@ async def put_workflow_pricing(body: dict, request: Request, user: dict = Depend
     """Give one workflow its own pricing, or switch it off. A rate left empty follows the rate of the workflow's kind."""
     state = request.app.state
     workflow = str(body.get("workflow") or "")
-    if workflow not in (MOTION, OVERLAY) and not state.catalog.known(workflow):
+    if workflow not in (MOTION, OVERLAY) and not await state.catalog.known(workflow):
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     row = {
         "credits_per_second": _amount(body.get("credits_per_second"), "Credits per second", maximum=1e6),
@@ -1767,24 +1711,6 @@ async def put_workflow_pricing(body: dict, request: Request, user: dict = Depend
     base, per_second, multiplier = await offload(state.credits.rate_for, workflow)
     await offload(audit.record, request, user, "Changed workflow pricing", workflow, "{:g} cr + {:g} cr/s × {:g}{}".format(
         base, per_second, multiplier, "" if row["enabled"] else " · switched off"))
-    return await offload(_pricing, state, await _pricing_items(state))
-
-
-@router.put("/pricing/models")
-async def put_model_prices(body: dict, request: Request, user: dict = Depends(admin_user)):
-    """The studio's price of each model of a generation workflow at each resolution: {"workflow", "prices": {model:
-    {resolution: credits}}}, credits a second for a video and a picture's for a picture. One left empty follows the
-    workflow's own rate."""
-    state = request.app.state
-    workflow = str(body.get("workflow") or "")
-    if workflow not in state.catalog.files():
-        raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
-    if not generation_models.has_models(workflows.describe(await state.catalog.load(workflow))):
-        raise HTTPException(400, "Only the generation server's workflows have models to price.")
-    prices = body.get("prices") if isinstance(body.get("prices"), dict) else {}
-    kept = await offload(state.credits.set_model_prices, workflow, prices)
-    await offload(audit.record, request, user, "Changed model prices", workflow,
-                  "; ".join("{} {}".format(m, ", ".join("{} {:g}".format(r, v) for r, v in res.items())) for m, res in kept.items()) or "none")
     return await offload(_pricing, state, await _pricing_items(state))
 
 
@@ -1868,7 +1794,7 @@ async def put_workflow_factors(body: dict, request: Request, user: dict = Depend
     empty ones follow the studio's."""
     state = request.app.state
     workflow = str(body.get("workflow") or "")
-    if not state.catalog.known(workflow):
+    if not await state.catalog.known(workflow):
         raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
     table = _factor_table(body)
     kept = await offload(state.credits.model_prices, workflow)   # a generation workflow's model prices stay as they are

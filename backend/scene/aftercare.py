@@ -22,7 +22,7 @@ agent tells the user what the model cannot do and offers another way, as its rul
 import asyncio
 import json
 
-from . import review, storage
+from . import review
 from .db import as_everyone, offload
 
 WAIT = 3               # seconds after a job is done before the background looks at its result (its item is filed)
@@ -91,10 +91,10 @@ def references_of(state, user_id, settings, item):
             continue
         if isinstance(use.get("asset"), int) and use["asset"]:
             row = state.db.one("SELECT name, kind, filename FROM assets WHERE id = ? AND user_id = ?", (use["asset"], user_id))
-            path = row and storage.here(state.assets_dir / str(user_id) / row["filename"])
+            path = row and state.assets_dir / str(user_id) / row["filename"]
         elif isinstance(use.get("id"), int):
             row = state.db.one("SELECT name, kind, filename FROM generations WHERE id = ? AND user_id = ?", (use["id"], user_id))
-            path = row and storage.here(state.outputs.folder(user_id) / row["filename"])
+            path = row and state.outputs.folder(user_id) / row["filename"]
         else:
             continue
         if row and row["kind"] in ("image", "video") and path.is_file():
@@ -116,7 +116,7 @@ def previous_of(state, user_id, settings):
     row = state.db.one("SELECT kind, filename FROM generations WHERE id = ? AND user_id = ?", (parent, user_id))
     if not row or row["kind"] != "video":
         return None
-    path = storage.here(state.outputs.folder(user_id) / row["filename"])
+    path = state.outputs.folder(user_id) / row["filename"]
     return (path, row["kind"]) if path.is_file() else None
 
 

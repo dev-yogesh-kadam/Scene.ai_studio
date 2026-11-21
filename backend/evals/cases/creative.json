@@ -311,7 +311,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "The runner",
       "prompt": "A woman in her thirties with short black hair in a grey running top, neutral front-lit portrait on a plain grey ground, soft window light.",
       "orientation": "landscape",
@@ -333,7 +333,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Blue-hour street",
       "prompt": "An empty city street at blue hour, street lamps still on, wet tarmac reflecting the lamps, no people.",
       "orientation": "landscape",
@@ -355,7 +355,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Riverside sunrise",
       "prompt": "A riverside path at sunrise, warm low sun on the water, mist over the river, an empty bench.",
       "orientation": "landscape",
@@ -377,7 +377,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "The shoe",
       "prompt": "A grey-and-orange running shoe on a dark ground, strong rim light along the sole's texture, a soft gradient behind.",
       "orientation": "landscape",
@@ -399,7 +399,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Dark bedroom",
       "prompt": "A small dark bedroom at 5:30 am, a phone glowing on the bedside table, running shoes by the door.",
       "orientation": "landscape",
@@ -468,7 +468,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "The singer",
       "prompt": "A woman of about twenty-five with long dark hair and a denim jacket, neutral portrait, soft daylight, plain ground.",
       "orientation": "landscape",
@@ -490,7 +490,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Rooftop at dawn",
       "prompt": "A city rooftop at dawn in cool blue light, empty bottles and a packed suitcase, the skyline behind.",
       "orientation": "landscape",
@@ -512,7 +512,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Rooftop at night",
       "prompt": "The same city rooftop at night, fairy lights strung between water tanks, warm practical light.",
       "orientation": "landscape",
@@ -534,7 +534,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Rooftop at sunset",
       "prompt": "The same city rooftop at golden hour, long warm shadows, the skyline glowing.",
       "orientation": "landscape",
@@ -594,7 +594,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Robot dog sheet",
       "prompt": "A character sheet of a small robot dog with a round head, one floppy antenna ear, orange and white panels, flat 3D toy look: front, three-quarter and side views on white.",
       "orientation": "landscape",
@@ -616,7 +616,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "The playroom",
       "prompt": "A bright playroom with a wooden toy box, soft rug and big window light, cheerful colours, no people.",
       "orientation": "landscape",
@@ -679,7 +679,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "La mujer",
       "prompt": "A young woman of about twenty-five with long wavy brown hair in a natural linen shirt, neutral portrait, soft daylight.",
       "orientation": "portrait",
@@ -701,7 +701,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "El taller",
       "prompt": "A small sewing workshop with window light, rolls of natural fabric and a sewing machine, warm tones.",
       "orientation": "portrait",
@@ -723,7 +723,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "El campo",
       "prompt": "A cotton field at golden hour, rows stretching to the horizon, warm low sun.",
       "orientation": "portrait",
@@ -745,7 +745,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Tintes",
       "prompt": "Indigo dye vats in a sunlit courtyard, fabric hanging to dry above them.",
       "orientation": "portrait",
@@ -767,7 +767,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "La camisa",
       "prompt": "A natural linen shirt folded on a wooden table, soft side light showing the weave.",
       "orientation": "portrait",
@@ -908,7 +908,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Sunset run",
       "prompt": "A golden retriever runs across a grassy park at sunset, ears flapping, low warm sun behind it lighting its fur in a rim of gold, long shadows on the grass.",
       "orientation": "landscape",
@@ -965,7 +965,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@nano_banana_pro",
       "name": "Perfume hero",
       "prompt": "A faceted glass perfume bottle on a black reflective surface, three-quarter angle, strong rim light tracing its edges, a soft gradient glow behind, the label turned slightly away.",
       "orientation": "square",
@@ -1027,7 +1027,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The crack",
       "prompt": "Extreme close-up of a golden croissant crust cracking as two hands break it, flakes falling in warm window light.",
       "orientation": "portrait",
@@ -1046,7 +1046,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The pull",
       "prompt": "Close-up of the croissant's buttery layers stretching apart, steam rising in soft side light.",
       "orientation": "portrait",
@@ -1065,7 +1065,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The bite: a woman of about thirty with short curly hair and a mustard-yellow raincoat",
       "prompt": "A woman of about thirty with short curly hair and a mustard-yellow raincoat takes a bite at a window table, eyes closing, rain on the glass behind.",
       "orientation": "portrait",
@@ -1084,7 +1084,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The tray",
       "prompt": "A tray of croissants slides out of a bakery oven, golden and glistening, a baker's gloved hands.",
       "orientation": "portrait",
@@ -1139,7 +1139,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Kitchen wide",
       "prompt": "A small kitchen at evening, warm lamp light: a man in his fifties in a grey cardigan and a girl of about sixteen in a school uniform stand on either side of the table.",
       "orientation": "landscape",
@@ -1158,7 +1158,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Her side",
       "prompt": "Over the father's shoulder: the girl in a school uniform argues, arms crossed, eyes wet.",
       "orientation": "landscape",
@@ -1177,7 +1177,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "His side",
       "prompt": "Over the girl's shoulder: the man in a grey cardigan listens, jaw tight, then his face softens.",
       "orientation": "landscape",
@@ -1196,7 +1196,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Making up",
       "prompt": "The man in a grey cardigan and the girl in a school uniform sit at the table; he slides a cup of tea to her and she almost smiles.",
       "orientation": "landscape",
@@ -1253,7 +1253,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The corridor",
       "prompt": "A long empty hospital corridor at night lit by one flickering fluorescent tube, a nurse in pale blue scrubs small at the far end.",
       "orientation": "landscape",
@@ -1272,7 +1272,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The door",
       "prompt": "A slow push toward a ward door standing ajar, darkness inside, the corridor light buzzing.",
       "orientation": "landscape",
@@ -1291,7 +1291,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "The nurse",
       "prompt": "A nurse in pale blue scrubs stops, listens, her breath visible in the cold light.",
       "orientation": "landscape",
@@ -1345,7 +1345,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Neon glow",
       "prompt": "A glowing pink and blue neon sign on a brick wall at night, its letters soft and out of focus, rain reflecting the colours on the wet pavement.",
       "orientation": "landscape",
@@ -1492,7 +1492,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Mehndi hands",
       "prompt": "Close-up of a bride's hands covered in intricate dark henna, resting still in her lap on a red silk lehenga, soft window light from the left.",
       "orientation": "portrait",

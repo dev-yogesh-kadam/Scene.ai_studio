@@ -189,7 +189,7 @@ const SECTIONS: { id: string; title: string; body: Block[] }[] = [
       [
         'list',
         [
-          "A job waiting a long time: the render server may be busy with other people's jobs; the queue at the top left shows where yours is.",
+          "A job waiting a long time: the model's provider may be busy with other people's jobs; the queue at the top left shows where yours is.",
           'A job failed: its card says why in plain words, and its credits came back. Try a shorter clip or a lower quality.',
           'A banner at the top says the studio is under maintenance: new jobs start again when it is over.',
         ],

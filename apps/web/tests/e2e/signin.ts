@@ -34,7 +34,7 @@ export async function makeImage(page: Page, settings: Record<string, unknown> = 
   return (await answer.json()) as { id: string; credits: number };
 }
 
-/** Waits until the job is finished on the fake render server. */
+/** Waits until the job is made by the fake v1 provider. */
 export async function done(page: Page, id: string) {
   await expect
     .poll(

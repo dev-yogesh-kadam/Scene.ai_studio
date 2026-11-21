@@ -1,4 +1,4 @@
-"""The providers' models offered in the studio, while the router is on (registry.ROUTER "on").
+"""The providers' models offered in the studio: every model the studio makes things with.
 
 Each model a key unlocks (provider_models) is offered as a workflow of its capability's folder, `<folder>/@<model id>`
 (video/@seedance_2_5, audio/@speech), made from its `input_schema` and `limits` in the shape a workflow file has, so
@@ -32,6 +32,7 @@ PROVIDER_CLASS = "ProviderJob"
 MARK = "@"            # a provider model's workflow id is <folder>/@<model id>
 FRESH = 5             # seconds the models and the switch are kept between reads
 LIST_MOST = 9         # reference slots of a list whose length the model does not say
+SEEN = "models_seen"  # the workflow ids of the models offered so far (a JSON list): ProviderWorkflows._hold_new
 LABELS = {"first_frame": "First frame", "last_frame": "Last frame", "reference_video": "Reference video",
           "video": "Video", "audio": "Voice track", "voice_id": "Voice id", "language_code": "Language",
           "style_instructions": "Style instructions", "aspect_ratio": "Shape", "sound": "Sound", "factor": "Scale",
@@ -80,12 +81,16 @@ def build(model):
     files = file_fields(schema)
     nodes = {PROVIDER_NODE: {"class_type": PROVIDER_CLASS, "inputs": {}, "_meta": {"title": model.get("name") or model["model_id"]}}}
     sink = nodes[PROVIDER_NODE]["inputs"]
+    words_spec = next((properties[n] for n in ("prompt", "text") if isinstance(properties.get(n), dict)), {})
+    prompt_chars = words_spec.get("maxLength")
     profile = {"title": model.get("name") or model["model_id"], "description": model.get("best_for") or "",
                "pick_when": model.get("best_for") or "", "labels": {}, "defaults": {}, "options": [], "rules": [],
                "optional_refs": [], "required_refs": [], "hints": [],
                "provider": {"model": model["model_id"], "capability": model["capability"], "limits": limits,
                             "pricing": model.get("pricing") or {}, "typical_seconds": model.get("typical_seconds"),
-                            "can_cancel": bool(model.get("can_cancel")), "files": {k: list(v) for k, v in files.items()}}}
+                            "can_cancel": bool(model.get("can_cancel")), "files": {k: list(v) for k, v in files.items()},
+                            # the most characters its prompt takes, as its provider says (0: not said)
+                            "prompt_chars": prompt_chars if isinstance(prompt_chars, int) and not isinstance(prompt_chars, bool) else 0}}
     number = [1]
 
     def node(class_type, inputs, title):
@@ -146,6 +151,8 @@ def build(model):
                 spec.get("maximum", seconds.get("max") if name == "duration" else None)
             if low is not None and high is not None:
                 profile["labels"]["{}:value".format(nid)] = "{} ({:g} to {:g})".format(title, low, high)
+                if name in ("duration", "seconds") and not seconds:   # the lengths it makes, when its limits don't say
+                    profile["provider"]["limits"] = dict(profile["provider"]["limits"], seconds={"min": low, "max": high})
             sink[name] = [nid, 0]
             if name in ("duration", "seconds"):
                 profile["pricing"] = {"seconds": "{}:value".format(nid)}
@@ -213,9 +220,11 @@ def provider_input(wf, graph):
     return found
 
 
-def limits_problem(wf, schema, settings):
-    """What a provider's model can't take of this job, in words, or "": its lengths (limits.seconds) and how many
-    reference pictures and sounds it takes. The provider checks the rest itself and says why."""
+def limits_problem(wf, schema, settings, video_seconds=None):
+    """What a provider's model can't take of this job, in words, or "": its lengths (limits.seconds), how many
+    reference pictures, sounds and videos it takes, and how long its reference videos may be, each and together
+    (limits.reference_clips; video_seconds: each filled video slot's length, measured by the caller). The provider
+    checks the rest itself and says why."""
     provider = wf["profile"].get("provider") or {}
     limits = provider.get("limits") or {}
     name = wf["profile"].get("title") or provider.get("model")
@@ -236,6 +245,22 @@ def limits_problem(wf, schema, settings):
         if isinstance(most, int) and not isinstance(most, bool) and len(listed) > most:
             what = "reference pictures" if kind == "image" else "reference sounds"
             return "{} takes {} {}; this job gives {}.".format(name, "no" if not most else "at most {}".format(most), what, len(listed))
+    videos = [slot for slot, given in refs.items() if given and kinds.get(slot) == "video"]
+    clips = limits.get("reference_clips") if isinstance(limits.get("reference_clips"), dict) else {}
+    most = limits.get("max_reference_videos", clips.get("max_clips"))
+    if isinstance(most, int) and not isinstance(most, bool) and len(videos) > most:
+        return "{} takes {} reference videos; this job gives {}.".format(name, "no" if not most else "at most {}".format(most), len(videos))
+    seconds_of = {slot: s for slot, s in (video_seconds or {}).items() if slot in videos and isinstance(s, (int, float)) and s > 0}
+    each = clips.get("seconds_each") if isinstance(clips.get("seconds_each"), list) and len(clips.get("seconds_each")) == 2 else None
+    if each:
+        for slot, s in seconds_of.items():
+            if s < each[0] - 0.05 or s > each[1] + 0.05:
+                return ("{} takes reference videos of {:g} to {:g} seconds; one here is {:.1f} s. Trim it with ffmpeg (a clip "
+                        "to continue keeps its end: -sseof).").format(name, each[0], each[1], s)
+    together = clips.get("seconds_together")
+    if isinstance(together, (int, float)) and seconds_of and sum(seconds_of.values()) > together + 0.05:
+        return ("{} takes {:g} seconds of reference video in all; this job gives {:.1f} s. Trim them with ffmpeg (a clip to "
+                "continue keeps its end: -sseof).").format(name, together, sum(seconds_of.values()))
     frames = limits.get("frames")
     if isinstance(frames, list):
         for frame in ("first", "last"):
@@ -246,19 +271,15 @@ def limits_problem(wf, schema, settings):
 
 
 class ProviderWorkflows:
-    """The providers' models as workflows, read from the registry at most every FRESH seconds; none while the router
-    is not "on". Its sync accessors read what was last read; refresh() (async) reads again when due."""
+    """The providers' models as workflows, read from the registry at most every FRESH seconds. Its sync accessors read
+    what was last read; refresh() (async) reads again when due."""
 
     def __init__(self, db):
         self.db = db
         self.read_at = 0.0
-        self.mode = "off"
         self.found = {}   # workflow id -> wf
 
     def _read(self):
-        mode = registry.router_mode(self.db)
-        if mode != "on":
-            return mode, {}
         with as_everyone():
             rows = self.db.all(
                 "SELECT m.* FROM provider_models m JOIN provider_keys k ON k.id = m.key_id JOIN providers p ON p.id = m.provider_id "
@@ -273,20 +294,32 @@ class ProviderWorkflows:
                 wf = build(row)
                 if wf is not None:
                     found[wid] = wf
-        return mode, found
+        with as_everyone():
+            self._hold_new(found)
+        return found
+
+    def _hold_new(self, found):
+        """A model a key offers for the first time starts for admins alone when the console says so (the Workflows
+        section's "new_workflows_admins_only"), until one offers it to everyone. The models seen are kept (SEEN); the
+        first look only learns them, so nothing offered already is hidden."""
+        known = registry._json(self.db.setting(SEEN, "")) if self.db.setting(SEEN, "") else None
+        new = [wid for wid in found if known is not None and wid not in known]
+        if new and self.db.setting("new_workflows_admins_only", "0") == "1":
+            from ..versions import set_audience
+            for wid in new:
+                if self.db.one("SELECT 1 FROM workflow_pricing WHERE workflow = ?", (wid,)) is None:
+                    set_audience(self.db, wid, "admins")
+        if known is None or new:
+            self.db.set_setting(SEEN, json.dumps(sorted(set(known or []) | set(found))))
 
     async def refresh(self, force=False):
         if not force and time.time() - self.read_at < FRESH:
             return
         try:
-            self.mode, self.found = await offload(self._read)
-        except Exception as error:   # the registry's tables missing (a database behind 0015): none offered
+            self.found = await offload(self._read)
+        except Exception as error:   # one bad read never empties the studio: the last good list stays
             print("The providers' models could not be read: {}".format(error))
-            self.mode, self.found = "off", {}
         self.read_at = time.time()
-
-    def active(self):
-        return self.mode == "on"
 
     def workflows(self):
         return self.found

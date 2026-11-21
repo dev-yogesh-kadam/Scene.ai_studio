@@ -1,4 +1,4 @@
-"""Whether the studio is well: its database, its render server (ComfyUI), the agent's model (Claude, through Claude Code
+"""Whether the studio is well: its database, its models (a provider key offers some), the agent's model (Claude, through Claude Code
 by the connection in use: Claude Code here is signed in, or the API key works; claude_connection.py), the programs it renders and edits with (FFmpeg, HyperFrames for motion graphics), its disk, its backups, its queue and the
 sending of the agent's calls to Langfuse (`langfuse`).
 
@@ -17,18 +17,18 @@ import time
 
 import httpx
 
-from . import backup, claude, claude_connection, langfuse_trace, media, motion, phone, retention, versions
+from . import backup, claude, claude_connection, langfuse_trace, media, motion, phone, retention
 from .db import offload
 
 CHECK_EVERY = 60     # seconds between checks
-FIRST_CHECK = 30     # after the app starts: it settles first (the render server may take a moment to be reached)
+FIRST_CHECK = 30     # after the app starts: it settles first (the providers' models are read 30 s after the start)
 CONFIRM = 2          # checks in a row a problem must be found in before it is sent: a moment's hiccup is not
 DAY = 86400
 
 # What is said when a problem is gone, by its key.
 RESOLVED = {
     "database": "The database answers again",
-    "render": "The render server answers again",
+    "models": "Models are offered again",
     "model": "Claude is set up for the agent again",
     "disk": "There is enough disk space again",
     "backup": "The database has been backed up",
@@ -92,23 +92,6 @@ def _mark(seen, online):
         seen.update(online=online, since=time.time())
 
 
-async def render_server(state, fresh=False):
-    """The render server (ComfyUI): whether it answers, since when as far as this app has seen, and what it reports."""
-    return dict(await remembered(state, "render:" + state.comfy.url, lambda: _render_server(state), fresh))
-
-
-async def _render_server(state):
-    try:
-        stats = await state.comfy.stats()
-        state.saw_server(True)
-        found = dict(stats, online=True, url=state.comfy.url)
-    except (httpx.HTTPError, ValueError):
-        state.saw_server(False)
-        found = {"online": False, "url": state.comfy.url}
-    found["since"] = state.server_seen["since"]   # no earlier than the app's start
-    return found
-
-
 async def database(state):
     """Whether the database answers: {"online", "seconds": how long `SELECT 1` took, "detail": why not}."""
     started = time.time()
@@ -139,13 +122,13 @@ def programs(state):
 
 
 async def checks(state):
-    """Every check in one answer, for the console's System section: {"database", "render", "model", "programs",
+    """Every check in one answer, for the console's System section: {"database", "model", "programs",
     "disk": {"folder", "free", "total"}, "backup": {"folder", "last", "check", "restore_test"}, "langfuse", "creative"}."""
     alive = await database(state)
-    render, model = await asyncio.gather(render_server(state), model_server(state))
+    model = await model_server(state)
     state.output_dir.mkdir(parents=True, exist_ok=True)
     disk = shutil.disk_usage(state.output_dir)
-    found = {"database": alive, "render": render, "model": model, "programs": await asyncio.to_thread(programs, state),
+    found = {"database": alive, "model": model, "programs": await asyncio.to_thread(programs, state),
              "disk": {"folder": str(state.output_dir), "free": disk.free, "total": disk.total},
              "backup": {"folder": str(state.backup_dir), "last": backup.newest(state.backup_dir), "check": None, "restore_test": None},
              "langfuse": None}
@@ -204,20 +187,20 @@ def problem(key, level, text, tab):
     return {"key": key, "level": level, "text": text, "tab": tab}
 
 
-async def problems(state, render=None, model=None):
-    """What is wrong now with the servers, the disk, the backups and the queue, the worst first. `render` and `model`
-    are what render_server and model_server found, when the caller has asked already."""
+async def problems(state, model=None):
+    """What is wrong now with the models, the agent's model, the disk, the backups and the queue, the worst first.
+    `model` is what model_server found, when the caller has asked already."""
     db, now = state.db, time.time()
     alive = await database(state)
     if not alive["online"]:   # nothing below can be asked of it
         return [problem("database", "critical", "The database does not answer ({}). Nobody can sign in, and no job is "
                         "started or finished.".format(alive["detail"]), "system")]
-    render = render or await render_server(state)
     model = model or await model_server(state)
     found = []
-    if not render["online"]:
-        found.append(problem("render", "critical", "The render server has not answered at {} since {}. No renders can run.".format(
-            render["url"], clock(render["since"])), "system"))
+    catalog = getattr(state, "catalog", None)
+    if catalog is not None and catalog.providers is not None and not await catalog.listing():
+        found.append(problem("models", "critical", "No models are offered: no provider key in use has any. Add one in "
+                             "Servers & APIs → Providers.", "servers"))
     if model["online"] is False:
         found.append(problem("model", "serious", "{} The agent can't plan and image prompts get no captions.".format(
             model["detail"]), "system"))
@@ -350,10 +333,8 @@ class Watcher:
             print("The database's outage could not be kept as an alert: {}".format(error))
         return [("resolved", "{} (after {}).".format(RESOLVED["database"], minutes(now - down["started"])))]
 
-    async def workflows(self, found):
-        """Note what the render PC changed in the workflow files, and fetch its node list again when it answers and the
-        one in hand is old: the console's Workflows section compares the workflows with it."""
-        await offload(versions.look, self.state)
+    async def upkeep(self, found):
+        """What is done after each look: old traces pruned, old session events moved to Langfuse, the daily backup check."""
         await offload(self.state.traces.prune, None, getattr(self.state.settings, "retention_days", 0))
         if time.time() - self.moved >= retention.MOVE_EVERY and getattr(self.state.traces, "langfuse", None) is not None:
             self.moved = time.time()
@@ -366,13 +347,6 @@ class Watcher:
         checked = await offload(backup.last_check, self.state.db)
         if self.state.settings.backup_keep > 0 and (not checked or checked["when"] < time.time() - DAY):   # once a day
             await asyncio.to_thread(backup.check, self.state.db, self.state.backup_dir)
-        catalog = self.state.catalog
-        saved = catalog.nodes_saved()
-        if not any(p["key"] == "render" for p in found) and (saved is None or time.time() - saved > versions.NODES_STALE):
-            try:
-                await catalog.refresh_nodes()
-            except (httpx.HTTPError, ValueError, OSError):
-                pass
 
     async def run_forever(self):
         await asyncio.sleep(FIRST_CHECK)
@@ -381,13 +355,12 @@ class Watcher:
                 try:
                     alive = await database(self.state)
                     if alive["online"]:
-                        found = await problems(self.state, await render_server(self.state, fresh=True),   # asked now: alerts
-                                               await model_server(self.state, fresh=True))
+                        found = await problems(self.state, await model_server(self.state, fresh=True))   # asked now: alerts
                     else:
                         found = await problems(self.state)   # the database's problem alone
                     await self.step(found)
                     if alive["online"]:
-                        await self.workflows(found)
+                        await self.upkeep(found)
                 except Exception as error:   # a check that fails must not stop the next one
                     print("The health check failed: {}".format(error))
                 await asyncio.sleep(CHECK_EVERY)

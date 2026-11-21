@@ -19,11 +19,8 @@ import {
   loadCatalog,
   loadWorkflow,
   newForm,
-  pickValue,
-  pickerGroups,
-  splitPick,
+  pickerEntries,
   submitJob,
-  withModel,
   warningsOf,
   type Catalog,
   type JobForm,
@@ -125,15 +122,12 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
 
   // Choose a workflow: its defaults, then what was handed over (Re-run's settings, Use as first frame's reference).
   const select = useCallback(
-    async (picked: string, saved?: Saved) => {
-      // `picked`: a workflow's id, or a generation server model as "<workflow id>#<model>" (jobForm.pickValue)
-      const [id, model] = splitPick(picked);
+    async (id: string, saved?: Saved) => {
       const wf = await loadWorkflow(id);
-      userPrefs.setStudio({ workflows: { [wf.id.split('/')[0]]: picked } });
+      userPrefs.setStudio({ workflows: { [wf.id.split('/')[0]]: wf.id } });
       const last = userPrefs.studio().project;
       const projectId = last && known.current.has(last) ? last : null;
       let next = newForm(wf, { projectId, parent: rerun ? rerun.id : null });
-      if (model) next = { ...next, ...withModel(wf, next.options, next.values, model) };
       if (saved) next = withSaved(next, saved);
       setError('');
       const given = prefill.current;
@@ -163,12 +157,11 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
     (list: Catalog, forKind: string, wanted?: string, saved?: Saved) => {
       const usable = list.workflows.filter((w) => w.kind === forKind && !w.error);
       if (!usable.length) return setForm(null);
-      const asked = wanted || userPrefs.studio().workflows[forKind] || list.default;
-      const want = splitPick(asked)[0];
+      const want = wanted || userPrefs.studio().workflows[forKind] || list.default;
       const pick =
         usable.find((w) => w.id === want) || usable.find((w) => (w.replaces || []).includes(want)) || usable[0];
       const same = pick.id === want || (pick.replaces || []).includes(want);
-      select(pick.id === want ? asked : pick.id, same ? saved : undefined).catch(showError);
+      select(pick.id, same ? saved : undefined).catch(showError);
     },
     [select, showError],
   );
@@ -279,10 +272,9 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
     : !usable.length
       ? items.length
         ? items[0].error
-        : `No ${kind} workflows yet. Save a ComfyUI workflow into the workflows/${kind} folder, then press Refresh.`
+        : `No ${kind} models yet. An admin adds a provider key in the console, then press Refresh.`
       : form
-        ? form.wf.description +
-          (form.wf.approximate ? ' Some node settings were guessed because the render server is offline.' : '')
+        ? form.wf.description
         : '';
   const short = quote ? quote.credits > quote.balance : false;
 
@@ -313,24 +305,14 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
               aria-label="Workflow"
               style={{ maxWidth: 320 }}
               className={items.length ? '' : 'hidden'}
-              value={form ? pickValue(form.wf, form.options) : ''}
-              onChange={(e) => {
-                // another model of the workflow in use keeps what is typed and given; another workflow starts afresh
-                const [id, model] = splitPick(e.target.value);
-                if (form && model && form.wf.id === id)
-                  setForm({ ...form, ...withModel(form.wf, form.options, form.values, model) });
-                else select(e.target.value).catch(showError);
-              }}
+              value={form ? form.wf.id : ''}
+              onChange={(e) => select(e.target.value).catch(showError)}
             >
-              {/* two groups, never mixed: ComfyUI's workflows and the generation server's models */}
-              {pickerGroups(usable).map((g) => (
-                <optgroup key={g.label} label={g.label}>
-                  {g.entries.map((e) => (
-                    <option key={e.value} value={e.value}>
-                      {e.label}
-                    </option>
-                  ))}
-                </optgroup>
+              {/* every model, each a workflow of its own */}
+              {pickerEntries(usable).map((e) => (
+                <option key={e.value} value={e.value}>
+                  {e.label}
+                </option>
               ))}
               {items
                 .filter((w) => w.error)
@@ -342,7 +324,7 @@ function CreateForm({ handoff, rerun }: { handoff: Handoff; rerun?: Item }) {
             </select>
             <button
               className="btn small quiet"
-              title="Look for new workflow files"
+              title="Look for new models"
               onClick={() => load().then(({ list }) => pickFor(list, kind, form?.wf.id), showError)}
             >
               Refresh

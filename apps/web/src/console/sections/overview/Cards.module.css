@@ -1,15 +1,6 @@
 .status-dot.warning {
   background: var(--status-warning);
 }
-.server-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: -4px 0 12px;
-}
-.server-line :global(.btn) {
-  margin-left: auto;
-}
 .earn-list {
   display: grid;
   gap: 12px;

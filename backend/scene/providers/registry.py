@@ -5,8 +5,8 @@ Servers & APIs → Providers lists them.
   shown its label and last 4 characters (shown), never the key.
 - An environment variable can still fix a key, as SCENE_ANTHROPIC_API_KEY does: it is listed as
   a key of its provider that the console can't change ("fixed", id FIXED_IDS), and used before the stored ones.
-- ComfyUI's providers are kept in step with the `endpoints` table both ways, so the load balancer (balancer.py) and
-  everything else that reads `endpoints` go on as before: a ComfyUI server added either way is in both.
+- Every model the studio offers comes from a provider here: Scene providers over the v1 contract (Studio_automation)
+  and On this PC (local_tools, the studio's own tools). ComfyUI is not one any more (migration 0019).
 - Which provider the agent uses (Claude on this PC or Anthropic) is the setting `agent_provider`.
   Claude on this PC (claude_local, migration 0016) has no key and no address: it uses the account Claude Code is
   signed in with on this PC.
@@ -21,11 +21,6 @@ from ..db import as_everyone
 from .base import AGENT_LLM, BUILT_IN, CAPABILITY_FOLDERS, CAPABILITY_WORDS, CLAUDE_KINDS, KEYLESS, KINDS, MODEL_KINDS, SELF_HOSTED, STATUSES, last4
 
 AGENT_PROVIDER = "agent_provider"
-ROUTER = "provider_router"
-# The capabilities whose ComfyUI workflows are no longer offered (a JSON list), while the router is on: the way off
-# ComfyUI, one capability at a time (docs/servers.md, "Moving off ComfyUI"). Switched back on at any time.
-COMFYUI_OFF = "comfyui_off"
-ROUTER_MODES = ("off", "shadow", "on")
 MOST_CONCURRENT = 64
 # The provider kind of each way claude.py reaches Claude Code (claude_connection.MODES), and back.
 MODE_OF = {"claude_local": "this_pc", "anthropic": "api_key"}
@@ -36,11 +31,6 @@ FIXED = (("anthropic", "anthropic_api_key", -1, "SCENE_ANTHROPIC_API_KEY"),)
 FIXED_IDS = {kind: key_id for kind, _, key_id, _ in FIXED}
 KEY_FIELDS = ("label", "active", "priority", "max_concurrent", "daily_cap")
 ORDER = "x-scene-order"   # kept in a stored input_schema: its inputs in the provider's order (jsonb sorts keys)
-
-
-def router_mode(db):
-    mode = str(db.setting(ROUTER, "off") or "off")
-    return mode if mode in ROUTER_MODES else "off"
 
 
 def _json(value):
@@ -170,7 +160,7 @@ KEY_LINE_MOST = 50   # keys one paste may hold
 
 
 def parse_keys(text):
-    """The keys of a paste, one a line: "label<TAB>key" (the generation server's "Copy all"), "label: key", "label key"
+    """The keys of a paste, one a line: "label<TAB>key" (Studio_automation's "Copy all"), "label: key", "label key"
     (the last word is the key) or the key alone. Blank lines and lines starting with # are left out. Returns
     [{"line", "label", "secret"}]; raises ValueError naming a line that holds no key, or when there are too many."""
     found = []
@@ -204,32 +194,11 @@ def has_secret(db, provider_id, secret):
     return ""
 
 
-# ---------------------------------------------------------------- what makes what, and ComfyUI switched off by capability
-
-def comfyui_off(db):
-    """The capabilities whose ComfyUI workflows are not offered any more (the setting COMFYUI_OFF), while the router is
-    on. With the router not on, the set is kept but empty in effect: nothing is offered by the providers then."""
-    found = _json(db.setting(COMFYUI_OFF, "")) or []
-    return {str(c) for c in found if str(c) in CAPABILITY_FOLDERS}
-
-
-def comfyui_off_now(db):
-    """comfyui_off(db) while the router is "on", else an empty set."""
-    return comfyui_off(db) if router_mode(db) == "on" else set()
-
-
-def set_comfyui(db, capability, on):
-    if capability not in CAPABILITY_FOLDERS:
-        raise ValueError("There is no capability '{}'.".format(capability))
-    off = comfyui_off(db)
-    (off.discard if on else off.add)(capability)
-    db.set_setting(COMFYUI_OFF, json.dumps(sorted(off)))
-    return off
-
+# ---------------------------------------------------------------- what makes what
 
 def provider_offers(db):
     """{capability: [{"id", "name", "providers": [names], "keys": [{"label", "mode", "status"}]}]}: the models of the
-    Scene providers (v1) that are on, from keys that are on and not invalid."""
+    providers that are on (Scene providers and On this PC), from keys that are on and not invalid."""
     with as_everyone():
         rows = db.all(
             "SELECT m.capability, m.model_id, m.name, p.name AS p_name, k.label, k.status, k.info FROM provider_models m "
@@ -247,37 +216,27 @@ def provider_offers(db):
     return {c: list(ms.values()) for c, ms in found.items()}
 
 
-def coverage(db, comfy_workflows):
-    """What makes what, by capability: the providers' models and the ComfyUI workflows, for the console and its switch.
-    `comfy_workflows`: [{"id", "title", "capability"}] (the studio's ComfyUI workflow files, not the generation
-    server's). Each row: {"capability", "words", "models", "live" (a live key covers it), "comfy", "comfyui_on",
-    "can_switch_off", "why_not", "state"} where state is "both", "provider", "comfyui" or "none" (as offered now)."""
-    mode = router_mode(db)
-    offers, off = provider_offers(db), comfyui_off(db)
-    comfy = {}
-    for w in comfy_workflows:
-        if w.get("capability"):
-            comfy.setdefault(w["capability"], []).append({"id": w["id"], "title": w.get("title") or w["id"]})
+# Work a model that edits a reference video does as well as making new clips (its limits say reference_video_edits):
+# the agent's recipes for these use such a model (agent.py), so they count as made when one is offered.
+EDITS = ("video_to_video", "outpaint", "animate")
+
+
+def coverage(db):
+    """What makes what, by capability, for the console: each row {"capability", "words", "models", "live" (a live key
+    covers it), "state": "provider" | "none"}. Video to video, outpaint and character animation are made by the video
+    models that edit a reference video (EDITS)."""
+    offers = provider_offers(db)
+    with as_everyone():
+        editing = {r["model_id"] for r in db.all("SELECT model_id, limits FROM provider_models WHERE capability = 'text_to_video'")
+                   if (_json(r["limits"]) or {}).get("reference_video_edits")}
     rows = []
     for capability in CAPABILITY_WORDS:
         models_ = offers.get(capability, [])
+        if capability in EDITS:
+            models_ = [m for m in offers.get("text_to_video", []) if m["id"] in editing]
         live = any(k["mode"] != "test" for m in models_ for k in m["keys"])
-        own = comfy.get(capability, [])
-        comfy_on = capability not in off
-        why = ""
-        if comfy_on:
-            if mode != "on":
-                why = "The provider router is not on: the providers' models are not offered yet."
-            elif not models_:
-                why = "No provider key offers it yet."
-            elif not live:
-                why = "Only test keys offer it: their jobs stop at the price quote."
-        offered_provider = mode == "on" and bool(models_)
-        offered_comfy = bool(own) and (comfy_on or mode != "on")
-        state = "both" if offered_provider and offered_comfy else "provider" if offered_provider else "comfyui" if offered_comfy else "none"
         rows.append({"capability": capability, "words": CAPABILITY_WORDS[capability], "models": models_, "live": live,
-                     "comfy": own, "comfyui_on": comfy_on, "can_switch_off": comfy_on and not why, "why_not": why,
-                     "state": state})
+                     "state": "provider" if models_ else "none"})
     return rows
 
 
@@ -385,8 +344,6 @@ def add_provider(db, kind, name="", base_url="", priority=0, active=True):
     with as_everyone():
         provider_id = db.run("INSERT INTO providers (kind, name, base_url, active, priority, created) VALUES (?, ?, ?, ?, ?, ?)",
                              (kind, name, base_url, 1 if active else 0, int(priority or 0), time.time()))
-    if kind == "comfyui":
-        _mirror_to_endpoint(db, provider(db, provider_id))
     return provider_id
 
 
@@ -403,10 +360,7 @@ def change_provider(db, provider_id, body):
     with as_everyone():
         db.run("UPDATE providers SET name = ?, base_url = ?, active = ?, priority = ? WHERE id = ?",
                (name, base_url, active, priority, row["id"]))
-    after = provider(db, provider_id)
-    if after["kind"] == "comfyui":
-        _mirror_to_endpoint(db, after, body)
-    return after
+    return provider(db, provider_id)
 
 
 def remove_provider(db, provider_id):
@@ -418,8 +372,6 @@ def remove_provider(db, provider_id):
     if row["kind"] in BUILT_IN:
         raise ValueError("{} is part of the studio: switch it off instead.".format(row["name"]))
     with as_everyone():
-        if row["kind"] == "comfyui" and row["legacy"].startswith("endpoints:"):
-            db.run("DELETE FROM endpoints WHERE id = ? AND kind = 'comfy'", (int(row["legacy"].split(":", 1)[1]),))
         db.run("DELETE FROM providers WHERE id = ?", (row["id"],))
     return row
 
@@ -446,7 +398,7 @@ def add_key(db, provider_id, secret, label="", max_concurrent=None, daily_cap=No
     if row["kind"] in BUILT_IN and keys(db, row["id"]):
         raise ValueError("{} needs no key: its tools run on this PC.".format(KINDS[row["kind"]]))
     secret = str(secret or "").strip()[:2000]
-    if not secret and row["kind"] != "comfyui":
+    if not secret:
         raise ValueError("Paste the key.")
     label = " ".join(str(label or "").split())[:60] or "Key {}".format(len(keys(db, row["id"])) + 1)
     with as_everyone():
@@ -457,8 +409,6 @@ def add_key(db, provider_id, secret, label="", max_concurrent=None, daily_cap=No
              _int(max_concurrent, None, 1, MOST_CONCURRENT), _int(daily_cap, None, 0),
              status if status in STATUSES else "unknown", str(error or "")[:500],
              time.time() if status != "unknown" else None, json.dumps(info) if info else None, time.time()))
-    if row["kind"] == "comfyui":
-        _mirror_to_endpoint(db, row)
     return key_id
 
 
@@ -478,11 +428,7 @@ def change_key(db, key_id, body):
             secret = str(body["secret"]).strip()[:2000]
             db.run("UPDATE provider_keys SET secret = ?, last4 = ?, status = 'unknown', cooldown_until = NULL, last_error = '' "
                    "WHERE id = ?", (vault.seal(secret), last4(secret), row["id"]))
-    after = key(db, key_id)
-    owner = provider(db, after["provider_id"])
-    if owner and owner["kind"] == "comfyui":
-        _mirror_to_endpoint(db, owner)
-    return after
+    return key(db, key_id)
 
 
 def remove_key(db, key_id):
@@ -545,74 +491,12 @@ def save_models(db, provider_id, key_id, found):
                     1 if m.get("can_cancel") else 0, now))
 
 
-# ---------------------------------------------------------------- ComfyUI, kept in step with `endpoints`
-
-def _mirror_to_endpoint(db, row, body=None):
-    """A ComfyUI provider written into its `endpoints` row (made when it has none), so the load balancer uses it as it
-    always did: address, name, on/off, its first key (sealed as it is) and its max at once as "Jobs at once"; the
-    Workflows patterns (`models`) when the console sent them."""
-    body = body or {}
-    own = keys(db, row["id"])
-    first = own[0] if own else None
-    slots = max(1, min(16, int((first or {}).get("max_concurrent") or 1)))
-    with as_everyone():
-        endpoint = None
-        if row["legacy"].startswith("endpoints:"):
-            endpoint = db.one("SELECT * FROM endpoints WHERE id = ? AND kind = 'comfy'", (int(row["legacy"].split(":", 1)[1]),))
-        patterns = str(body.get("workflows", (endpoint or {}).get("models", "")) or "")
-        patterns = ", ".join(p.strip() for p in patterns.split(",") if p.strip())[:500]
-        values = (row["name"], row["base_url"], (first or {}).get("secret") or "", patterns, slots, row["active"])
-        if endpoint is None:
-            endpoint_id = db.run("INSERT INTO endpoints (kind, name, url, api_key, models, slots, active, created) "
-                                 "VALUES ('comfy', ?, ?, ?, ?, ?, ?, ?)", (*values, time.time()))
-            db.run("UPDATE providers SET legacy = ? WHERE id = ?", ("endpoints:{}".format(endpoint_id), row["id"]))
-        else:
-            db.run("UPDATE endpoints SET name = ?, url = ?, api_key = ?, models = ?, slots = ?, active = ? WHERE id = ?",
-                   (*values, endpoint["id"]))
-
-
-def mirror_endpoints(db):
-    """The ComfyUI servers of `endpoints` added or changed the old way (its console routes, endpoints.seed) taken into
-    the registry, and those removed there taken out. Run at start and after the old routes change one."""
-    with as_everyone():
-        rows = db.all("SELECT * FROM endpoints WHERE kind = 'comfy' ORDER BY id")
-        linked = {r["legacy"]: r for r in db.all("SELECT * FROM providers WHERE kind = 'comfyui' AND legacy LIKE 'endpoints:%'")}
-        for e in rows:
-            ref = "endpoints:{}".format(e["id"])
-            row = linked.pop(ref, None)
-            if row is None:
-                provider_id = db.run("INSERT INTO providers (kind, name, base_url, active, priority, legacy, created) "
-                                     "VALUES ('comfyui', ?, ?, ?, 0, ?, ?)", (e["name"], e["url"], e["active"], ref, time.time()))
-                db.run("INSERT INTO provider_keys (provider_id, label, secret, last4, max_concurrent, created) VALUES (?, 'Server', ?, ?, ?, ?)",
-                       (provider_id, e["api_key"], last4(vault.reveal(e["api_key"])), e.get("slots") or 1, time.time()))
-                continue
-            if (row["name"], row["base_url"], row["active"]) != (e["name"], e["url"], e["active"]):
-                db.run("UPDATE providers SET name = ?, base_url = ?, active = ? WHERE id = ?", (e["name"], e["url"], e["active"], row["id"]))
-            first = db.one("SELECT * FROM provider_keys WHERE provider_id = ? ORDER BY priority, id LIMIT 1", (row["id"],))
-            if first is None:
-                db.run("INSERT INTO provider_keys (provider_id, label, secret, last4, max_concurrent, created) VALUES (?, 'Server', ?, ?, ?, ?)",
-                       (row["id"], e["api_key"], last4(vault.reveal(e["api_key"])), e.get("slots") or 1, time.time()))
-            elif (first["secret"], first["max_concurrent"]) != (e["api_key"], e.get("slots") or 1):
-                db.run("UPDATE provider_keys SET secret = ?, last4 = ?, max_concurrent = ? WHERE id = ?",
-                       (e["api_key"], last4(vault.reveal(e["api_key"])), e.get("slots") or 1, first["id"]))
-        for gone in linked.values():   # its endpoints row was removed
-            db.run("DELETE FROM providers WHERE id = ?", (gone["id"],))
-
-
-def endpoint_of(db, row):
-    """The `endpoints` row of a ComfyUI provider, or None."""
-    if row["kind"] != "comfyui" or not str(row.get("legacy") or "").startswith("endpoints:"):
-        return None
-    with as_everyone():
-        return db.one("SELECT * FROM endpoints WHERE id = ?", (int(row["legacy"].split(":", 1)[1]),))
-
-
 # ---------------------------------------------------------------- at start
 
 def seed(db, settings):
-    """At start: ComfyUI kept in step with `endpoints`; the last 4 of copied keys filled in (migration 0015 copies them
-    sealed); Claude on this PC and an Anthropic provider always there; `agent_provider` set when it is not (Claude on this PC, unless config.json says otherwise)."""
-    mirror_endpoints(db)
+    """At start: the last 4 of copied keys filled in (migration 0015 copies them sealed); Claude on this PC, an Anthropic
+    provider and On this PC always there; `agent_provider` set when it is not (Claude on this PC, unless config.json
+    says otherwise)."""
     with as_everyone():
         for row in db.all("SELECT id, secret FROM provider_keys WHERE last4 = '' AND secret <> ''"):
             found = last4(vault.reveal(row["secret"]))

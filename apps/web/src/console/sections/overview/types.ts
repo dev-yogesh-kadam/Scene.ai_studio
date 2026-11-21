@@ -40,14 +40,12 @@ export type Queue = {
   waiting: { id: string; name: string; user_name: string; created: number; priority?: number }[];
 };
 export type Health = {
-  render: boolean;
   model: boolean | null;
   alerts: number;
   maintenance: boolean;
   disk_free: number;
   backups_on: boolean;
   last_backup: number | null;
-  node_list: number | null;
 };
 export type EarnRow = {
   title: string;
@@ -65,7 +63,6 @@ export type Overview = {
   totals: { users: number; items: number; credits_held: number };
   health: Health;
   queue: Queue;
-  server: { online: boolean; since: number; version: string };
   announcement: { text?: string };
   attention: { level: string; text: string; tab: string }[];
   online: {

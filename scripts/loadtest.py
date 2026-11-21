@@ -4,7 +4,7 @@
 
 It never touches the live studio: it starts a studio of its own (this tree's backend, or --backend's) on port 8781
 with a throwaway database (scripts/testdb.py, beside SCENE_TEST_DATABASE_URL's) and the fake ComfyUI (node, apps/web/
-tests/support/fake-comfy.mjs). Each user has --items library items, signs in, keeps /api/events open, and loads the
+tests/support/fake-v1.mjs: the models of a fake Scene provider). Each user has --items library items, signs in, keeps /api/events open, and loads the
 pages one after another with the API requests a browser makes for them (recorded from the React build, 10 Nov 2026),
 each page's requests at once as a browser sends them. A few of them keep queueing image jobs, which the fake ComfyUI
 "renders" in half a second, so the queue, the job workers and the live messages are busy throughout. At the end it
@@ -25,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
-PORT, CONSOLE_PORT, COMFY_PORT = 8781, 8790, 8799
+PORT, CONSOLE_PORT, PROVIDER_PORT = 8781, 8790, 8799
 PASSWORD = "Load-test-2026-pass"
 
 # What each page asks for as it opens (a browser's requests, the React build of 10 Nov 2026): GETs at once, then the
@@ -50,22 +50,37 @@ def percentile(values, p):
     return values[min(len(values) - 1, int(round(p / 100 * (len(values) - 1))))]
 
 
-def start_fake_comfy():
-    loader = ("import('{}').then(async (m) => {{ await m.startFakeComfy({{port: {}, renderMs: 500}}); "
-              "console.log('ready'); }})").format((ROOT / "apps/web/tests/support/fake-comfy.mjs").as_uri(), COMFY_PORT)
+def start_fake_provider():
+    """The fake Scene provider (apps/web/tests/support/fake-v1.mjs) the studio's jobs go to, on PROVIDER_PORT."""
+    loader = ("import('{}').then(async (m) => {{ await m.startFakeV1({{port: {}}}); "
+              "console.log('ready'); }})").format((ROOT / "apps/web/tests/support/fake-v1.mjs").as_uri(), PROVIDER_PORT)
     process = subprocess.Popen(["node", "-e", loader], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     process.stdout.readline()
     return process
+
+
+async def add_provider(httpx):
+    """Give the studio the fake provider's key, as Servers & APIs → Providers → Add key does: its models are offered."""
+    setup_key = "sa_live_e2esetup4321"   # fake-v1.mjs's SETUP_KEY
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:{}".format(CONSOLE_PORT), headers={"Sec-Fetch-Site": "same-origin"}) as desk:
+        signed = await desk.post("/api/console/login", json={"email": "load-admin@local.test", "password": PASSWORD})
+        if signed.status_code != 200:
+            raise SystemExit("Could not sign in to the console: {}".format(signed.text[:200]))
+        added = await desk.post("/api/admin/providers/keys", json={"kind": "scene_provider_v1", "name": "Load test models",
+                                                                   "base_url": "http://127.0.0.1:{}".format(PROVIDER_PORT),
+                                                                   "label": "load", "secret": setup_key})
+        if added.status_code != 200 or not added.json().get("saved"):
+            raise SystemExit("Could not add the fake provider: {}".format(added.text[:200]))
 
 
 def start_studio(backend, database, home):
     config = Path(home) / "config.json"
     config.write_text(json.dumps({
         "host": "127.0.0.1", "port": PORT, "console_host": "127.0.0.1", "console_port": CONSOLE_PORT,
-        "comfy_url": "http://127.0.0.1:{}".format(COMFY_PORT), "storage_dir": str(Path(home) / "storage"),
+        "storage_dir": str(Path(home) / "storage"),
         "secret_key_file": str(Path(home) / "secret.key"), "database_url": database, "backup_keep": 0,
         "signups_per_day": 0, "allow_signup": True, "signup_credits": 1000, "claude_connection": "api_key", "first_account_local": False, "claude_models": "off",
-        "web_dist_dir": str(ROOT / "apps/web/dist"), "workflows_dir": str(ROOT / "workflows")}), encoding="utf-8")
+        "web_dist_dir": str(ROOT / "apps/web/dist")}), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("SCENE_")}
     env.update(SCENE_CONFIG=str(config), PYTHONUNBUFFERED="1")
     log = open(Path(home) / "studio.log", "w", encoding="utf-8")
@@ -198,7 +213,7 @@ async def run(args):
     database = subprocess.run([PYTHON, str(ROOT / "scripts/testdb.py"), "create"], capture_output=True, text=True,
                               check=True).stdout.strip()
     home = tempfile.mkdtemp(prefix="scene-load-")
-    comfy = start_fake_comfy()
+    provider = start_fake_provider()
     reached = database
     if args.via:   # the studio reaches its database through another address (a proxy that adds a network's delay)
         from urllib.parse import urlsplit, urlunsplit
@@ -214,6 +229,7 @@ async def run(args):
                                                                "password": PASSWORD})
             if made.status_code != 200:
                 raise SystemExit("Could not make the admin: {}".format(made.text[:200]))
+            await add_provider(httpx)
             flux = next(w["id"] for w in (await http.get("/api/workflows")).json()["workflows"] if w["kind"] == "image")
         tokens = make_users(database, emails)   # straight into the database: sign-ups are limited per address
         with __import__("psycopg").connect(database) as conn:
@@ -232,7 +248,7 @@ async def run(args):
         elapsed = time.monotonic() - started
     finally:
         studio.terminate()
-        comfy.terminate()
+        provider.terminate()
         try:
             studio.wait(timeout=20)
         except subprocess.TimeoutExpired:
@@ -264,7 +280,7 @@ def main():
     parser.add_argument("--items", type=int, default=200, help="library items of each user")
     parser.add_argument("--backend", default=str(ROOT / "backend"), help="the backend folder to run (for a before/after)")
     parser.add_argument("--out", help="also write the report here (JSON)")
-    parser.add_argument("--via", help="host:port the studio reaches PostgreSQL at instead (a latency proxy, as Azure is)")
+    parser.add_argument("--via", help="host:port the studio reaches PostgreSQL at instead (a latency proxy, as a remote database is)")
     asyncio.run(run(parser.parse_args()))
 
 

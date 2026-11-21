@@ -1,7 +1,7 @@
 // Starts a studio of its own for the smoke and end-to-end tests: this working tree's backend, with a throwaway
 // PostgreSQL database of its own (scripts/testdb.py makes it beside SCENE_TEST_DATABASE_URL's; stop() drops it), a
-// folder of its own, ports of its own, and a render server address that is either nothing (jobs wait in the queue)
-// or the fake ComfyUI (fake-comfy.mjs). Never the real render server, never anyone's real data.
+// folder of its own and ports of its own. Its models come from the fake v1 provider (fake-v1.mjs addToStudio), when a
+// test gives it one; never a real provider, never anyone's real data.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -15,19 +15,14 @@ const PYTHON =
   process.platform === 'win32' ? join(REPO, '.venv', 'Scripts', 'python.exe') : join(REPO, '.venv', 'bin', 'python');
 
 // Test studios' ports start at SCENE_TEST_PORT_BASE (default 8100), so runs side by side (one per worktree) each get
-// their own: the smoke test uses base+81 (studio), +90 (console), +99 (fake ComfyUI); Playwright +181, +190, +199.
+// their own: the smoke test uses base+81 (studio), +90 (console), +98 (fake v1 provider); Playwright +181, +190, +198.
 export const PORT_BASE = Number(process.env.SCENE_TEST_PORT_BASE || 8100);
 
 /**
  * Start the studio. Resolves when it answers. `stop()` ends it.
- * @param {{port?: number, consolePort?: number, comfyUrl?: string, dir?: string}} options
+ * @param {{port?: number, consolePort?: number, dir?: string}} options
  */
-export async function startStudio({
-  port = PORT_BASE + 81,
-  consolePort = PORT_BASE + 90,
-  comfyUrl = 'http://127.0.0.1:9',
-  dir,
-} = {}) {
+export async function startStudio({ port = PORT_BASE + 81, consolePort = PORT_BASE + 90, dir } = {}) {
   const home = dir || mkdtempSync(join(tmpdir(), 'scene-smoke-'));
   const database = testDatabase('create');
   mkdirSync(home, { recursive: true });
@@ -40,7 +35,6 @@ export async function startStudio({
         port,
         console_host: '127.0.0.1',
         console_port: consolePort,
-        comfy_url: comfyUrl,
         storage_dir: join(home, 'storage'),
         secret_key_file: join(home, 'secret.key'),
         database_url: database,

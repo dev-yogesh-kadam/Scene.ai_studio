@@ -21,7 +21,6 @@ import contextlib
 import hashlib
 import re
 import time
-from . import storage
 from .db import as_everyone
 from pathlib import Path
 
@@ -205,6 +204,43 @@ def keeper_of(db, user_id, project):
     return top["user_id"] if role and role != "owner" else user_id
 
 
+ELSEWHERE = "That item is in another module; attach it here first."
+
+
+def item_in_module(db, user_id, module, item_id, kind=None):
+    """A library item the agent may read or use in this module (a row of generations), or None. In a module: one made
+    there by this user, or by the owner of a project shared with them (keeper_of); outside any project: the user's own
+    that is in none. An item of another module or project is never one, whoever made it."""
+    if isinstance(item_id, bool) or not isinstance(item_id, int) or not item_id:
+        return None
+    kinds = ([kind] if isinstance(kind, str) else list(kind)) if kind else []
+    which = " AND kind IN ({})".format(", ".join("?" * len(kinds))) if kinds else ""
+    if not module:
+        return db.one("SELECT * FROM generations WHERE id = ? AND user_id = ? AND project_id IS NULL" + which, (item_id, user_id, *kinds))
+    keeper = keeper_of(db, user_id, module)
+    with as_everyone() if keeper != user_id else contextlib.nullcontext():
+        return db.one("SELECT * FROM generations WHERE id = ? AND user_id IN (?, ?) AND project_id = ?" + which,
+                      (item_id, user_id, keeper, module, *kinds))
+
+
+def entry_in_module(db, user_id, module, asset_id, kind=None):
+    """A NeuralCore entry of this module (a row of assets, kept under keeper_of), or None. There is none outside a project."""
+    if isinstance(asset_id, bool) or not isinstance(asset_id, int) or not asset_id or not module:
+        return None
+    keeper = keeper_of(db, user_id, module)
+    with as_everyone() if keeper != user_id else contextlib.nullcontext():
+        return db.one("SELECT * FROM assets WHERE id = ? AND user_id = ? AND project_id = ?" + (" AND kind = ?" if kind else ""),
+                      (asset_id, keeper, module, *([kind] if kind else [])))
+
+
+def refusal(db, user_id, item_id, otherwise):
+    """What the agent is told of an item id item_in_module did not give: ELSEWHERE when it is the user's own in another
+    module or project, else `otherwise`."""
+    if isinstance(item_id, int) and not isinstance(item_id, bool) and db.one("SELECT 1 FROM generations WHERE id = ? AND user_id = ?", (item_id, user_id)):
+        return ELSEWHERE
+    return otherwise
+
+
 def entry(db, user_id, asset_id):
     row = db.one("SELECT * FROM assets WHERE id = ? AND user_id = ?", (asset_id, user_id))
     return dict(row, type=TYPES.get(row["tag"], "other")) if row else None
@@ -243,7 +279,6 @@ def add(db, folder, user_id, project, data, filename, kind, name, tag="other", a
         return before["id"]
     folder.mkdir(parents=True, exist_ok=True)
     (folder / stored).write_bytes(data)
-    storage.keep_file(folder / stored)   # where the media are kept for good (storage.py)
     asset = db.run("INSERT INTO assets (user_id, name, tag, kind, filename, size, created, origin, project_id, about, use_note, "
                    "made_from, always, position, named) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                    (user_id, name, tag, kind, stored, len(data), time.time(), origin, project or None, clean_note(about),
@@ -312,7 +347,6 @@ def remove(db, folder, user_id, asset_id):
     if not db.one("SELECT 1 FROM assets WHERE user_id = ? AND filename = ?", (user_id, row["filename"])):
         try:
             (folder / row["filename"]).unlink(missing_ok=True)   # another project may have the same file: then it stays
-            storage.forget_file(folder / row["filename"])
         except OSError:
             pass   # held open for the moment (a download of it): the entry is gone, the file goes with the next cleanup
     return True
@@ -379,6 +413,20 @@ def fills(schema, on, taken=(), used=(), left_out=(), used_items=()):
             e = next((e for e in on if e["tag"] == tag and fit(e, slot)), None)
             if e:
                 put(slot, e, SAID_AS.get(tag, "the " + TYPES[tag]))
+    # A model's list of reference pictures ("REFERENCE 1", "REFERENCE 2" …: a provider's, slots with an "order") is for
+    # any of them: what is still left goes in, in order, the characters first, then the rest in the kit's order.
+    listed = sorted((r for r in slots if r.get("order") and r["id"] not in taken), key=lambda r: r["order"])
+    rest = [e for e in distinct if e["id"] not in used] + [e for e in on if e["tag"] != "character" and e["id"] not in used]
+    for slot in listed:
+        e = next((e for e in rest if fit(e, slot)), None)
+        if e is None:
+            break
+        rest.remove(e)
+        if e["tag"] == "character":
+            n = distinct.index(e)
+            put(slot, e, PEOPLE[min(n, len(PEOPLE) - 1)])
+        else:
+            put(slot, e, SAID_AS.get(e["tag"], "the " + TYPES.get(e["tag"], e["tag"])))
     return out
 
 
@@ -444,12 +492,17 @@ def mentions(schema, text, all_entries, taken=(), usable=None):
     people = [r for r in slots if r["kind"] == "image" and re.search(SLOT_WORDS[0][1], r["label"], re.IGNORECASE) and not OTHER_ANGLE.search(r["label"])]
     placed, words = {}, {}
 
+    listed = sorted((r for r in slots if r.get("order")), key=lambda r: r["order"])   # a model's list of reference pictures
+
     def slot_for(e):
         fits = [r for r in slots if r["id"] not in taken and e["kind"] in FITS.get(r["kind"], ())]
         if e["tag"] == "character":
-            return next((r for r in people if r in fits), None)
-        words_for_type = dict(SLOT_WORDS).get(e["tag"])
-        return next((r for r in fits if words_for_type and re.search(words_for_type, r["label"], re.IGNORECASE)), None)
+            found = next((r for r in people if r in fits), None)
+        else:
+            words_for_type = dict(SLOT_WORDS).get(e["tag"])
+            found = next((r for r in fits if words_for_type and re.search(words_for_type, r["label"], re.IGNORECASE)), None)
+        # No slot says it is for this one: the next free picture of the model's list takes it (a provider's model)
+        return found or next((r for r in listed if r in fits), None)
 
     def said(e):
         if e["id"] in words:
@@ -461,13 +514,17 @@ def mentions(schema, text, all_entries, taken=(), usable=None):
         taken.add(slot["id"])
         placed[slot["id"]] = e["id"]
         if e["tag"] == "character":
-            words[e["id"]] = PEOPLE[min(people.index(slot), len(PEOPLE) - 1)]
+            n = people.index(slot) if slot in people else sum(1 for d in placed.values() if by_id[d]["tag"] == "character") - 1
+            words[e["id"]] = PEOPLE[min(n, len(PEOPLE) - 1)]
         else:
             words[e["id"]] = SAID_AS.get(e["tag"], "the " + TYPES.get(e["tag"], "reference"))
+        if slot in listed and slot.get("tag"):   # in a list of pictures: which one it is, as the prompt names them
+            words[e["id"]] += " ({})".format(slot["tag"])
         return words[e["id"]]
 
     pattern = re.compile(r"@(" + "|".join(re.escape(e["name"]) for e in named) + r")(?![\w])", re.IGNORECASE)
     by_name = {e["name"].lower(): e for e in named}
+    by_id = {e["id"]: e for e in named}
     out = pattern.sub(lambda m: said(by_name[m.group(1).lower()]), str(text))
     return out, placed
 

@@ -16,11 +16,11 @@ from scene import agent, agent_tools, claude, ffjob, guardrails, moderation, web
 from scene.api import studio as studio_api
 from test_agent_shots import hosted
 from test_api import JOB, console, post_job, register
-from test_plans import USER, balance, studio, wait_for  # noqa: F401 (studio: the fixture)
+from test_plans import IMAGE, PROMPT, USER, balance, studio, wait_for  # noqa: F401 (studio: the fixture)
 
 BOB = {"name": "Bob", "email": "bob@example.com", "password": "another one"}
-UPSCALE = "upscaler/utility_seedvr2_3b_int8_upscale_video"   # priced by the length of the video it is given
-DURATION = "102:value"   # the duration control of JOB's workflow (video/h3_all_in_one), "3 to 15" seconds
+UPSCALE = "upscaler/@upscale_video"   # priced by the length of the video it is given
+DURATION = "3:value"   # the duration control of JOB's model (video/@seedance_2_5), "4 to 30" seconds
 
 
 def hook(where):
@@ -98,7 +98,7 @@ def underpriced_plan(client, monkeypatch, who):
     video = db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
                    "VALUES (?, 'video/x', 'video', 'Long', 'long.mp4', '{}', ?, ?)", (me["id"], json.dumps({"duration": 300}), time.time()))
     step = {"name": "Sharper", "kind": "video", "settings": {"workflow": UPSCALE, "name": "Sharper", "values": {}, "source_seconds": 1},
-            "uses": [{"id": video, "slot": "73:file", "kind": "video"}]}
+            "uses": [{"id": video, "slot": "2:video", "kind": "video"}]}
     db.run("UPDATE users SET credits = 10000 WHERE id = ?", (me["id"],))
     return client.post("/api/agent/plans", json={"steps": [step]}).json()
 
@@ -129,7 +129,7 @@ def test_plan_step_problem_holds_a_step_to_what_is_left_of_its_reservation(studi
 
 def test_a_plan_is_only_seen_approved_stopped_resumed_or_chosen_by_its_owner(studio):
     plan = studio.post("/api/agent/plans", json={"steps": [{"name": "one", "kind": "image", "settings": {
-        "workflow": "image/image_t2i_flux2_dev", "name": "one", "values": {}}}]}).json()
+        "workflow": IMAGE, "name": "one", "values": {PROMPT: "a lighthouse"}}}]}).json()
     ada = balance(studio)
     sign_in(studio, BOB)
     bob = balance(studio)
@@ -146,7 +146,7 @@ def test_a_plan_is_only_seen_approved_stopped_resumed_or_chosen_by_its_owner(stu
 
 def test_a_plan_approves_itself_only_when_the_users_permission_says_so(studio):
     plan = studio.post("/api/agent/plans", json={"steps": [{"name": "one", "kind": "image", "settings": {
-        "workflow": "image/image_t2i_flux2_dev", "name": "one", "values": {}}}]}).json()
+        "workflow": IMAGE, "name": "one", "values": {PROMPT: "a lighthouse"}}}]}).json()
     refused = studio.post("/api/agent/plans/{}/approve".format(plan["id"]), json={"auto": True})
     assert refused.status_code == 403 and studio.get("/api/agent/plans/{}".format(plan["id"])).json()["state"] == "waiting"
 
@@ -281,7 +281,7 @@ def test_a_plan_over_the_plan_limit_is_not_approved(studio):
     sign_in(studio, BOB)
     studio.app.state.db.set_setting("guard_plan_max", 10)
     plan = studio.post("/api/agent/plans", json={"steps": [{"name": "one", "kind": "image", "settings": {
-        "workflow": "image/image_t2i_flux2_dev", "name": "one", "values": {}}}]}).json()
+        "workflow": IMAGE, "name": "one", "values": {PROMPT: "a lighthouse"}}}]}).json()
     before = balance(studio)
     refused = studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
     assert refused.status_code == 429 and "one plan may cost at most 10" in refused.json()["detail"]
@@ -386,7 +386,7 @@ def test_the_studio_and_the_phone_are_refused_the_same_words(client):
 def test_a_plan_step_with_listed_words_is_refused_when_it_is_queued_and_its_credits_go_back(studio):
     before = balance(studio)
     plan = studio.post("/api/agent/plans", json={"steps": [{"name": "Beast", "kind": "image", "settings": {
-        "workflow": "image/image_t2i_flux2_dev", "name": "Beast", "values": {"100:value": "a dragon"}}}]}).json()
+        "workflow": IMAGE, "name": "Beast", "values": {PROMPT: "a dragon"}}}]}).json()
     refuse(studio, "dragon")   # listed after the plan was made: the step is refused when it is queued
     studio.post("/api/agent/plans/{}/approve".format(plan["id"]))
     ended = wait_for(studio, plan["id"])
@@ -399,7 +399,7 @@ def test_a_plan_step_with_listed_words_is_refused_when_it_is_queued_and_its_cred
 def test_a_plan_with_listed_words_is_refused_before_it_is_priced(studio):
     refuse(studio, "dragon")
     refused = studio.post("/api/agent/plans", json={"steps": [{"name": "Beast", "kind": "image", "settings": {
-        "workflow": "image/image_t2i_flux2_dev", "name": "Beast", "values": {"100:value": "a dragon"}}}]})
+        "workflow": IMAGE, "name": "Beast", "values": {PROMPT: "a dragon"}}}]})
     assert refused.status_code == 400 and "“Beast” (dragon)" in refused.json()["detail"]
 
 

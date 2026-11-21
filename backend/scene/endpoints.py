@@ -1,42 +1,26 @@
-"""The studio's servers, as the admin console's Servers section lists them: the ComfyUI servers the renders run on, and
-Langfuse, which is sent the agent's calls (langfuse_trace.py; its key is "public:secret"). Each one is added, switched
-off or removed in the console while the app runs. (The agent's models are Claude's, through
-Claude Code on this machine: they need no server here.)
-
-A render goes to a ComfyUI server that can do it and has a slot free (balancer.py): each server has the workflows it
-takes ("Workflows", the column `models`) and how many renders it runs at once ("Jobs at once", `slots`).
-
-The files people upload for a job are kept by the studio (references.keep_reference), not on a server: when a render
-starts, the server it runs on is given the files it needs (jobs._send_inputs). So no server has to answer for a job to be
-added, and a server that is off holds up only the renders that can be made nowhere else. The first ComfyUI server in use
-is still called the main one: files uploaded before the studio kept them are copied from it.
+"""The studio's servers, as the admin console's Servers section lists them: Langfuse, which is sent the agent's calls
+(langfuse_trace.py; its key is "public:secret"). It is added, switched off or removed in the console while the app runs.
+The models the studio makes things with come from its providers (providers/registry.py), not from a server here; the
+agent's model is Claude's, through Claude Code on this machine. (ComfyUI servers were listed here once: migration 0019
+took them out.)
 """
 
 import asyncio
 import re
-import time
 
 import httpx
 
 from . import vault
-from .balancer import ComfyPool  # noqa: F401  (the pool lives in balancer.py; main.py makes it as endpoints.ComfyPool)
 from .db import offload
 
-KINDS = {"comfy": "ComfyUI", "langfuse": "Langfuse"}
+KINDS = {"langfuse": "Langfuse"}
 FIELDS = ("kind", "name", "url", "api_key", "models", "slots", "active")
 MOST_SLOTS = 16   # "Jobs at once" a server may be given
 
 
 def seed(db, settings):
-    """An installation without any: the ComfyUI server config.json names (and the console's old address). The model
-    servers and APIs of before (Ollama, Kimi, Gemini: the agent uses only Claude now) are taken out, keys and all."""
+    """The servers and APIs of before (ComfyUI, Ollama, Kimi, Gemini) are taken out, keys and all."""
     db.run("DELETE FROM endpoints WHERE kind NOT IN ({})".format(", ".join("'{}'".format(k) for k in KINDS)))
-    if db.one("SELECT 1 FROM endpoints WHERE kind = 'comfy'"):
-        return
-    url = db.setting("comfy_url", settings.comfy_url)
-    if str(url or "").strip():
-        db.run("INSERT INTO endpoints (kind, name, url, api_key, models, active, created) VALUES ('comfy', 'Render server', ?, '', '', 1, ?)",
-               (str(url).strip().rstrip("/"), time.time()))
 
 
 def listed(db, kind=None, active_only=False):
@@ -51,15 +35,15 @@ def listed(db, kind=None, active_only=False):
 
 def clean(body, before=None):
     """What an admin typed for one, tidied: {"kind", "name", "url", "api_key", "models", "slots", "active"}. Nothing is
-    refused: a missing name gets one, an address without http:// gets it, "Jobs at once" is kept between 1 and
+    refused but another kind than Langfuse: a missing name gets one, an address without http:// gets it, "Jobs at once" is kept between 1 and
     MOST_SLOTS, and one that does not answer is shown as not answering."""
-    row = dict(before or {"kind": "comfy", "name": "", "url": "", "api_key": "", "models": "", "slots": 1, "active": 1})
+    row = dict(before or {"kind": "langfuse", "name": "", "url": "", "api_key": "", "models": "", "slots": 1, "active": 1})
     for key in FIELDS:
         if key in body:
             row[key] = body[key]
     row["kind"] = str(row["kind"])
     if row["kind"] not in KINDS:
-        row["kind"] = "comfy"
+        raise ValueError("The Servers section holds Langfuse only: the models come from Servers & APIs → Providers.")
     row["name"] = " ".join(str(row["name"] or "").split())[:60] or KINDS[row["kind"]]
     row["url"] = "".join(str(row["url"] or "").split()).rstrip("/")[:300]
     if row["url"] and not re.match(r"^[a-z][a-z0-9+.-]*://", row["url"], re.I):
@@ -81,19 +65,12 @@ def shown(row):
 
 async def status(state):
     """Every row with whether it answers now and what it runs. All are asked at once, briefly."""
-    pool = state.comfy_pool
-
     async def one(http, row):
         item = shown(row)
         if not row["url"]:
             return dict(item, online=False)
         try:
-            if row["kind"] == "comfy":
-                r = await http.get(row["url"] + "/system_stats")
-                r.raise_for_status()
-                devices = r.json().get("devices") or [{}]
-                item.update(online=True, detail=devices[0].get("name", ""), running=pool.running(row["url"]))
-            elif row["kind"] == "langfuse":
+            if row["kind"] == "langfuse":
                 r = await http.get(row["url"] + "/api/public/health")
                 r.raise_for_status()
                 item.update(online=True, detail="Langfuse " + str(r.json().get("version") or ""))

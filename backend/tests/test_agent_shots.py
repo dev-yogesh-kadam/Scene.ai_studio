@@ -1,7 +1,6 @@
 """The shot board: camera fields said in the prompt, a shot id on every generation, takes of a shot."""
 
 from scene import camera, memory
-from scene.api import workspace
 from test_agent_conversation import STEP, model
 from test_api import register
 
@@ -50,12 +49,8 @@ def test_storyboard_then_animate_then_reroll(client, monkeypatch):
     shots = [dict(STEP, name="Shot %d" % n, shot_size="WS") for n in (1, 2)]
     model(monkeypatch, client, {"thought": "", "reply": "Two shots.", "steps": shots})
     plan = client.post("/api/agent/plan", json={"instruction": "a film"}).json()
-    assert all(s["proposal"]["workflow"] == "video/h3_all_in_one" for s in plan["steps"])
+    assert all(s["proposal"]["workflow"] == "video/@seedance_2_5" for s in plan["steps"])
     sent = [{"shot_id": s["shot_id"], "proposal": s["proposal"]} for s in plan["steps"]]
-    # the picture workflows need node definitions the test fixture lacks: a video workflow stands in for the still's
-    async def stand_in(state, user):
-        return "video/h3_all_in_one"
-    monkeypatch.setattr(workspace, "_still_workflow", stand_in)
     board = client.post("/api/agent/storyboard", json={"shots": sent})
     assert board.status_code == 200, board.text
     stills = board.json()["steps"]
@@ -67,7 +62,7 @@ def test_storyboard_then_animate_then_reroll(client, monkeypatch):
     # animate: a still that is not the user's is left out, a real one starts its clip
     still = client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, created) "
-        "VALUES (?, 'image/z_image_turbo', 'image', 'Still · Shot 1', 'x.png', '', '{}', '{\"width\": 720, \"height\": 1280}', 1)", (me["id"],))
+        "VALUES (?, 'image/@nano_banana_pro', 'image', 'Still · Shot 1', 'x.png', '', '{}', '{\"width\": 720, \"height\": 1280}', 1)", (me["id"],))
     animated = client.post("/api/agent/animate", json={"shots": [
         {"shot_id": sent[0]["shot_id"], "item": still, "proposal": sent[0]["proposal"]},
         {"shot_id": sent[1]["shot_id"], "item": 99999, "proposal": sent[1]["proposal"]}]}).json()
@@ -82,7 +77,7 @@ def test_reroll_makes_take_two_of_the_same_shot(client, monkeypatch):
     step = client.post("/api/agent/plan", json={"instruction": "a dog"}).json()["steps"][0]
     made = client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, created) "
-        "VALUES (?, 'video/h3_all_in_one', 'video', 'Dog', 'x.mp4', '', ?, '{}', 1)", (me["id"], json.dumps(step["settings"])))
+        "VALUES (?, 'video/@seedance_2_5', 'video', 'Dog', 'x.mp4', '', ?, '{}', 1)", (me["id"], json.dumps(step["settings"])))
     again = client.post("/api/agent/reroll", json={"item": made}).json()["retake"]
     assert again["settings"]["shot"] == {"id": step["shot_id"], "take": 2} and again["settings"]["seed_mode"] == "random"
     assert again["credits"] == step["credits"] and "dog" in again["prompt"].lower()
@@ -140,7 +135,7 @@ def test_a_local_model_still_answers_once(client, monkeypatch):
 
 def test_the_assemble_step_is_planned_after_the_shots_and_waits_for_them(client, monkeypatch):
     register(client)
-    cut = {"tool": "assemble", "workflow": "video/h3_all_in_one", "name": "The film", "orientation": "portrait",
+    cut = {"tool": "assemble", "workflow": "video/@seedance_2_5", "name": "The film", "orientation": "portrait",
            "scenes": [{"kind": "title", "heading": "Rex", "text": "A dog's day", "items": [], "seconds": 3},
                       {"kind": "end", "heading": "The end", "text": "", "items": [], "seconds": 3}]}
     model(monkeypatch, client, {"thought": "", "reply": "Two shots and the cut.", "steps": [STEP, dict(STEP, name="Dog sleeps"), cut]})
@@ -168,7 +163,7 @@ def test_the_final_cut_joins_the_shots_under_music(client):
         asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "color={}:s=64x64:r=24:d=1".format(colour), "-pix_fmt", "yuv420p", folder / ("c%d.mp4" % i)))
         ids.append(client.app.state.db.run(
             "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "
-            "VALUES (?, 'video/h3_all_in_one', 'video', ?, ?, '{}', '{}', 1)", (me["id"], "c%d" % i, "c%d.mp4" % i)))
+            "VALUES (?, 'video/@seedance_2_5', 'video', ?, ?, '{}', '{}', 1)", (me["id"], "c%d" % i, "c%d.mp4" % i)))
     asyncio.run(media._ffmpeg("-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=1", folder / "song.mp3"))
     song = client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, created) "

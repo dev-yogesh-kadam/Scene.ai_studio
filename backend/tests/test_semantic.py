@@ -28,7 +28,7 @@ def vector_db():
         conn.execute('CREATE DATABASE "{}"'.format(name))
     url = urlunsplit((parts.scheme, parts.netloc, "/" + name, parts.query, ""))
     with psycopg.connect(url, autocommit=True) as conn:
-        conn.execute("CREATE EXTENSION vector")   # as a superuser, as on Azure its admin
+        conn.execute("CREATE EXTENSION vector")   # as a superuser
     schema.upgrade(url)
     yield url
     with psycopg.connect(VECTOR, autocommit=True) as conn:
@@ -76,12 +76,12 @@ def test_items_are_found_by_what_they_are_about(vector_db):
 
 def test_the_library_route_searches_by_meaning_when_asked(vector_db, tmp_path):
     from fastapi.testclient import TestClient
-    from conftest import ROOT, built
+    from conftest import built
     from scene.config import Settings
     from scene.main import create_app
     from test_api import register
-    settings = Settings(database_url=vector_db, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
-                        storage_dir=str(tmp_path), first_account_local=False, workflows_dir=str(ROOT / "workflows"),
+    settings = Settings(database_url=vector_db, claude_models="off",
+                        storage_dir=str(tmp_path), first_account_local=False,
                         web_dist_dir=str(built(tmp_path / "web")), semantic_search=True, embedding_provider="fake")
     with TestClient(create_app(settings)) as client:
         me = register(client)

@@ -1,5 +1,5 @@
 // Requests and bytes per page with a big library (not part of the test suites): a studio of its own with 500 items in
-// one project, made from four real ones on the fake ComfyUI and copied in the database. Each page is opened fresh
+// one project, made from four real ones by the fake v1 provider and copied in the database. Each page is opened fresh
 // (no cache) and everything it asks for until the network is quiet is counted.
 //
 //   node tests/measure.mjs [items]        default 500; prints a table and writes tests/look/shots/measure.json
@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
-import { startFakeComfy } from './support/fake-comfy.mjs';
+import { addToStudio, startFakeV1 } from './support/fake-v1.mjs';
 import { REPO, client, startStudio } from './support/studio.mjs';
 
 const COUNT = Number(process.argv[2]) || 500;
@@ -62,12 +62,13 @@ db.commit()
   return project;
 }
 
-const fake = await startFakeComfy({ port: 8599, renderMs: 100 });
-const studio = await startStudio({ port: PORT, consolePort: PORT + 9, comfyUrl: fake.url });
+const fake = await startFakeV1({ port: 8599 });
+const studio = await startStudio({ port: PORT, consolePort: PORT + 9 });
 const browser = await chromium.launch();
 const results = {};
 try {
   await client(studio.base).call('/api/auth/register', { method: 'POST', json: account });
+  await addToStudio(studio, fake, account, client); // the first account: an admin
   const project = await seed(studio);
   for (const [name, path] of [
     ['Home', '/home'],

@@ -89,9 +89,6 @@
 .app-menu .working {
   margin: 0 0 4px;
 }
-.app-menu .server {
-  padding: 4px 10px;
-}
 .working {
   display: flex;
   align-items: center;
@@ -104,14 +101,6 @@
   font-size: 12px;
   font-weight: 500;
   text-decoration: none;
-}
-.server {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  padding: 6px 12px 10px;
 }
 .shell.railed .app-menu-wrap {
   display: none;

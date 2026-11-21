@@ -22,7 +22,7 @@ from starlette.datastructures import FormData
 from .credits import PREPAID
 from .jobs import QUEUEING
 from .db import offload
-from . import content_check, errors, generation_models, guardrails, moderation
+from . import content_check, errors, guardrails, moderation
 
 RUNNING = ("running", "stopping")
 ENDED_JOB = ("done", "failed", "cancelled")
@@ -510,15 +510,15 @@ class PlanRunner:
             raise Refused(str(problem) or type(problem).__name__)
 
     async def _frame_clashes(self, step, settings):
-        """Whether this step's generation model can't take the frame it would start on with the references it has."""
+        """Whether this step's model can't start on a frame (its provider's limits say which frames it takes)."""
         from .comfy import workflows
         try:
-            schema = workflows.describe(await self.state.catalog.load(str(settings.get("workflow", ""))))
+            wf = await self.state.catalog.load(str(settings.get("workflow", "")))
         except workflows.WorkflowError:
             return False
         frame = (step.get("start") or step.get("after") or {}).get("slot")
-        used = set(settings.get("refs") or {}) | {frame}
-        return bool(frame) and generation_models.has_models(schema) and generation_models.clashes(schema, settings.get("options"), used)
+        frames = (((wf.get("profile") or {}).get("provider") or {}).get("limits") or {}).get("frames")
+        return bool(frame) and isinstance(frames, list) and "first" not in frames
 
     async def _result(self, plan_id, steps, step, waiting_step):
         """The library item step `step` made, waiting for its job if it is still being made. A failed or cancelled job,

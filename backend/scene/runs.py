@@ -18,10 +18,12 @@ PAGE = 100              # leaves listed at a time
 MANY = 2000             # leaves written by one write_many
 
 
-SKILL = "/skill"        # the long skill the run follows, kept from the message that named it: set by the studio only
-ATTACHED = "/attached"  # the library ids of every file attached in the run, so later messages still have them: the studio's
-THREADS = "/claude"     # the Claude session of the run's conversation, one for each project and model: the studio's
-MARKS = "/studio"       # what the studio did once in a run (the creative process: the brief asked, the review given): the studio's
+# A tab's own paths, set by the studio only, one for each module the tab is open in (/skill/p12, /attached/p12,
+# /claude/p12, /studio/p12/<name>; p0 outside any project): the same tab id in two modules shares none of them.
+SKILL = "/skill"        # the long skill the run follows, kept from the message that named it
+ATTACHED = "/attached"  # the library ids of every file attached in the run, so later messages still have them
+THREADS = "/claude"     # the Claude session of the run's conversation, one for each module
+MARKS = "/studio"       # what the studio did once in a run (the creative process: the brief asked, the review given)
 PROTECTED = (SKILL, ATTACHED, THREADS, MARKS)
 MOST_ATTACHED = 64
 
@@ -184,44 +186,57 @@ def saved_since(db, user_id, run, since):
     return bool(found and found["last"] and found["last"] > since)
 
 
-def kept_skill(db, user_id, run):
-    """The id of the long skill this run follows, or None."""
-    found = read(db, user_id, run, SKILL)
+def _in_module(base, project):
+    """A tab's own path for one module: /skill -> /skill/p12."""
+    return "{}/p{}".format(base, int(project or 0))
+
+
+def _module_leaf(db, user_id, run, base, project):
+    """The path of `base` for this module, a leaf kept before tabs kept one for each module (a value at /skill itself)
+    taken away first: a folder cannot sit under a leaf, and that value belonged to no module in particular."""
+    path = _in_module(base, project)
+    db.change("DELETE FROM run_state WHERE user_id = ? AND run = ? AND path = ?", (user_id, clean_run(run), base))
+    return path
+
+
+def kept_skill(db, user_id, run, project):
+    """The id of the long skill this run follows in this module, or None."""
+    found = read(db, user_id, run, _in_module(SKILL, project))
     return found["value"] if isinstance(found.get("value"), str) else None
 
 
-def kept_attached(db, user_id, run):
-    """The library ids of the files attached so far in this run, oldest first."""
-    found = read(db, user_id, run, ATTACHED)
+def keep_skill(db, user_id, run, project, skill_id):
+    """Remember the long skill this run follows in this module, so the messages after the one that named it carry on with it."""
+    write(db, user_id, run, _module_leaf(db, user_id, run, SKILL, project), skill_id, "studio", trusted=True)
+
+
+def kept_attached(db, user_id, run, project):
+    """The library ids of the files attached so far in this run, in this module, oldest first."""
+    found = read(db, user_id, run, _in_module(ATTACHED, project))
     return [i for i in found.get("value") or [] if isinstance(i, int)] if isinstance(found.get("value"), list) else []
 
 
-def keep_attached(db, user_id, run, ids):
-    """Add files attached to a message of this run to the ones it keeps."""
-    kept = kept_attached(db, user_id, run)
+def keep_attached(db, user_id, run, project, ids):
+    """Add files attached to a message of this run, in this module, to the ones it keeps."""
+    kept = kept_attached(db, user_id, run, project)
     more = [i for i in ids if isinstance(i, int) and i not in kept]
     if more:
-        write(db, user_id, run, ATTACHED, (kept + more)[-MOST_ATTACHED:], "studio", trusted=True)
+        write(db, user_id, run, _module_leaf(db, user_id, run, ATTACHED, project), (kept + more)[-MOST_ATTACHED:], "studio", trusted=True)
 
 
-def marked(db, user_id, run, name):
-    """What the studio marked once in this run under `name` (mark), or None."""
-    found = read(db, user_id, run, "{}/{}".format(MARKS, name))
+def marked(db, user_id, run, project, name):
+    """What the studio marked once in this run, in this module, under `name` (mark), or None."""
+    found = read(db, user_id, run, "{}/{}".format(_in_module(MARKS, project), name))
     return None if found.get("missing") else found.get("value")
 
 
-def mark(db, user_id, run, name, value=True):
-    """Mark that the studio did something once in this run (the creative process's brief, concept, review)."""
-    write(db, user_id, run, "{}/{}".format(MARKS, name), value, "studio", trusted=True)
-
-
-def keep_skill(db, user_id, run, skill_id):
-    """Remember the long skill this run follows, so the messages after the one that named it carry on with it."""
-    write(db, user_id, run, SKILL, skill_id, "studio", trusted=True)
+def mark(db, user_id, run, project, name, value=True):
+    """Mark that the studio did something once in this run, in this module (the creative process's brief, concept, review)."""
+    write(db, user_id, run, "{}/{}".format(_in_module(MARKS, project), name), value, "studio", trusted=True)
 
 
 def _thread_path(project):
-    return "{}/p{}".format(THREADS, int(project or 0))
+    return _in_module(THREADS, project)
 
 
 def kept_thread(db, user_id, run, project):

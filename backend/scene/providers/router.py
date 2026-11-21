@@ -13,10 +13,8 @@ What a call's problem means (base.py):
 - ProviderProblem: the next provider offering the same model is tried, once.
 - RequestProblem: never retried; the job fails with the provider's words.
 
-The setting `provider_router` (registry.ROUTER): "off", today's code paths only; "shadow", today's paths do the work and
-the router says what it would have picked, kept on the job (`jobs.provider`) and in the log, to compare; "on", the
-generation models go through the providers (scene_provider_v1). ComfyUI's workflows stay with the load balancer in
-every mode: it is ComfyUI's adapter (comfyui.py)."""
+Every job of a model runs this way: the Scene providers (v1.py) and On this PC (local.py) are the only places models
+come from."""
 
 import asyncio
 import time
@@ -25,7 +23,6 @@ from ..db import as_everyone, offload
 from . import registry
 from .anthropic_api import Anthropic
 from .base import KeyProblem, ProviderProblem, RequestProblem
-from .comfyui import ComfyUI
 from .local import LocalTools
 from .v1 import V1
 
@@ -37,21 +34,6 @@ REFRESH_EVERY = 600        # seconds between two reads of each key's models (reg
 FIRST_WAIT = 30            # seconds after the start before the first read
 VOICES_FRESH = 600         # seconds a provider's voice list is kept
 SPEECH = "speech"          # the voiceover model's id at a Scene provider (its capability as its id)
-# The generation server's workflows (the ComfyUI disguise) and the provider model each one is, for shadow mode: the
-# provider's ids are the same as their Model choices (seedance_2_5 …); a tool is its capability.
-DISGUISED_TOOLS = {"generation_speech": "speech", "generation_music": "music", "generation_sound_effect": "sound_effect",
-                   "generation_lipsync": "lip_sync", "generation_upscale": "upscale_video"}
-DISGUISED_MODELS = ("generation_video", "generation_image")
-
-
-def model_of_job(workflow_id, options):
-    """The provider model a job of the generation server's disguised workflows is, or None for any other workflow."""
-    name = str(workflow_id or "").rsplit("/", 1)[-1]
-    if name in DISGUISED_TOOLS:
-        return DISGUISED_TOOLS[name]
-    if name in DISGUISED_MODELS:
-        return str((options or {}).get("model") or "") or None
-    return None
 
 
 def local_tools(settings):
@@ -81,21 +63,14 @@ class Choice(dict):
 
 
 class Router:
-    def __init__(self, db, settings=None, catalog=None, pool=None):
+    def __init__(self, db, settings=None):
         self.db = db
         self.settings = settings
-        self.catalog = catalog     # for ComfyUI's models (its workflows)
-        self.pool = pool           # the load balancer, for ComfyUI's Workflows patterns
         self.running = {}          # key id -> the ids of the studio's jobs running with it now
         self._candidates = {}      # model id -> (when, [Choice without secret])
         self._spend = {}           # key id -> (when, credits today)
         self.adapters = {}         # tests put adapters here: provider id -> Adapter
         self._voices = {}          # (q, language) -> (when, voices, words)
-
-    # ------------------------------------------------------------ the switch
-
-    def mode(self):
-        return registry.router_mode(self.db)
 
     # ------------------------------------------------------------ adapters
 
@@ -105,10 +80,6 @@ class Router:
         kind = provider["kind"]
         if kind == "scene_provider_v1":
             return V1(provider["base_url"])
-        if kind == "comfyui":
-            endpoint = registry.endpoint_of(self.db, provider)
-            from ..balancer import patterns_of
-            return ComfyUI(provider["base_url"], self.catalog, patterns_of((endpoint or {}).get("models")))
         if kind == "anthropic":
             return Anthropic(provider["base_url"])
         if kind == LocalTools.kind:
@@ -318,7 +289,7 @@ class Router:
     async def check_key(self, provider, key_row, secret=None):
         """Ask a provider about one key now: whoami and its models. Saves what was learned (status, models, whoami)
         and returns {"ok", "models", "credits", "alerts", "error", "status"}."""
-        adapter = await offload(self.adapter, provider)   # a ComfyUI one reads its endpoints row
+        adapter = await offload(self.adapter, provider)
         secret = registry.secret_of(key_row) if secret is None else secret
         try:
             said = await adapter.whoami(secret)

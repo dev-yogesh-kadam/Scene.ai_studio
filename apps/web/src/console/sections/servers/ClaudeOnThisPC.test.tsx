@@ -45,8 +45,8 @@ const LOCAL = {
   keyless: true,
 };
 const DATA: ProvidersData = {
-  kinds: { claude_local: 'Claude on this PC', anthropic: 'Anthropic', comfyui: 'ComfyUI' },
-  self_hosted: ['comfyui'],
+  kinds: { claude_local: 'Claude on this PC', anthropic: 'Anthropic', scene_provider_v1: 'Scene provider' },
+  self_hosted: ['scene_provider_v1'],
   keyless: ['claude_local'],
   providers: [
     LOCAL,
@@ -61,8 +61,6 @@ const DATA: ProvidersData = {
       keyless: false,
     },
   ],
-  router: 'off',
-  modes: ['off', 'shadow', 'on'],
   agent_provider: 9,
   testing: 'Personal Claude subscription',
 };

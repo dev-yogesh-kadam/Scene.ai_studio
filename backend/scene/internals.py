@@ -34,7 +34,6 @@ PLAIN = [
     (re.compile(r"^Compacted this conversation's context"), "Tidied up the conversation"),
     (re.compile(r"^Asked .* for a second opinion"), "Asked for a second opinion"),
     (re.compile(r"^(Opened|Looked in) NeuralCore"), "Checked the project's references"),
-    (re.compile(r"^Looked in the other projects"), "Checked the other projects' references"),
     (re.compile(r"NeuralCore"), "Kept it with the project's references"),
     (re.compile(r"^(Read|Wrote) .* of the (run|conversation|project)|^Wrote \d+ leaves"), "Updated the run's notes"),
     (re.compile(r"^Saved to memory|^Forgot "), "Updated what it remembers"),

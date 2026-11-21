@@ -8,15 +8,15 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import CONSOLE_PAGE, POSTGRES, ROOT, STUDIO_PAGE, built, empty_postgres
+from conftest import CONSOLE_PAGE, POSTGRES, STUDIO_PAGE, built, empty_postgres
 from scene.config import Settings, load_settings
 from scene.main import Doors, create_app
 
 def app_with(tmp_path, **settings):
     empty_postgres()
-    settings = Settings(database_url=POSTGRES, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
+    settings = Settings(database_url=POSTGRES, claude_models="off",
                         storage_dir=str(tmp_path / "storage"), first_account_local=False,
-                        workflows_dir=str(ROOT / "workflows"), **settings)
+                        **settings)
     return create_app(settings)
 
 
@@ -35,8 +35,7 @@ def test_a_config_from_before_still_starts(tmp_path):
                       % json.dumps(str(built(tmp_path / "dist"))), encoding="utf-8")
     settings = load_settings(config)
     assert not hasattr(settings, "web_app") and not hasattr(settings, "frontend_dir")
-    settings.storage_dir, settings.workflows_dir, settings.claude_models = str(tmp_path / "storage"), str(ROOT / "workflows"), "off"
-    settings.hold_queue_offline, settings.comfy_url = False, "http://127.0.0.1:9"
+    settings.storage_dir, settings.claude_models = str(tmp_path / "storage"), "off"
     settings.database_url = POSTGRES
     empty_postgres()
     with TestClient(create_app(settings)) as studio:

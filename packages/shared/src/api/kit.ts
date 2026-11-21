@@ -82,10 +82,11 @@ export function deleteState(project: number, path: string) {
   return api<{ ok: true }>(`/api/core/state?project=${project}&path=${encodeURIComponent(path)}`, { method: 'DELETE' });
 }
 
-export function remembered() {
-  return api<{ entries: { key: string; value: string }[] }>('/api/remembered');
+/** What the agent remembers of the user in one module (memory is never shared between modules). */
+export function remembered(project: number) {
+  return api<{ entries: { key: string; value: string }[] }>(`/api/remembered?project=${project}`);
 }
 
-export function forget(key: string) {
-  return api<{ ok: true }>('/api/remembered?key=' + encodeURIComponent(key), { method: 'DELETE' });
+export function forget(project: number, key: string) {
+  return api<{ ok: true }>(`/api/remembered?project=${project}&key=${encodeURIComponent(key)}`, { method: 'DELETE' });
 }

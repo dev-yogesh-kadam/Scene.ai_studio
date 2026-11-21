@@ -7,12 +7,13 @@ import time
 
 import pytest
 
-from scene.comfy.client import ComfyError
 from scene.db import offload
+from scene.jobs import JobError
 from scene.plans import PlanRunner
 
 USER = {"name": "Ada", "email": "ada@example.com", "password": "correct horse"}
-IMAGE = "image/image_t2i_flux2_dev"
+IMAGE = "image/@nano_banana_pro"   # a picture model of the test provider (studio_models.py)
+PROMPT = "2:value"                 # its prompt (the provider form's first node)
 # A picture of one pixel: what the stand-in render files in the library.
 PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415408d763f8cfc0f0"
                     "1f0005000201e5270ddb0000000049454e44ae426082")
@@ -20,8 +21,8 @@ PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108020000009
 
 @pytest.fixture
 def studio(client, monkeypatch):
-    """The studio with a render that files a picture (or fails, or waits, as a test says), and references put on the
-    render server without one."""
+    """The studio with a render that files a picture in place of the provider's (or fails, or waits, as a test says),
+    and references kept without storing them."""
     manager = client.app.state.jobs
     client.hold = {}      # job name -> asyncio.Event the render waits for
     client.failing = set()   # job names whose render fails
@@ -33,7 +34,7 @@ def studio(client, monkeypatch):
         if job["name"] in client.hold:
             await client.hold[job["name"]].wait()
         if job["name"] in client.failing:
-            raise ComfyError("The render failed.")
+            raise JobError("The render failed.")
         folder, stem = await offload(manager._target, job)   # as the real render does: off the event loop
         target = folder / (stem + ".png")
         target.write_bytes(PNG)
@@ -49,7 +50,7 @@ def studio(client, monkeypatch):
 
 
 def step(name, **extra):
-    return {"name": name, "kind": "image", "settings": {"workflow": IMAGE, "name": name, "values": {}}, **extra}
+    return {"name": name, "kind": "image", "settings": {"workflow": IMAGE, "name": name, "values": {PROMPT: "A lighthouse at dusk"}}, **extra}
 
 
 def balance(client):
@@ -365,7 +366,9 @@ def test_a_job_that_ends_between_the_plans_look_and_its_wait_is_not_missed(studi
 def test_a_plans_later_shots_keep_its_place_ahead_of_what_was_asked_for_after_it(studio):
     """A plan whose next shot starts on the one being made (queued only once that is made) is not overtaken by a
     video asked for after the plan, in another module: its shots render first. Shot three starts on nothing, so it is
-    queued at once and renders before shot two, which waits for shot one."""
+    queued at once and renders before shot two, which waits for shot one. The provider's key makes one job at a time."""
+    studio.app.state.db.run("UPDATE provider_keys SET max_concurrent = 1")
+    studio.app.state.router.forget()
     release = hold(studio, "one")
     steps = [step("one"), step("two", after={"step": 0, "slot": "x"}), step("three")]
     plan = studio.post("/api/agent/plans", json={"steps": steps}).json()
@@ -373,7 +376,7 @@ def test_a_plans_later_shots_keep_its_place_ahead_of_what_was_asked_for_after_it
     until = time.time() + 10
     while "one" not in studio.started and time.time() < until:
         time.sleep(0.02)
-    other = studio.post("/api/jobs", data={"settings": json.dumps({"workflow": IMAGE, "name": "other", "values": {}})})
+    other = studio.post("/api/jobs", data={"settings": json.dumps({"workflow": IMAGE, "name": "other", "values": {PROMPT: "A boat"}})})
     assert other.status_code == 200, other.text
     release()
     assert wait_for(studio, plan["id"])["state"] == "done"

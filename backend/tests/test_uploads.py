@@ -190,7 +190,7 @@ def test_a_run_keeps_its_files_for_the_messages_after(client, monkeypatch, tmp_p
     assert "scenetest1" in told and "sceneaites-doc" in told   # still there after "go"
     assert any("scenetest1" in e["text"] and "sceneaites-doc" in e["text"] for e in plan["activity"] if e["text"].startswith("Read what you attached"))
     from scene import runs
-    assert runs.kept_attached(client.app.state.db, 1, "pm-1") == [sound["id"], script["id"]]
+    assert runs.kept_attached(client.app.state.db, 1, "pm-1", 0) == [sound["id"], script["id"]]
 
 
 def test_a_run_keeps_the_skill_the_user_picked_and_its_files(client, monkeypatch, tmp_path):
@@ -215,11 +215,11 @@ def test_a_run_keeps_the_skill_the_user_picked_and_its_files(client, monkeypatch
     monkeypatch.setattr(agent_, "_service_of", lambda name: ({"name": "Test"}, name))
     # the skill's words alone ("episode") pick nothing
     client.post("/api/agent/plan", json={"instruction": "@1 the first minute of this episode", "selection": [sound["id"]], "run": "pm-8"})
-    assert runs.kept_skill(client.app.state.db, 1, "pm-8") is None
+    assert runs.kept_skill(client.app.state.db, 1, "pm-8", 0) is None
     client.post("/api/agent/plan", json={"instruction": "@1 /pocket-motion-seedance-v2 make the first minute of this episode",
                                          "selection": [sound["id"]], "run": "pm-9"})
-    assert runs.kept_skill(client.app.state.db, 1, "pm-9") == "pocket-motion-seedance-v2"
-    assert runs.kept_attached(client.app.state.db, 1, "pm-9") == [sound["id"]]
+    assert runs.kept_skill(client.app.state.db, 1, "pm-9", 0) == "pocket-motion-seedance-v2"
+    assert runs.kept_attached(client.app.state.db, 1, "pm-9", 0) == [sound["id"]]
     plan = client.post("/api/agent/plan", json={"instruction": "continue", "selection": [], "run": "pm-9"}).json()
     assert any(e["text"].startswith("Carried on") for e in plan["activity"])
     assert any("scenetest1" in e["text"] for e in plan["activity"] if e["text"].startswith("Read what you attached"))

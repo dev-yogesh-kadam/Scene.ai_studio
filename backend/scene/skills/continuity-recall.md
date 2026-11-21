@@ -10,7 +10,7 @@ words: \b(continuity|smart referenc\w*|keep (her|him|them|it) the same|looks? di
 
 A memory of what the video has already shown. Every generated shot leaves one labelled keyframe behind. Before the next clip, pick the few that help it most, rather than passing only the last frame or everything.
 
-**Studio:** `video_audio_analysis` with `detect_shots` is film shots {"video", "save_to"}; `extract_key_frames` and step 3's caption strip are film keyframes {"video", "shots", "pick": "middle", "labels", "save_to": "/continuity/recall/keyframes/c<n>"}, which keeps each frame and a copy with its label in a strip below it (keyframe_captioned); the grid is film board {"stills": [{"image": each pick's keyframe_captioned item}], "panels": 6, "numbered": true}. On H3 Chunk the grid goes in the Extra Reference slot. Who someone is comes from NeuralCore (/cast, and a look of its own when they changed).
+**Studio:** `video_audio_analysis` with `detect_shots` is film shots {"video", "save_to"}; `extract_key_frames` and step 3's caption strip are film keyframes {"video", "shots", "pick": "middle", "labels", "save_to": "/continuity/recall/keyframes/c<n>"}, which keeps each frame and a copy with its label in a strip below it (keyframe_captioned); the grid is film board {"stills": [{"image": each pick's keyframe_captioned item}], "panels": 6, "numbered": true}. The grid goes in the video model's numbered reference pictures, after the anchor and the sheets (its last @Image). Who someone is comes from NeuralCore (/cast, and a look of its own when they changed).
 
 ## Saving keyframes
 After each kept clip (never a discarded take):

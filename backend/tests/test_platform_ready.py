@@ -1,5 +1,6 @@
-"""What running on Azure needs of the app: health answers for the platform, JSON logs, connection strings with their
-TLS parameters taken whole by every tool, and nothing that needs a superuser."""
+"""Good practice for the studio on one PC too, and checked here: health answers (/healthz, /readyz) for whatever watches
+it, JSON logs, connection strings with their parameters taken whole by every tool, and migrations that need no
+superuser."""
 
 import io
 import json
@@ -36,8 +37,8 @@ def test_each_line_written_becomes_one_json_object():
 
 
 def test_a_connection_string_with_its_parameters_works_for_the_app_its_copies_and_its_migrations(tmp_path):
-    """Azure's PostgreSQL wants sslmode=verify-full&sslrootcert=...: the pool, pg_dump and the migrations take the
-    address as it is given (here with parameters this server takes: no TLS on LUFI)."""
+    """A connection string may carry parameters (TLS, a timeout, the application's name): the pool, pg_dump and the
+    migrations take the address as it is given (here with parameters this server takes: no TLS on LUFI)."""
     empty_postgres()
     with_parameters = POSTGRES + ("&" if "?" in POSTGRES else "?") + "sslmode=prefer&application_name=scene-test&connect_timeout=10"
     schema.upgrade(with_parameters)   # SQLAlchemy's address keeps them

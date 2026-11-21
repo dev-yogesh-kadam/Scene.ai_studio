@@ -1,215 +1,59 @@
-"""The workflow catalog: every workflow file under workflows/<kind>/. A file is read again only once it changed.
+"""The workflow catalog: every model the studio offers, as a workflow (providers/workflows.py). A model is offered by a
+provider whose key has it: a Scene provider over the v1 contract (Studio_automation), or On this PC (the studio's own
+tools). Its id is "<folder>/@<model id>" ("video/@seedance_2_5", "audio/@transcribe").
 
-A workflow is <name>.json (the graph that runs: an API export, or ComfyUI's own save), with <name>.studio.json beside it
-(its presets) and, when the file that runs is an API export, <name>.ui.json (the save to open in ComfyUI, never run).
-A new file shows on the next request. workflows/archive and workflows/reports are never read."""
-
-import asyncio
-import copy
-import json
-import time
-
-import httpx
+The studio once ran ComfyUI workflow files from workflows/<kind>/; they are kept in workflows/archive/ and never read."""
 
 from .comfy import workflows
 
 KINDS = ("video", "image", "audio")
-# The folders of workflows/. An upscaler makes nothing from a prompt: it takes a video the user has and returns it
-# larger, so it is its own action in the studio and is left out of the Create page and the agent's workflows.
+# The folders a model is offered in. An upscaler makes nothing from a prompt: it takes a video the user has and returns
+# it larger, so it is its own action in the studio and is left out of the Create page and the agent's workflows.
 FOLDERS = (*KINDS, "upscaler")
 
 
 class Catalog:
-    def __init__(self, directory, comfy, cache_file=None):
-        self.directory = directory
-        self.comfy = comfy
-        self.object_info = None
-        self.tried = 0.0
-        # The node definitions from the last time ComfyUI answered, so workflows stay readable while it is off.
-        self.cache_file = cache_file
-        self.saved = None
-        if cache_file and cache_file.is_file():
-            try:
-                self.saved = json.loads(cache_file.read_text(encoding="utf-8"))
-            except ValueError:
-                pass
-        self.lock = asyncio.Lock()  # several requests may need the node definitions at once: fetch them once
-        # What was read, kept until a file changes: (the folders' times, the files); (their sidecars' times, replaced);
-        # path -> (the file's and its sidecar's times, the node definitions it was read with, the workflow).
-        self._files, self._replaced, self._read = (None, {}), (None, {}), {}
-        # The providers' models offered as workflows while the router is on (providers/workflows.ProviderWorkflows;
-        # main.py sets it). Then the generation server's own workflow files (the ComfyUI disguise) are not offered.
-        self.providers = None
+    def __init__(self, providers=None):
+        # The providers' models offered as workflows (providers/workflows.ProviderWorkflows; main.py sets it).
+        self.providers = providers
 
-    def known(self, workflow_id):
-        """Whether a workflow id is one there is: a file, or a provider's model offered now."""
-        return workflow_id in self.files() or (self.providers is not None and workflow_id in self.providers.workflows())
+    async def known(self, workflow_id):
+        """Whether a workflow id is one offered now (the providers' models read first when due: right after a start
+        the list in hand is empty)."""
+        if self.providers is None:
+            return False
+        await self.providers.refresh()
+        return workflow_id in self.providers.workflows()
 
     def is_provider(self, workflow_id):
         from .providers.workflows import is_provider_id
         return is_provider_id(workflow_id)
 
-    @staticmethod
-    def _time(path):
-        try:
-            return path.stat().st_mtime_ns
-        except OSError:
-            return None
-
-    def files(self):
-        """Workflow id ("video/h3_director") -> path. Looked for again only when a folder changed (a file came or went)."""
-        seen = tuple(self._time(self.directory / kind) for kind in FOLDERS)
-        if self._files[0] != seen:
-            self._files = (seen, self._find())
-        return dict(self._files[1])
-
-    def _find(self):
-        found = {}
-        for kind in FOLDERS:
-            folder = self.directory / kind
-            if not folder.is_dir():
-                continue
-            for path in sorted(folder.glob("*.json"), key=lambda p: p.name.lower()):
-                if not path.name.endswith((".studio.json", ".ui.json")):
-                    found["{}/{}".format(kind, path.stem)] = path
-        return found
-
-    def sidecar_of(self, path):
-        """The presets file of a workflow file: <name>.studio.json beside it."""
-        return path.with_name(path.stem + ".studio.json")
-
-    def forget_nodes(self):
-        self.object_info, self.tried = None, 0.0
-
-    async def refresh_nodes(self):
-        """Ask ComfyUI for its node list now, and keep it: what its nodes are and which model files it has. Raises
-        httpx.HTTPError when it can't be reached."""
-        async with self.lock:
-            self.object_info = self.saved = await self.comfy.object_info()
-            self.tried = time.time()
-            if self.cache_file:
-                self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-                self.cache_file.write_text(json.dumps(self.object_info), encoding="utf-8")
-        return self.object_info
-
-    def nodes_saved(self):
-        """When the node list in hand was fetched from ComfyUI, or None if there is none."""
-        if self.cache_file and self.cache_file.is_file():
-            return self.cache_file.stat().st_mtime
-        return (self.tried or None) if self.object_info else None
-
-    def replaced(self):
-        """Retired workflow id -> the id of the workflow that took its place (its presets file lists it under "replaces").
-        Earlier work, a saved default and a job still waiting name the old id; they are served by the new workflow."""
-        files = self.files()
-        seen = tuple((path, self._time(self.sidecar_of(path))) for path in files.values())
-        if self._replaced[0] != seen:
-            self._replaced = (seen, self._find_replaced(files))
-        return dict(self._replaced[1])
-
-    def _find_replaced(self, files):
-        found = {}
-        for workflow_id, path in files.items():
-            sidecar = self.sidecar_of(path)
-            try:
-                old = json.loads(sidecar.read_text(encoding="utf-8")).get("replaces") if sidecar.is_file() else None
-            except (OSError, ValueError):
-                old = None
-            found.update({str(name): workflow_id for name in old or []})
-        return found
-
     def current(self, workflow_id):
-        """The id a workflow goes by now."""
-        return workflow_id if workflow_id in self.files() else self.replaced().get(workflow_id, workflow_id)
+        """The id a workflow goes by now: a model keeps its id for good (the contract never reuses one)."""
+        return workflow_id
 
     async def load(self, workflow_id):
         if self.providers is not None and self.is_provider(workflow_id):
             await self.providers.refresh()
             wf = self.providers.get(workflow_id)
-            if wf is None:
-                raise workflows.WorkflowError("{} is not offered now: no provider key in use has it, or the provider router "
-                                              "is not on.".format(workflow_id))
-            return wf
-        workflow_id = self.current(workflow_id)
-        path = self.files().get(workflow_id)
-        if path is None:
-            raise workflows.WorkflowError("There is no workflow named '{}'.".format(workflow_id))
-        try:
-            wf = self._load_file(path, self.object_info or self.saved, workflow_id)
-            if not wf["approximate"]:
+            if wf is not None:
                 return wf
-            error = None
-        except workflows.WorkflowError as e:
-            if not e.needs_info:
-                raise
-            wf, error = None, e
-        # The file alone wasn't enough. Ask ComfyUI how its nodes are defined (at most once a minute).
-        async with self.lock:
-            if self.object_info is None and time.time() - self.tried > 60:
-                self.tried = time.time()
-                try:
-                    self.object_info = self.saved = await self.comfy.object_info()
-                    if self.cache_file:
-                        self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-                        self.cache_file.write_text(json.dumps(self.object_info), encoding="utf-8")
-                except (httpx.HTTPError, ValueError, OSError):
-                    pass
-        if self.object_info is not None:
-            return self._load_file(path, self.object_info, workflow_id)
-        if wf is None:
-            raise error
-        return wf
-
-    def _load_file(self, path, info, workflow_id):
-        """workflows.load_workflow, kept until the file or its sidecar changes or other node definitions arrive. Each
-        caller gets a copy of its own to change."""
-        seen = (self._time(path), self._time(self.sidecar_of(path)), id(info), workflow_id)
-        kept = self._read.get(path)
-        if kept is None or kept[0] != seen:
-            kept = self._read[path] = (seen, workflows.load_workflow(path, info, workflow_id, self.sidecar_of(path)))
-        return copy.deepcopy(kept[1])
+            raise workflows.WorkflowError("{} is not offered now: no provider key in use has it.".format(workflow_id))
+        raise workflows.WorkflowError("There is no workflow named '{}': the studio's models come from its providers "
+                                      "(Servers & APIs → Providers).".format(workflow_id))
 
     async def listing(self):
+        if self.providers is None:
+            return []
+        await self.providers.refresh()
         items = []
-        on = False
-        if self.providers is not None:
-            await self.providers.refresh()
-            on = self.providers.active()
-        for workflow_id in self.files():
-            if on and workflow_id.rsplit("/", 1)[-1].startswith("generation_"):
-                continue   # the router is on: the generation server's models come as its provider's, not this way
-            kind, name = workflow_id.split("/", 1)
-            item = {"id": workflow_id, "kind": kind, "title": name.replace("_", " "), "description": ""}
-            try:
-                loaded = await self.load(workflow_id)
-                profile = loaded["profile"]
-                item["title"] = profile.get("title") or item["title"]
-                # Where it is made: a ComfyUI workflow, or the generation server, whose models (its Model option's
-                # choices) are offered one by one, apart from the workflows (generation_models.py).
-                generation = any(str(n.get("class_type") or "") in workflows.GENERATION_NODES for n in loaded["nodes"].values())
-                item["source"] = "generation" if generation else "comfy"
-                if generation:
-                    model = next((o for o in profile.get("options", []) if o.get("id") == "model"), None)
-                    item["models"] = [{"id": c["id"], "label": c.get("label") or c["id"]} for c in (model or {}).get("choices", [])]
-                item["description"] = profile.get("description", "")
-                # how many reference pictures it takes, as its presets file lists them (0: it makes pictures from words only)
-                item["picture_refs"] = len([r for r in [*profile.get("required_refs", []), *profile.get("optional_refs", [])]
-                                            if str(r).endswith(":image")])
-                listed = profile.get("refs")   # a list of references, none to "max"
-                if isinstance(listed, dict) and listed.get("mode") == "dynamic" and str(listed.get("node_class") or "LoadImage") == "LoadImage":
-                    item["picture_refs"] += int(listed.get("max", 0))
-                if profile.get("replaces"):   # earlier work made with one of these is run again with this workflow
-                    item["replaces"] = profile["replaces"]
-            except workflows.WorkflowError as e:
-                item["error"] = str(e)
-            items.append(item)
-        if on:
-            for workflow_id, wf in self.providers.workflows().items():
-                profile = wf["profile"]
-                listed = profile.get("refs") if isinstance(profile.get("refs"), dict) else {}
-                items.append({"id": workflow_id, "kind": workflow_id.split("/", 1)[0], "title": profile["title"],
-                              "description": profile.get("description", ""), "source": "generation", "provider": True,
-                              "model": profile["provider"]["model"],
-                              "picture_refs": int(listed.get("max", 0)) + len([r for r in profile.get("optional_refs", [])
-                                                                               + profile.get("required_refs", []) if r.endswith(":image")])})
+        for workflow_id, wf in self.providers.workflows().items():
+            profile = wf["profile"]
+            listed = profile.get("refs") if isinstance(profile.get("refs"), dict) else {}
+            items.append({"id": workflow_id, "kind": workflow_id.split("/", 1)[0], "title": profile["title"],
+                          "description": profile.get("description", ""), "source": "generation", "provider": True,
+                          "model": profile["provider"]["model"],
+                          "picture_refs": int(listed.get("max", 0)) + len([r for r in profile.get("optional_refs", [])
+                                                                           + profile.get("required_refs", []) if r.endswith(":image")])})
         return items

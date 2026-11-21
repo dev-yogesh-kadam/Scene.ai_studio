@@ -41,15 +41,15 @@ def test_bulk_generation_queues_one_free_job_per_workflow_on_the_canvas(client):
     register(client)   # the admin
     film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     listed = {w["id"]: w for w in client.get("/api/bulk/workflows?kind=image").json()["workflows"]}
-    assert "image/image_t2i_hunyuan_image_21" in listed and listed["image/image_t2i_flux2_klein_9b"]["needs_pictures"] == 0
+    assert "image/@seedream_5" in listed and listed["image/@nano_banana_pro"]["needs_pictures"] == 0
     before = client.get("/api/auth/me").json()["credits"]
     done = client.post("/api/bulk", data={"kind": "image", "prompt": "a red fox in snow", "quality": "draft", "project_id": str(film),
-                                          "workflows": json.dumps(["image/image_t2i_hunyuan_image_21", "image/image_t2i_flux2_klein_9b"])})
+                                          "workflows": json.dumps(["image/@seedream_5", "image/@nano_banana_pro"])})
     assert done.status_code == 200, done.text
     assert done.json()["queued"] == 2
     jobs = client.app.state.db.all("SELECT cost, project_id, settings FROM jobs")
     assert len(jobs) == 2 and all(j["cost"] == 0 and j["project_id"] == film for j in jobs)        # free, on this canvas
-    assert json.loads(jobs[0]["settings"])["options"]["quality"] == "draft"
+    assert all("quality" not in json.loads(j["settings"])["options"] for j in jobs)   # a quality only goes to a model that has one
     assert client.get("/api/auth/me").json()["credits"] == before
     assert client.post("/api/bulk", data={"kind": "image", "prompt": "x", "workflows": "[]"}).status_code == 400
 
@@ -57,7 +57,7 @@ def test_bulk_generation_queues_one_free_job_per_workflow_on_the_canvas(client):
 def test_a_bulk_run_is_a_grid_of_prompts_by_workflows_on_one_seed(client):
     register(client)
     film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
-    wfs = ["image/image_t2i_hunyuan_image_21", "image/image_t2i_flux2_klein_9b"]
+    wfs = ["image/@seedream_5", "image/@nano_banana_pro"]
     client.app.state.jobs.pause(True)   # nothing renders: the grid is looked at as it was queued
     done = client.post("/api/bulk", data={"kind": "image", "prompts": json.dumps(["a red fox", "a blue whale"]), "workflows": json.dumps(wfs),
                                           "takes": "2", "same_seed": "1", "project_id": str(film)}).json()
@@ -81,7 +81,7 @@ def test_a_starred_cell_is_its_items_rating(client):
     me = register(client)
     client.app.state.jobs.pause(True)
     done = client.post("/api/bulk", data={"kind": "image", "prompts": json.dumps(["a red fox"]),
-                                          "workflows": json.dumps(["image/image_t2i_flux2_klein_9b"])}).json()
+                                          "workflows": json.dumps(["image/@nano_banana_pro"])}).json()
     job = client.get("/api/bulk/runs/" + done["run"]).json()["cells"][0]["job"]
     item = client.app.state.db.run(
         "INSERT INTO generations (user_id, job_id, workflow, kind, name, filename, settings, context, created) "
@@ -96,4 +96,4 @@ def test_bulk_generation_is_for_admins_only(client):
     register(client)
     register(client, **BOB)   # signed in as Bob now, who is not an admin
     assert client.get("/api/bulk/workflows?kind=image").status_code == 403
-    assert client.post("/api/bulk", data={"kind": "image", "prompt": "x", "workflows": json.dumps(["image/image_t2i_hunyuan_image_21"])}).status_code == 403
+    assert client.post("/api/bulk", data={"kind": "image", "prompt": "x", "workflows": json.dumps(["image/@seedream_5"])}).status_code == 403

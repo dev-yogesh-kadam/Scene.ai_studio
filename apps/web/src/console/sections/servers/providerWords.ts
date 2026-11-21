@@ -31,27 +31,16 @@ export type Unlocked = { capability: string; words: string; models: { id: string
 /** One line of a paste of several keys, as /keys/many answered it. */
 export type ManyResult = { line: number; label: string; saved: boolean; check: Check; words?: string };
 
-/** One capability of What makes what (/api/admin/providers/capabilities). */
+/** One capability of What makes what (/api/admin/providers/capabilities): the models that make it, and their keys. */
 export type Capability = {
   capability: string;
   words: string;
   models: { id: string; name: string; providers: string[]; keys: { label: string; mode: string; status: string }[] }[];
   live: boolean; // a live key makes it (not only test keys)
-  comfy: { id: string; title: string }[];
-  comfyui_on: boolean;
-  can_switch_off: boolean;
-  why_not: string;
-  state: 'both' | 'provider' | 'comfyui' | 'none';
+  state: 'provider' | 'none';
 };
 
-export type CoverageData = { router: string; capabilities: Capability[] };
-
-export const STATE_WORDS: Record<Capability['state'], string> = {
-  both: 'Providers and ComfyUI',
-  provider: 'Providers only',
-  comfyui: 'ComfyUI only',
-  none: 'Nothing makes it',
-};
+export type CoverageData = { capabilities: Capability[] };
 
 /** "Video: Seedance 2.5, Kling 3 · Voiceover: Speech". */
 export function unlockWords(unlocks: Unlocked[] | undefined): string {
@@ -96,21 +85,12 @@ export type ProvidersData = {
   keyless?: string[]; // the kinds with no key (claude_local)
   built_in?: string[]; // the kinds the studio makes itself, one each, never added here (local_tools: On this PC)
   providers: Provider[];
-  router: 'off' | 'shadow' | 'on';
-  modes: string[];
   agent_provider: number | null;
   testing: string;
   check?: Check;
   saved?: boolean | number; // one key: whether it was saved; several: how many were
   results?: ManyResult[];
   provider_id?: number | null; // the provider a key was added to (made by the first key of a new one)
-};
-
-export const ROUTER_WORDS: Record<string, string> = {
-  off: 'Off: renders go the way they always did (ComfyUI, and the generation server as a ComfyUI server).',
-  shadow:
-    'Shadow: renders go the way they always did; each job also notes which provider and key the router would have picked, to compare.',
-  on: "On: the providers' models are offered and made through their providers; ComfyUI's workflows stay on the load balancer.",
 };
 
 export const STATUS_WORDS: Record<string, string> = {

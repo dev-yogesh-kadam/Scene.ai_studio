@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
-import { ActivityIndicator, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
-import { credits as creditsOf, requestCredits, status } from '@scene/shared/api/studio';
+import { credits as creditsOf, requestCredits } from '@scene/shared/api/studio';
 import { Button } from '@/components/Button';
 import { ChipRow } from '@/components/Chip';
 import { Group, Row } from '@/components/Group';
@@ -25,7 +25,6 @@ export default function AccountScreen() {
   const { scrollY, onScroll } = useScrollY();
   const barInset = useBarInset();
   const credits = useQuery({ queryKey: ['credits'], queryFn: creditsOf });
-  const server = useQuery({ queryKey: ['status'], queryFn: status });
   const [leaving, setLeaving] = useState(false);
   const toast = useToast();
   const [appearance, setAppearance] = useState<Choice>(chosen());
@@ -79,7 +78,6 @@ export default function AccountScreen() {
             refreshing={credits.isRefetching}
             onRefresh={() => {
               void credits.refetch();
-              void server.refetch();
             }}
             progressViewOffset={barInset}
             tintColor={colors.textSecondary}
@@ -157,21 +155,6 @@ export default function AccountScreen() {
           </Group>
 
           <Group title="Studio">
-            <Row
-              icon="hardware-chip"
-              tint={server.data?.online ? colors.success : colors.warning}
-              title="Render Server"
-              right={
-                server.isPending ? (
-                  <ActivityIndicator color={colors.textSecondary} />
-                ) : (
-                  <Animated.View entering={FadeIn.duration(200)} style={styles.status}>
-                    <View style={[styles.dot, { backgroundColor: server.data?.online ? colors.success : colors.warning }]} />
-                    <Text style={styles.statusText}>{server.data?.online ? 'Online' : 'Offline'}</Text>
-                  </Animated.View>
-                )
-              }
-            />
             <Row icon="desktop" tint="#5E5CE6" title="Open the Full Studio" subtitle="The desktop studio, on this phone" chevron onPress={() => window.location.assign('/?desktop=1')} />
             <Row icon="information-circle" tint="#8E8E93" title="Version" detail={version} />
             <Row icon="sparkles" tint={colors.accent} title="What's New" chevron onPress={() => setNews(releases[0])} />
@@ -223,9 +206,6 @@ const styles = StyleSheet.create({
   balance: { ...fonts.hero, color: colors.text },
   creditsNote: { ...fonts.footnote, color: colors.textSecondary },
   amount: { ...fonts.calloutStrong },
-  status: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { ...fonts.body, color: colors.textSecondary },
   appearance: { padding: spacing.md },
   askText: { ...fonts.subhead, color: colors.textSecondary },
   askInput: { ...fonts.body, color: colors.text, backgroundColor: colors.surfaceRaised, borderRadius: radius.md, padding: spacing.md, minHeight: 80, textAlignVertical: 'top' },

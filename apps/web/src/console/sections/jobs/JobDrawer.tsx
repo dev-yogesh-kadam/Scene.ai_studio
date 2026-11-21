@@ -146,11 +146,11 @@ function Body({ j, close }: { j: Job; close: () => void }) {
             ['Settings', j.summary],
             ['Credits', String(j.cost) + held],
             ['Length asked for', j.seconds_requested ? span(j.seconds_requested) : null],
-            ['Server', j.server],
+            ['Made by', j.server],
             ['Output size', j.output_size ? bytes(j.output_size) : null],
             ['Added', stamp(j.created)],
             ['Waited in queue', j.started ? span(j.started - j.created) : 'Not started'],
-            ['Render time', j.finished && j.started ? span(j.finished - j.started) : null],
+            ['Time to make', j.finished && j.started ? span(j.finished - j.started) : null],
             ['Estimated', j.est_seconds ? span(j.est_seconds) : 'No estimate'],
             ['Job id', j.id],
           ]}
@@ -168,7 +168,7 @@ function Body({ j, close }: { j: Job; close: () => void }) {
             ['Resolution', st.resolution && `${st.resolution}p ${st.orientation || ''}`],
             ['Clips', (st.clips ?? 0) > 1 ? String(st.clips) : null],
             ['Seed', st.seed_mode],
-            ...values.filter(([, v]) => v !== promptText).map(([k, v]) => ['Node ' + k, String(v)] as const),
+            ...values.filter(([, v]) => v !== promptText).map(([k, v]) => ['Setting ' + k, String(v)] as const),
           ]}
         />
       </Section>

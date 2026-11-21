@@ -9,7 +9,7 @@ PyTorch, faster-whisper and Demucs), one process a job, one job at a time (the G
 quote and the cost are 0, as the contract says for a local backend. A tool whose software is missing is not offered
 (models() leaves it out); the console says what to install.
 
-The provider has one key row with no secret (as a ComfyUI server's), so the router counts its jobs and its "max at
+The provider has one key row with no secret, so the router counts its jobs and its "max at
 once" (1) like any key's. Its jobs live in this process (JOBS): after a restart a job that was running is lost, and
 the queue says so."""
 
@@ -33,7 +33,7 @@ MIMES = {".json": "application/json", ".srt": "application/x-subrip", ".wav": "a
 FREE = {"credits": 0, "source": "local"}
 
 # The models: their tool (run.py's), their capability (the contract's, 02-provider-api-v1.md) and their one required
-# file, so the agent sees them as work on a sound (agent.takes_sound) as it saw ComfyUI's, which they replace.
+# file, so the agent sees them as work on a sound (agent.takes_sound).
 LANGUAGE = {"type": "string", "enum": ["auto", "en", "hi"], "default": "auto", "title": "Language"}
 SPEAKERS = {"type": "boolean", "default": False, "title": "Speaker labels",
             "description": "Not set up yet: every line is SPEAKER_00."}

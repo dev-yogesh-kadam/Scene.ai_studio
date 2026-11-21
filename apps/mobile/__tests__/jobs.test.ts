@@ -47,7 +47,7 @@ describe('statusLine', () => {
   it('says what a job is doing', () => {
     expect(statusLine(job({ status: 'queued', position: 1 }))).toBe('Next in line');
     expect(statusLine(job({ status: 'queued', position: 3 }))).toBe('#3 in line');
-    expect(statusLine(job({ status: 'queued', waiting_for_server: true }))).toMatch(/render server/);
+    expect(statusLine(job({ status: 'queued', position: null }))).toBe('Waiting in line');
     expect(statusLine(job({ status: 'running', clip: 2, clips: 5, eta_seconds: 120 }))).toBe('1 of 5 clips done · about 2 min left');
     expect(statusLine(job({ status: 'failed', reason: 'Out of memory' }))).toBe('Out of memory');
     expect(statusLine(job({ status: 'done', items: [{ id: 1, kind: 'video' }, { id: 2, kind: 'video' }] }))).toBe('Ready · 2 results');

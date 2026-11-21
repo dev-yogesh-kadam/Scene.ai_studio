@@ -18,7 +18,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "कुत्ता",
       "prompt": "A brown dog runs across a green park in the morning.",
       "duration": 6,
@@ -136,7 +136,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Puppy",
       "prompt": "A puppy runs across a lawn chasing a red ball.",
       "duration": 6,
@@ -227,19 +227,14 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "audio/audio_minimax_music_3",
+      "workflow": "audio/@music",
       "name": "Wedding music",
       "prompt": "Joyful shehnai and dhol, festive.",
       "uses": [],
       "clips": 1,
       "after": 0,
       "duration": 30,
-      "choices": [
-       {
-        "setting": "37:13:max_duration",
-        "value": "30"
-       }
-      ]
+      "choices": []
      }
     ],
     "direction": "",
@@ -313,7 +308,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Playa",
       "prompt": "Waves roll onto an empty beach at sunset.",
       "duration": 6,
@@ -325,7 +320,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Gaviotas",
       "prompt": "Seagulls fly low over the water at sunset.",
       "duration": 5,
@@ -396,7 +391,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Puppy",
       "prompt": "A puppy runs across a lawn.",
       "duration": 6,

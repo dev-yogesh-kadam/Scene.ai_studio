@@ -1,9 +1,9 @@
 // End-to-end tests (Playwright, Chromium only) against a studio of their own: the React build served by this working
-// tree's backend, a new database, and the fake ComfyUI. Build first: `npm run e2e` does both.
+// tree's backend, a new database, and the fake v1 provider. Build first: `npm run e2e` does both.
 
 import { defineConfig } from '@playwright/test';
 
-// Ports from SCENE_TEST_PORT_BASE (default 8100: studio 8281, console 8290, fake ComfyUI 8299), see tests/support/studio.mjs.
+// Ports from SCENE_TEST_PORT_BASE (default 8100: studio 8281, console 8290, fake v1 provider 8298), see tests/support/studio.mjs.
 export const PORT_BASE = Number(process.env.SCENE_TEST_PORT_BASE || 8100);
 export const STUDIO = `http://127.0.0.1:${PORT_BASE + 181}`;
 export const CONSOLE = `http://127.0.0.1:${PORT_BASE + 190}`;

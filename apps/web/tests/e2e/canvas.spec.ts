@@ -1,5 +1,5 @@
 // The canvas and its panel in the React build: a frame for each result, and an agent plan approved there and carried
-// out by the server (docs/r1-plan-runner-design.md) on the fake render server. No language model is asked: the plan is
+// out by the server (docs/r1-plan-runner-design.md) with the fake v1 provider. No language model is asked: the plan is
 // one the agent left in the conversation, as it leaves every plan it makes.
 
 import { expect, test, type Page } from '@playwright/test';

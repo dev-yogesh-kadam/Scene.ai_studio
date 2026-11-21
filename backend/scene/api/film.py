@@ -8,7 +8,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import core, detect, edits, ffjob, film, montage, motion, pages, reframe, runs, sharing, storage
+from .. import core, detect, edits, ffjob, film, kit, montage, motion, pages, reframe, runs, sharing
 from ..media import FPS, MediaError
 from .deps import costly, current_user
 from .workspace import _project_id
@@ -58,9 +58,10 @@ async def film_edit(body: dict, request: Request, user: dict = Depends(current_u
     return await offload(queue, request, user, body)
 
 
-def queue(request, user, body):
+def queue(request, user, body, module=None):
     """Check one film operation and queue it (the endpoint above, and the agent's "film" tool). Raises HTTPException
-    with the reason when anything in it is wrong; nothing is queued then."""
+    with the reason when anything in it is wrong; nothing is queued then. module: the agent's module (0 outside a
+    project): every item the operation names must be of that module (the user's own call names any of theirs)."""
     state = request.app.state
     op = body.get("op")
     if op not in edits.FILM:
@@ -74,8 +75,10 @@ def queue(request, user, body):
             raise HTTPException(400, "Name {} by its library id.".format(what))
         row = state.db.one("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind IN ({})".format(", ".join("?" * len(kinds))),
                            (item_id, user["id"], *kinds))
-        if row is None or not storage.here(folder / row["filename"]).is_file():
+        if row is None or not (folder / row["filename"]).is_file():
             raise HTTPException(404, "{} is not in your library.".format(what[0].upper() + what[1:]))
+        if module is not None and (row["project_id"] or 0) != module:
+            raise HTTPException(403, kit.ELSEWHERE)
         return row["id"]
 
     def kind_of(item_id):
@@ -169,19 +172,13 @@ def queue(request, user, body):
         else:
             settings["windows"] = [_span(w, "A window") for w in _list(body.get("windows"), 400, "the windows to scan")]
             facts = "{} windows".format(len(settings["windows"]))
-    elif op in ("reframe", "outpaint_prep", "outpaint_join"):
+    elif op == "reframe":
         shape = body.get("shape")
         if shape not in reframe.SHAPES:
             raise HTTPException(400, "shape must be one of: {}.".format(", ".join(reframe.SHAPES)))
         settings.update(video=own(body.get("video"), ("video",), "the video"), shape=shape)
-        if op == "reframe":
-            settings.update(x=_number(body.get("x", 0.5), 0, 1, "x"), y=_number(body.get("y", 0.5), 0, 1, "y"))
-            facts = "cropped to {}".format(shape)
-        elif op == "outpaint_join":
-            settings["parts"] = [own(p, ("video",), "a filled-in part") for p in _list(body.get("parts"), 400, "the filled-in parts")]
-            facts = "{} parts · {}".format(len(settings["parts"]), shape)
-        else:
-            facts = "{} · parts of {} frames at {} fps".format(shape, reframe.PART_FRAMES, reframe.GEN_FPS)
+        settings.update(x=_number(body.get("x", 0.5), 0, 1, "x"), y=_number(body.get("y", 0.5), 0, 1, "y"))
+        facts = "cropped to {}".format(shape)
     elif op == "logo":
         settings["logo"] = own(body.get("logo"), ("image", "text"), "the logo")
         settings["kind"] = kind_of(settings["logo"])

@@ -165,30 +165,15 @@ class Credits:
     def enabled(self, workflow_id, user=None):
         """Whether `user` may use the workflow: it is switched on and, while it is tried out by admins alone (the
         console's Workflows section), they are one. With no user, as for anyone who is not an admin."""
-        if self._comfyui_off(workflow_id):
-            return False
         row = self.pricing(workflow_id)
         if not row:
             return True
         return bool(row["enabled"]) and (not row["admins_only"] or bool(user and user.get("role") == "admin"))
 
-    def _comfyui_off(self, workflow_id, off=None):
-        """Whether a ComfyUI workflow's capability is switched off for ComfyUI (the console's What makes what, while the
-        router is on: the providers make it). Never a provider's model or the generation server's own workflows."""
-        from .providers import registry
-        from .providers.comfyui import capability_of
-        from .providers.workflows import is_provider_id
-        if is_provider_id(workflow_id) or str(workflow_id).rsplit("/", 1)[-1].startswith("generation_"):
-            return False
-        off = registry.comfyui_off_now(self.db) if off is None else off
-        return bool(off) and capability_of(workflow_id) in off
-
     def enabled_of(self, workflow_ids, user=None):
         """The ids of these workflows `user` may use (enabled()), their pricing read in one query: the agent's turn and the
         Create page asked for each workflow of the catalog in turn."""
-        from .providers import registry
-        off = registry.comfyui_off_now(self.db)
-        ids = [i for i in dict.fromkeys(workflow_ids) if not self._comfyui_off(i, off)]
+        ids = list(dict.fromkeys(workflow_ids))
         rows = {r["workflow"]: r for r in self.db.all("SELECT workflow, enabled, admins_only FROM workflow_pricing WHERE workflow = ANY(?)",
                                                       (ids,))} if ids else {}
         admin = bool(user and user.get("role") == "admin")

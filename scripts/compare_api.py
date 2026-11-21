@@ -33,9 +33,9 @@ def start(backend, url, home, port):
     config = Path(home) / "config.json"
     config.write_text(json.dumps({
         "host": "127.0.0.1", "port": port, "console_host": "127.0.0.1", "console_port": port + 9,
-        "comfy_url": "http://127.0.0.1:9", "storage_dir": str(Path(home) / "storage"), "secret_key_file": str(Path(home) / "secret.key"),
-        "database_url": url, "backup_keep": 0, "claude_models": "off", "hold_queue_offline": True,
-        "web_dist_dir": str(ROOT / "apps/web/dist"), "workflows_dir": str(ROOT / "workflows")}), encoding="utf-8")
+        "storage_dir": str(Path(home) / "storage"), "secret_key_file": str(Path(home) / "secret.key"),
+        "database_url": url, "backup_keep": 0, "claude_models": "off",
+        "web_dist_dir": str(ROOT / "apps/web/dist")}), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("SCENE_")}
     env.update(SCENE_CONFIG=str(config), PYTHONUNBUFFERED="1",
                SCENE_SECRET_KEY=env.get("COMPARE_SECRET_KEY") or __import__("cryptography.fernet").fernet.Fernet.generate_key().decode())

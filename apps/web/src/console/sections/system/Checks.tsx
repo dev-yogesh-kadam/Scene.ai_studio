@@ -15,7 +15,6 @@ type Ready = { ready?: boolean; detail?: string };
 type Outcome = { ok?: boolean; detail?: string; when?: number } | null;
 export type Checks = {
   database?: { online?: boolean; seconds?: number; detail?: string };
-  render?: { online?: boolean; url?: string; since?: number; detail?: string };
   model?: ClaudeStatus;
   programs?: { ffmpeg?: Ready; motion?: Ready };
   disk?: { folder?: string; free?: number; total?: number };
@@ -57,18 +56,6 @@ export function rowsOf(c: Checks): Row[] {
       : db.online
         ? { name: 'Database', state: 'ok', words: `Answers (${db.seconds ?? 0} s)` }
         : { name: 'Database', state: 'problem', words: db.detail || 'Does not answer' },
-  );
-  const r = c.render;
-  rows.push(
-    !r
-      ? { name: 'Render server', state: 'off', words: 'Not checked' }
-      : r.online
-        ? { name: 'Render server', state: 'ok', words: `Online${r.url ? ' at ' + r.url : ''}` }
-        : {
-            name: 'Render server',
-            state: 'problem',
-            words: r.detail || `Not answering${r.url ? ' at ' + r.url : ''}${r.since ? ' since ' + ago(r.since) : ''}`,
-          },
   );
   const m = c.model;
   rows.push(
@@ -143,7 +130,11 @@ export function rowsOf(c: Checks): Row[] {
               state: 'problem',
               words: `Could not run ${ago(cc.failed_at)}${cc.error ? ': ' + cc.error : ''} · plans go on unchecked (it fails open)`,
             }
-          : { name: 'Content check', state: 'ok', words: `Mode ${cc.mode ?? 'warn'} · fails open if the model is down` },
+          : {
+              name: 'Content check',
+              state: 'ok',
+              words: `Mode ${cc.mode ?? 'warn'} · fails open if the model is down`,
+            },
   );
   const gates = c.creative?.gates;
   rows.push(

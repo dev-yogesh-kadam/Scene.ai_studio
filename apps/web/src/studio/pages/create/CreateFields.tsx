@@ -7,14 +7,7 @@ import { api } from '../../../common/api';
 import { Field } from '../../../common/components/AuthForm';
 import { askText } from '../../../common/components/Dialog';
 import { Segmented } from '../../../common/components/Segmented';
-import {
-  byRole,
-  chosenModel,
-  lengthChoices,
-  optionsShown,
-  type Control,
-  type JobForm,
-} from '../../features/jobs/jobForm';
+import { byRole, lengthChoices, optionsShown, type Control, type JobForm } from '../../features/jobs/jobForm';
 import s from './CreatePage.module.css';
 import { classesOf } from '../../../common/cx';
 import css0 from '../../../common/components/Shared.module.css';
@@ -58,8 +51,7 @@ export function CreateFields({ form, onChange, projects, onProjects, onError }: 
     </Field>
   );
   // An option some choices leave out is not shown under them (Best upscale needs Upscale video or Sharpen first frame).
-  // A generation workflow's Model is picked in the Workflow list above (its models are offered there one by one).
-  const shown = optionsShown(form).filter((o) => !(wf.source === 'generation' && o.id === 'model'));
+  const shown = optionsShown(form);
   parts.unshift(...shown.filter((o) => o.top).map(choice)); // what the whole form depends on comes first
   const groups: ReactNode[] = shown.filter((o) => !o.top).map(choice);
   const sizes = wf.resolutions.map((r) => ({ id: r, label: String(r) }));
@@ -102,7 +94,7 @@ export function CreateFields({ form, onChange, projects, onProjects, onError }: 
       <Field key="duration" label={form.clips > 1 ? 'Length of each clip' : 'Duration'}>
         <div className="row">
           <Segmented
-            choices={lengthChoices(wf, form.options, Number(form.values[dur.id])).map((d) => ({
+            choices={lengthChoices(Number(form.values[dur.id])).map((d) => ({
               id: d,
               label: d + ' s',
             }))}
@@ -113,8 +105,7 @@ export function CreateFields({ form, onChange, projects, onProjects, onError }: 
             control={dur}
             value={form.values[dur.id]}
             onValue={(v) => setValue(dur.id, v)}
-            min={chosenModel(wf, form.options)?.seconds?.min ?? 1}
-            max={chosenModel(wf, form.options)?.seconds?.max}
+            min={1}
             style={{ width: 80 }}
           />
         </div>

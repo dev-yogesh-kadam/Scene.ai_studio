@@ -7,7 +7,7 @@ export const PING = 20_000;
 export const SILENT = 50_000;
 export const RECONNECT = 3_000;
 export const POLL = 4_000; // the jobs, fetched this often while the connection is down
-export const STATUS = 15_000; // the render server's state and the page version, checked this often
+export const STATUS = 15_000; // the page version, checked this often
 
 export type LiveMessage = {
   jobs?: unknown[];
@@ -19,7 +19,7 @@ export type LiveMessage = {
 export type LiveHandlers = {
   onMessage: (message: LiveMessage) => void;
   pollJobs: () => Promise<unknown>; // the jobs fetched over HTTP: when the connection is down or went quiet
-  pollStatus: () => Promise<unknown>; // the render server's state, fetched every STATUS ms
+  pollStatus: () => Promise<unknown>; // the page version, fetched every STATUS ms
   page?: () => string; // the page this tab shows, for the admin's list of who is online
   url?: string; // defaults to this site's /api/events
   WebSocketImpl?: typeof WebSocket; // for the tests

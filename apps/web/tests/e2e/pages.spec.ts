@@ -1,5 +1,5 @@
-// The studio's pages in the React build, each with its main action, against the studio's own backend and the fake
-// render server.
+// The studio's pages in the React build, each with its main action, against the studio's own backend and the fake v1
+// provider.
 
 import { expect, test } from '@playwright/test';
 import { ACCOUNTS } from './accounts';

@@ -275,17 +275,23 @@ export function reviewFinished(chat: AgentChat) {
 
 /** Finished jobs become their library items: the result shows, with its frames and its place on the canvas. */
 export async function collectResults(chat: AgentChat) {
-  if (chat.collecting) return;
+  // A job that finished while another collect was on its way is not dropped: it is collected once that one ends.
+  if (chat.collecting) {
+    chat.collectAgain = true;
+    return;
+  }
   const open: [Run, Step, Take][] = [];
   for (const run of chat.runs)
     for (const step of run.steps)
       for (const take of takesOf(step)) {
-        if (!take || !take.job || take.made || (take.misses || 0) > 3) continue;
+        if (!take || !take.job || take.made || (take.misses || 0) >= COLLECT_TRIES) continue;
         const job = chat.jobOf(take.job);
         if (!job || job.status === 'done') open.push([run, step, take]);
       }
   if (!open.length) return;
   chat.collecting = true;
+  chat.collectAgain = false;
+  let missed = false;
   try {
     // What each of those jobs made: only those items are asked for, not the whole canvas.
     const jobs = [...new Set(open.map(([, , take]) => take.job as string))];
@@ -300,7 +306,9 @@ export async function collectResults(chat: AgentChat) {
     for (const [run, step, take] of open) {
       const item = allOf(take.job as string)[0];
       if (!item) {
+        // the job is done but its item is not saved yet: looked for again in a moment
         take.misses = (take.misses || 0) + 1;
+        if (take.misses < COLLECT_TRIES) missed = true;
         continue;
       }
       const c = item.context || {};
@@ -335,11 +343,25 @@ export async function collectResults(chat: AgentChat) {
       chat.changed();
     }
   } catch {
-    // the next update tries again
+    missed = true; // the server did not answer: tried again in a moment, not only on the next job update
   }
-  carryOn(chat);
   chat.collecting = false;
+  carryOn(chat);
+  if (chat.collectAgain) {
+    chat.collectAgain = false;
+    void collectResults(chat);
+  } else if (missed && !chat.collectRetry) {
+    chat.collectRetry = setTimeout(() => {
+      chat.collectRetry = null;
+      void collectResults(chat);
+      reviewFinished(chat);
+    }, COLLECT_RETRY_MS);
+  }
 }
+
+/** How often, and how far apart, a finished job's item is looked for before its take is given up on. */
+const COLLECT_TRIES = 10;
+const COLLECT_RETRY_MS = 3000;
 
 /** The retake of a failed shot: the same workflow and settings with the prompt the review fixed. A retake made before
  *  it is kept with the earlier takes; the newest is step.take2. `reserved`: already counted by the automatic path. */

@@ -30,7 +30,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Product",
       "prompt": "A ceramic mug on a white table, soft light.",
       "uses": [],
@@ -172,7 +172,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 0",
       "prompt": "A red dragon flies over snowy mountains, view 0.",
       "uses": [],
@@ -181,7 +181,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 1",
       "prompt": "A red dragon flies over snowy mountains, view 1.",
       "uses": [],
@@ -190,7 +190,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 2",
       "prompt": "A red dragon flies over snowy mountains, view 2.",
       "uses": [],
@@ -199,7 +199,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 3",
       "prompt": "A red dragon flies over snowy mountains, view 3.",
       "uses": [],
@@ -208,7 +208,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 4",
       "prompt": "A red dragon flies over snowy mountains, view 4.",
       "uses": [],
@@ -217,7 +217,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 5",
       "prompt": "A red dragon flies over snowy mountains, view 5.",
       "uses": [],
@@ -226,7 +226,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 6",
       "prompt": "A red dragon flies over snowy mountains, view 6.",
       "uses": [],
@@ -235,7 +235,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 7",
       "prompt": "A red dragon flies over snowy mountains, view 7.",
       "uses": [],
@@ -244,7 +244,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 8",
       "prompt": "A red dragon flies over snowy mountains, view 8.",
       "uses": [],
@@ -253,7 +253,7 @@
      },
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Dragon 9",
       "prompt": "A red dragon flies over snowy mountains, view 9.",
       "uses": [],
@@ -296,7 +296,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Lantern",
       "prompt": "A paper lantern glows in the dark.",
       "uses": [],
@@ -342,7 +342,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Castle",
       "prompt": "A castle on a hill at dawn.",
       "uses": [],

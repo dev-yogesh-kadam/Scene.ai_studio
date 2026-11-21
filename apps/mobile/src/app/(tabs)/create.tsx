@@ -119,7 +119,7 @@ export default function CreateScreen() {
   });
 
   const generate = useMutation({
-    // A slot filled from the library goes as the file already on the render server; one from the phone goes along.
+    // A slot filled from the library goes as the studio's own copy of it; one from the phone goes along.
     mutationFn: async () => {
       const fromLibrary: Record<string, { comfy_name: string; name: string }> = {};
       const fromPhone: Record<string, { uri: string; name: string; type: string }> = {};

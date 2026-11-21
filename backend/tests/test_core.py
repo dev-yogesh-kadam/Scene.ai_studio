@@ -47,11 +47,11 @@ def test_an_episode_is_shared_by_every_tab_and_member(client):
     with pytest.raises(runs.RunError, match="read only"):
         cats.write("/scenes/3/summary", "x")
     # the tab keeps its own paths: the skill a tab follows is not another tab's
-    runs.keep_skill(db, ada["id"], "tab1", "pocket-motion")
-    assert core.Core(db, ada["id"], "tab1", one).read("/skill")["value"] == "pocket-motion"
-    assert core.Core(db, ada["id"], "tab2", one).read("/skill")["missing"] is True
+    runs.keep_skill(db, ada["id"], "tab1", one, "pocket-motion")
+    assert core.Core(db, ada["id"], "tab1", one).read("/skill/p{}".format(one))["value"] == "pocket-motion"
+    assert core.Core(db, ada["id"], "tab2", one).read("/skill/p{}".format(one))["missing"] is True
     with pytest.raises(runs.RunError, match="kept by the studio"):
-        core.Core(db, ada["id"], "tab1", one).write("/skill", "other")
+        core.Core(db, ada["id"], "tab1", one).write("/skill/p{}".format(one), "other")
 
 
 def test_another_projects_memory_cannot_be_read(client):
@@ -72,11 +72,11 @@ def test_a_tabs_own_run_moves_into_the_episode_once(client):
     ada, film = setup(client)
     db = db_of(client)
     runs.write(db, ada["id"], "tab1", "/motion/status", "step 3")
-    runs.keep_skill(db, ada["id"], "tab1", "pocket-motion")
+    runs.keep_skill(db, ada["id"], "tab1", film, "pocket-motion")
     shared = core.Core(db, ada["id"], "tab1", film)
     assert shared.adopt() == 1
     assert shared.read("/motion/status")["value"] == "step 3"
-    assert shared.read("/skill")["value"] == "pocket-motion"      # the tab's own stays the tab's
+    assert shared.read("/skill/p{}".format(film))["value"] == "pocket-motion"      # the tab's own stays the tab's
     assert core.Core(db, ada["id"], "tab1", film).adopt() == 0    # once
     # outside a project the tab's run holds everything, as before
     loose = core.Core(db, ada["id"], "tab9", 0)
@@ -220,7 +220,7 @@ def test_each_module_has_a_neuralcore_of_its_own(client, monkeypatch):
     assert db_of(client).one("SELECT 1 FROM assets WHERE id = ?", (maya["id"],)) is None
 
 
-def test_the_agent_finds_an_entry_in_another_project_and_copies_it_here(client, monkeypatch):
+def test_an_entry_of_another_project_or_module_is_never_found_or_copied_here(client, monkeypatch):
     ada, film = setup(client)
     other = client.post("/api/projects", json={"name": "Old film"}).json()["id"]
     upload(client, other)
@@ -229,35 +229,39 @@ def test_the_agent_finds_an_entry_in_another_project_and_copies_it_here(client, 
            {"tool": "finish", "reply": "ok", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "keep meera", "project_id": other})
     [meera] = client.get("/api/kit", params={"project": other}).json()["entries"]
+    one = module_of(client, film)
     seen = hosted(monkeypatch, client, {"tool": "find_assets", "query": "red scarf", "op": "all"},
                   {"tool": "book_save", "asset": meera["id"], "text": "Meera", "op": "character"},
+                  {"tool": "book_save", "item": item, "text": "Meera", "op": "character"},
                   {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "use the girl in the red scarf from my other film", "project_id": film})
+    client.post("/api/agent/plan", json={"instruction": "use the girl in the red scarf from my other film", "project_id": one})
     told = [m["content"] for m in seen[-1] if m["role"] == "user"]
-    assert any('"project": "Old film (' in t for t in told)
-    assert any('"copied_from": {}'.format(other) in t for t in told)
-    [copy] = client.get("/api/kit", params={"project": film}).json()["entries"]
-    assert copy["name"] == "Meera" and copy["id"] != meera["id"] and copy["about"] == "a girl in a red scarf"
+    assert not any("Old film" in t for t in told)
+    assert any("Nothing in NeuralCore matches" in t for t in told)
+    assert any("There is no NeuralCore entry {} in this module".format(meera["id"]) in t for t in told)
+    assert any("That item is in another module; attach it here first." in t for t in told)
+    assert client.get("/api/kit", params={"project": one}).json()["entries"] == []
+    assert client.get("/api/kit", params={"project": film}).json()["entries"] == []
     # the other project's entry is as it was
-    assert [e["id"] for e in client.get("/api/kit", params={"project": other}).json()["entries"]] == [meera["id"]]
+    [kept] = client.get("/api/kit", params={"project": other}).json()["entries"]
+    assert kept["id"] == meera["id"] and kept["name"] == "Meera"
 
 
-def test_the_agent_remembers_a_user_across_projects_and_says_what_it_used(client, monkeypatch):
+def test_the_agent_remembers_a_user_in_one_module_and_says_what_it_used(client, monkeypatch):
     from scene import recall
     ada, film = setup(client)
-    other = client.post("/api/projects", json={"name": "Other"}).json()["id"]
     hosted(monkeypatch, client, {"tool": "memory", "op": "remember", "path": "pref.shape", "value": "portrait, for Reels"},
            {"tool": "memory", "op": "remember", "path": "bad key", "value": "x"},
            {"tool": "finish", "reply": "Noted.", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "I always post Reels", "project_id": film})
-    assert [(e["key"], e["value"]) for e in recall.entries(db_of(client), ada["id"])] == [("pref.shape", "portrait, for Reels")]
+    assert [(e["key"], e["value"]) for e in recall.entries(db_of(client), ada["id"], film)] == [("pref.shape", "portrait, for Reels")]
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "Portrait, as you make Reels.\n[from memory: pref.shape, pref.made_up]", "steps": []})
-    plan = client.post("/api/agent/plan", json={"instruction": "a dog video", "project_id": other}).json()
+    plan = client.post("/api/agent/plan", json={"instruction": "a dog video", "project_id": film}).json()
     assert any("pref.shape: portrait, for Reels" in m["content"] for m in seen[-1])   # the digest went with the message
     assert plan["reply"] == "Portrait, as you make Reels." and plan["memory_used"] == ["pref.shape"]
     hosted(monkeypatch, client, {"tool": "memory", "op": "forget", "path": "pref.shape"}, {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "stop making everything portrait", "project_id": other})
-    assert recall.entries(db_of(client), ada["id"]) == []
+    client.post("/api/agent/plan", json={"instruction": "stop making everything portrait", "project_id": film})
+    assert recall.entries(db_of(client), ada["id"], film) == []
 
 
 def test_the_memory_view_reads_and_changes_the_state_and_what_is_remembered(client):
@@ -271,8 +275,10 @@ def test_the_memory_view_reads_and_changes_the_state_and_what_is_remembered(clie
     assert core.Core(db_of(client), ada["id"], "tab2", one).read("/scenes/1/summary")["value"] == "the long chase"
     assert client.delete("/api/core/state", params={"project": one, "path": "/scenes/1/summary"}).json()["deleted"] == 1
     from scene import recall
-    recall.remember(db_of(client), ada["id"], "pref.light", "soft window light")
-    assert client.get("/api/remembered").json()["entries"][0]["key"] == "pref.light"
-    assert client.delete("/api/remembered", params={"key": "pref.light"}).json()["forgotten"] is True
+    recall.remember(db_of(client), ada["id"], one, "pref.light", "soft window light")
+    assert client.get("/api/remembered", params={"project": one}).json()["entries"][0]["key"] == "pref.light"
+    assert client.get("/api/remembered", params={"project": film}).json()["entries"] == []   # the main canvas keeps its own
+    assert client.get("/api/remembered").status_code == 400                                 # memory belongs to a module
+    assert client.delete("/api/remembered", params={"project": one, "key": "pref.light"}).json()["forgotten"] is True
     as_(client, BOB)   # someone outside the project sees nothing of it
     assert client.get("/api/core/memory", params={"project": one}).status_code == 404

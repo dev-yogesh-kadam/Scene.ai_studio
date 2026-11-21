@@ -1,4 +1,4 @@
-"""Work done on this machine, not on the render server: joining a timeline, putting a sound on a video, drawing
+"""Work done on this machine, not by a provider: joining a timeline, putting a sound on a video, drawing
 motion graphics, and the frame-exact work of a film made on its audio (film.py). Each is a job in the queue, filed
 under an "edit/..." workflow that has no workflow file.
 
@@ -8,7 +8,7 @@ The request that queues one checks it and writes what is to be done into the job
 import time
 from pathlib import Path
 
-from . import core, credits, detect, ffjob, film, logo, media, montage, motion, reframe, runs, storage
+from . import core, credits, detect, ffjob, film, logo, media, montage, motion, reframe, runs
 from .db import as_everyone, offload
 
 TIMELINE = "edit/timeline"   # the clips of a timeline joined into one video
@@ -27,8 +27,6 @@ FILM = {
     "film": ("edit/film", "Film on the master audio", ".mp4", "video"),
     "speech": ("edit/speech", "Speech spans", ".json", "text"),
     "reframe": ("edit/reframe", "Cropped to a new shape", ".mp4", "video"),
-    "outpaint_prep": ("edit/outpaint_prep", "Parts to fill in", ".mp4", "video"),
-    "outpaint_join": ("edit/outpaint_join", "Extended to a new shape", ".mp4", "video"),
     "shots": ("edit/shots", "Shots found", ".json", "text"),
     "keyframes": ("edit/keyframes", "Keyframes", ".jpg", "image"),
     "board": ("edit/board", "Board of stills", ".png", "image"),
@@ -60,7 +58,7 @@ async def run(job, folder, db, node_path="", tmp_dir=None):
         kinds = ("audio", "video") if kind == "sound" else kind if isinstance(kind, tuple) else (kind,)
         row = db.one("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind IN ({})".format(", ".join("?" * len(kinds))),
                      (item_id, job["user_id"], *kinds))
-        if row is None or not storage.here(folder / row["filename"]).is_file():
+        if row is None or not (folder / row["filename"]).is_file():
             raise media.MediaError("{} this was to be made from is no longer in the library.".format(
                 {"video": "A video", "image": "A picture", "audio": "The sound", "sound": "The sound"}.get(kind, "A file")))
         return folder / row["filename"]
@@ -249,10 +247,6 @@ async def _film(settings, item, target, node_path, tmp_dir):
                 "found": found if settings.get("save_to") else None}
     if op == "reframe":
         return await reframe.crop(await offload(item, settings["video"]), settings["shape"], target, settings["x"], settings["y"])
-    if op == "outpaint_prep":
-        return await reframe.prepare(await offload(item, settings["video"]), settings["shape"], target)
-    if op == "outpaint_join":
-        return await reframe.join(await offload(item, settings["video"]), [await offload(item, i) for i in settings["parts"]], settings["shape"], target)
     if op == "html":
         return await _html(settings, item, target, node_path, tmp_dir)
     if op == "ffmpeg":

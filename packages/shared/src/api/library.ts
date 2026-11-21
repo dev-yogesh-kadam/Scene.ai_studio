@@ -71,7 +71,7 @@ export function upload(file: { uri: string; name: string; type: string }, projec
   return request<LibraryItem>('/api/library/upload', { method: 'POST', body: form });
 }
 
-/** Put a library item on the render server, for a reference slot of a job. */
+/** Mark a library item as a reference slot of a job: the studio keeps it and sends it to the provider when the job runs. */
 export function asReference(id: number, kind?: string) {
   return request<{ comfy_name: string; name: string }>(
     `/api/library/${id}/reference${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`,

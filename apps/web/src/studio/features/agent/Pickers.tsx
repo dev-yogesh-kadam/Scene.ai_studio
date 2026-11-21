@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import { Icon } from '../../../common/components/Icon/Icon';
 import { popover, s as pop } from '../../../common/components/Popover';
 import { cx } from '../../../common/cx';
-import { loadCatalog, loadModelCatalog } from '../jobs/jobForm';
+import { loadCatalog } from '../jobs/jobForm';
 import { EFFORT_NAMES, PERMISSIONS, type AgentChat } from './chat';
 import s from './Composer.module.css';
 import { CHECK_RESULTS } from './shots';
@@ -169,8 +169,8 @@ export function PermissionPicker({ chat }: { chat: AgentChat }) {
   );
 }
 
-/** The menu of PinsPicker: a tab for each kind, "Agent selects" first, then the generation server's models one by
- * one, then ComfyUI's workflows. Ticking keeps the menu open; the chat keeps the pins (chat.setPins). */
+/** The menu of PinsPicker: a tab for each kind, "Agent selects" first, then the providers' models. Ticking keeps the
+ * menu open; the chat keeps the pins (chat.setPins). */
 function PinsMenu({ chat, tabs, close }: { chat: AgentChat; tabs: PinTab[]; close: () => void }) {
   const [pins, setPinsHere] = useState(chat.chatWorkflows);
   const [kind, setKind] = useState(
@@ -202,12 +202,7 @@ function PinsMenu({ chat, tabs, close }: { chat: AgentChat; tabs: PinTab[]; clos
         <span className={s['pin-text']}>
           <b>{e.title}</b>
           {e.about && <span className={s['pin-about']}>{e.about}</span>}
-          {(e.sound || e.meta.length > 0) && (
-            <span className={s['pin-meta']}>
-              {e.sound && <Icon name="audio" />}
-              {e.meta.join(' · ')}
-            </span>
-          )}
+          {e.meta.length > 0 && <span className={s['pin-meta']}>{e.meta.join(' · ')}</span>}
         </span>
       </button>
     );
@@ -254,10 +249,8 @@ function PinsMenu({ chat, tabs, close }: { chat: AgentChat; tabs: PinTab[]; clos
         </span>
       </button>
       <div className={s['pin-list']}>
-        {tab.models.length > 0 && <div className={s['pin-section']}>Models (generation server)</div>}
+        <div className={s['pin-section']}>Models</div>
         {tab.models.map(row)}
-        {tab.workflows.length > 0 && <div className={s['pin-section']}>Workflows (ComfyUI)</div>}
-        {tab.workflows.map(row)}
       </div>
       {pins.length > 0 && (
         <button
@@ -284,11 +277,7 @@ export function PinsPicker({ chat }: { chat: AgentChat }) {
   const open = async () => {
     let tabs: PinTab[];
     try {
-      const [catalog, models] = await Promise.all([
-        loadCatalog(),
-        loadModelCatalog().catch(() => ({ models: {} })), // without the server's list the presets still name them
-      ]);
-      tabs = pinTabs(catalog.workflows, models.models);
+      tabs = pinTabs((await loadCatalog()).workflows);
     } catch (e) {
       chat.say((e as Error).message);
       return;

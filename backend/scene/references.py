@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from .security import content_matches
 
 UPLOAD_PREFIX = "scene_"
-# The names keep_reference gives, and nothing else: no folder, no way out of ComfyUI's input folder.
+# The names keep_reference gives, and nothing else: no folder, no way out of the references folder.
 UPLOAD_NAME = re.compile(r"^scene_[0-9a-f]{10}_[\w.-]{1,200}$")
 MAX_BYTES = 200 * 1024 * 1024
 KINDS = {
@@ -21,8 +21,8 @@ KINDS = {
 }
 
 
-# Pictures the render server can't read (an iPhone's HEIC, AVIF): made a JPEG (a PNG when they have transparency) as
-# they come in, so every workflow can take them.
+# Pictures a provider may not read (an iPhone's HEIC, AVIF): made a JPEG (a PNG when they have transparency) as
+# they come in, so every model can take them.
 CONVERTED = {".heic", ".heif", ".avif"}
 
 # What the user brings that is words, filed as "text": a script (.docx, .pdf, .txt, .md), a transcript (.srt, .json) or
@@ -177,9 +177,8 @@ REFERENCES = "references"   # the storage kind (storage.py) the files are kept i
 
 async def keep_reference(store, filename, data, db=None, user_id=None):
     """Keep a file a job uses as an input in the studio's own storage (`store`, app.state.storage) and return the name
-    the job calls it by. No render server is asked: the file is sent to the one that runs the job when it starts
-    (jobs._send_inputs), so a server that is off, or another server than the one it will run on, never stops a job
-    from being added. The name includes a hash of the content, so two different files with the same name never
+    the job calls it by. No provider is asked: the file is sent to the one that makes the job when it starts
+    (jobs._provider_files), so a provider that does not answer now never stops a job from being added. The name includes a hash of the content, so two different files with the same name never
     overwrite each other, and the same file kept twice is kept once. With `db` and `user_id`, the name is remembered as
     that user's, so they and nobody else can use it again (see owns_upload)."""
     from .db import offload
@@ -192,8 +191,7 @@ async def keep_reference(store, filename, data, db=None, user_id=None):
 
 
 def kept_reference(store, name):
-    """Whether the studio keeps this input file itself (one kept before keep_reference existed is only on the main
-    render server)."""
+    """Whether the studio keeps this input file itself (one kept before keep_reference existed is not kept any more)."""
     try:
         return store is not None and bool(UPLOAD_NAME.match(str(name or ""))) and store.exists(REFERENCES, name)
     except (OSError, ValueError):
@@ -201,6 +199,6 @@ def kept_reference(store, name):
 
 
 def owns_upload(db, user_id, name):
-    """Whether a file in the render server's input folder is one this user put there."""
+    """Whether a reference file the studio keeps is one this user put there."""
     name = str(name or "")
     return bool(UPLOAD_NAME.match(name)) and db.one("SELECT 1 FROM uploads WHERE user_id = ? AND name = ?", (user_id, name)) is not None

@@ -7,7 +7,6 @@ describe('the checks card', () => {
   it('a row for each check: ok, or the problem in its words', () => {
     const rows = rowsOf({
       database: { online: true, seconds: 0.002, detail: '' },
-      render: { online: false, url: 'http://render:8188', detail: '' },
       model: {
         mode: 'this_pc',
         online: true,
@@ -31,8 +30,7 @@ describe('the checks card', () => {
     });
     const by = Object.fromEntries(rows.map((r) => [r.name, r]));
     expect(by['Database'].state).toBe('ok');
-    expect(by['Render server']).toMatchObject({ state: 'problem' });
-    expect(String(by['Render server'].words)).toContain('http://render:8188');
+    expect(by['Render server']).toBeUndefined(); // there is none: every model is a provider's
     expect(by['Agent model']).toMatchObject({
       state: 'ok',
       words: 'Claude on this PC · Claude Code 2.1.3 · signed in as owner@example.com · Pro · 1 of 3 calls running',
@@ -65,6 +63,5 @@ describe('the checks card', () => {
     const rows = rowsOf({ database: { online: false, detail: 'connection refused' }, langfuse: null });
     expect(rows.find((r) => r.name === 'Database')).toMatchObject({ state: 'problem', words: 'connection refused' });
     expect(rows.find((r) => r.name === 'Langfuse')).toMatchObject({ state: 'off', words: 'Not checked' });
-    expect(rows.find((r) => r.name === 'Render server')?.state).toBe('off');
   });
 });

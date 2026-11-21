@@ -169,8 +169,7 @@ def test_its_models_are_offered_as_sound_workflows_the_agent_knows(database, too
     row = next(p for p in registry.providers(database) if p["kind"] == "local_tools")
     key = registry.keys(database, row["id"])[0]
     registry.save_models(database, row["id"], key["id"], run(tools.models("")))
-    database.set_setting(registry.ROUTER, "on")
-    found = provider_workflows.ProviderWorkflows(database)._read()[1]
+    found = provider_workflows.ProviderWorkflows(database)._read()
     assert {"audio/@transcribe", "audio/@transcribe_video", "audio/@separate_voice"} <= set(found)
     offers = registry.provider_offers(database)
     assert {m["id"] for m in offers["transcribe"]} == {"transcribe", "transcribe_video"}

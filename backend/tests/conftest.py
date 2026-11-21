@@ -240,25 +240,30 @@ def built(folder):
     return folder
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "no_models: the test studio is given no provider (the test adds its own)")
+
+
 @pytest.fixture
-def client(tmp_path):
-    """The app with empty storage and a render server address nothing listens on."""
+def client(tmp_path, request):
+    """The app with empty storage, its models from a fake Scene provider (studio_models.py: `client.provider` is the
+    fake, its `calls` what was asked). A test marked no_models gets none: it adds its own provider."""
     empty_postgres()
     # Claude Code is never run by a test: the real one is switched off, and the agent is given a Claude of its own
     # with no `claude` to run (a test that reaches it fails, fresh_claude), as faked by each test (fake_claude, hosted,
     # model). It reaches Claude by an API key (with none): a studio open to other users, as most tests need (sign-up
     # open, the agent for everyone); Claude on this PC, a personal subscription, is test_claude_local.py's.
-    settings = Settings(database_url=POSTGRES, database_loop_guard=LOOP_GUARD, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
-                        claude_connection="api_key",
+    settings = Settings(database_url=POSTGRES, database_loop_guard=LOOP_GUARD, claude_models="off", claude_connection="api_key",
                         storage_dir=str(tmp_path), allow_signup=True, signup_credits=500, first_account_local=False,
-                        workflows_dir=str(ROOT / "workflows"), web_dist_dir=str(built(tmp_path / "web")))
+                        web_dist_dir=str(built(tmp_path / "web")), local_tools_python=str(tmp_path / "no-local-tools" / "python.exe"))
     from scene import claude
     with TestClient(create_app(settings)) as test_client:
         with_claude(test_client.app.state.agent)
         # Claude's live session is played by the agent's chat, which each test fakes (chat_session)
         live, claude.converse = claude.converse, chat_session(test_client.app.state.agent)
-        # The video workflow is a normal ComfyUI save: it is read with the node definitions a real server gave.
-        test_client.app.state.catalog.saved = json.loads((BACKEND / "tests" / "fixtures" / "node_definitions.json").read_text(encoding="utf-8"))
+        # The models: a fake Scene provider's (studio_models.py), as Studio_automation's would be.
+        import studio_models
+        test_client.provider = None if request.node.get_closest_marker("no_models") else studio_models.install(test_client.app.state)
         # The admin console: a site of its own beside the studio, with its own sign-in and cookie (test_api.console).
         test_client.console = TestClient(test_client.app.state.console)
         try:

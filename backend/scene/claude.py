@@ -52,7 +52,7 @@ PARALLEL = 3   # calls running at once; more wait their turn (each is a program 
 MAX_TURNS = 3  # an answer in a schema takes two turns of Claude Code's (the answer, then its check)
 # Claude Code's own web search, the one of its tools a studio session may use: the search runs at Anthropic, so it
 # reaches nothing on this machine or its network. Reading a page is the studio's own tool (web_fetch, web.py), which
-# fetches only public addresses: Claude Code's WebFetch runs here and would reach the render PC and localhost.
+# fetches only public addresses: Claude Code's WebFetch runs here and would reach this PC's own network and localhost.
 WEB_TOOLS = ("WebSearch",)
 WEB_TURNS = 6  # more turns for a call that may search first
 WINDOW = 1_000_000   # tokens of context the models have (Sonnet 5, Opus 4.7, Haiku 5.5 and later); claude_context in config.json

@@ -9,11 +9,8 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
 
-import httpx
-
-from .. import balancer, generation_models, guardrails, sharing, health, kit, media, memory, placement, runs, storage
+from .. import guardrails, sharing, health, kit, media, memory, placement, runs
 from ..db import as_everyone, offload
 from ..catalog import KINDS
 from ..comfy import workflows
@@ -72,7 +69,7 @@ async def billed_seconds(state, wf, schema, settings, user_id=None):
         row = await state.db.aone("SELECT filename, context FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (parent, user_id))
         if row:
             known = json.loads(row["context"] or "{}").get("duration")
-            path = None if known else await offload(storage.here, await offload(state.outputs.folder, user_id) / row["filename"])
+            path = None if known else await offload(state.outputs.folder, user_id) / row["filename"]
             return float(known) if known else (await media.probe(path))["seconds"] if path.is_file() else None
     return None
 
@@ -111,26 +108,16 @@ async def price(state, wf, settings, user_id=None):
 
 
 def switched_on(state, workflow_id, user):
-    if state.credits._comfyui_off(workflow_id):   # its capability is made by the providers now (What makes what)
-        from ..providers.base import CAPABILITY_WORDS
-        from ..providers.comfyui import capability_of
-        what = CAPABILITY_WORDS.get(capability_of(workflow_id), "This")
-        raise HTTPException(400, "{} is no longer made on ComfyUI: pick one of the providers' models.".format(what))
     if not state.credits.enabled(workflow_id, user):
         raise HTTPException(400, "This workflow is switched off for now.")
 
 
 def fit_resolution(state, schema, settings, used=None):
     """Make a job at a resolution an admin has not switched off (credits.fit_resolution): the one asked for, or the next
-    one allowed, written back into the settings; and a generation server model given references at one it renders
-    with them (generation_models.fit_references; `used`: the slots it fills, else those of settings["refs"]). Returns
-    the note that says so ("" when nothing changed), which is also kept as settings["resolution_note"]."""
+    one allowed, written back into the settings. Returns the note that says so ("" when nothing changed), which is also
+    kept as settings["resolution_note"]. (`used`: the slots the job fills; kept for its callers.)"""
     settings.pop("resolution_note", None)
     note = _switched_off(state, schema, settings)
-    if generation_models.has_models(schema):
-        slots = set(used) if used is not None else set((settings.get("refs") or {}).keys())
-        fitted = generation_models.fit_references(schema, settings, slots, generation_models.reference_rules(state.db))
-        note = " ".join(filter(None, [note, fitted]))
     if note:
         settings["resolution_note"] = note
     return note
@@ -138,6 +125,21 @@ def fit_resolution(state, schema, settings, used=None):
 
 def _switched_off(state, schema, settings):
     roles = {c["role"]: c for c in schema["controls"] if c["role"]}
+    option = schema.get("resolution_option")
+    if option:   # a provider's model: its Resolution option, by the resolution each choice is
+        options = settings["options"] = settings.get("options") if isinstance(settings.get("options"), dict) else {}
+        default = next((o["default"] for o in schema["options"] if o["id"] == option["id"]), None)
+        chosen = options.get(option["id"], default)
+        asked = next((r for r, choice in option["by"].items() if choice == chosen), None)
+        if asked is None:
+            return ""
+        try:
+            used, note = state.credits.fit_resolution(schema["id"], asked, sorted(option["by"]))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if note:
+            options[option["id"]] = option["by"][used]
+        return note
     if schema.get("size"):
         asked = settings.get("resolution") or schema["size"]["resolution"]
     elif "resolution" in roles:
@@ -159,19 +161,8 @@ def _switched_off(state, schema, settings):
 
 @router.get("/status")
 async def status(request: Request, user: dict = Depends(current_user)):
-    """Whether the render server answers, and the version of the page files (a tab opened before a change offers to
-    reload). Every open tab asks every 15 s: the render server is asked once for all of them, every few seconds."""
-    state = request.app.state
-
-    async def ask():
-        try:
-            stats = await state.comfy.stats()
-            state.saw_server(True)
-            return {"online": True, "version": stats.get("system", {}).get("comfyui_version")}
-        except (httpx.HTTPError, ValueError):
-            state.saw_server(False)
-            return {"online": False}
-    return dict(await health.remembered(state, "status", ask), page=state.page_version())
+    """The version of the page files: a tab opened before a change offers to reload. Every open tab asks every 15 s."""
+    return {"page": request.app.state.page_version()}
 
 
 @router.get("/announcement")
@@ -185,35 +176,16 @@ async def announcement(request: Request, user: dict = Depends(current_user)):
     return await offload(current_announcement, db)
 
 
-LEARN_WAIT = 3   # seconds the workflow list waits for the servers' node definitions (unreachable)
-
-
 async def unreachable(state, rows):
-    """{workflow id: why} of the generation server's workflows no server in use can make now (no generation server in
-    the console, or it switched off): offered nowhere, so none is picked only to fail at once (balancer.route says
-    why). The servers' node definitions are read first when they are not known (at most once in a while)."""
-    pool = getattr(state, "comfy_pool", None)
+    """{workflow id: why} of the providers' models no key could ever make now (the router says why not): offered
+    nowhere, so none is picked only to fail at once."""
     found = {}
     router = getattr(state, "router", None)
-    for w in rows:   # a provider's model: offered while some key could ever make it (the router says why not)
+    for w in rows:
         if w.get("provider") and router is not None:
             _, problem = await offload(router.pick, w["model"])
             if problem:
                 found[w["id"]] = problem
-    generation = [w for w in rows if w.get("source") == "generation" and not w.get("error") and not w.get("provider")]
-    if pool is None or not generation:
-        return found
-    try:   # a server that does not answer holds the page LEARN_WAIT at most; it is read on in the background
-        await asyncio.wait_for(asyncio.shield(pool.learn([s["url"] for s in pool.servers() if not s["patterns"]])), LEARN_WAIT)
-    except Exception:   # unknown nodes count as there: the queue still says why when it can't place a job
-        pass
-    for w in generation:
-        try:
-            _, problem = pool.route(w["id"], balancer.needs_of(await state.catalog.load(w["id"])))
-        except workflows.WorkflowError:
-            continue
-        if problem:
-            found[w["id"]] = problem
     return found
 
 
@@ -234,23 +206,7 @@ async def get_workflow(kind: str, name: str, request: Request, user: dict = Depe
     allowed = await offload(request.app.state.credits.allowed_resolutions, schema["id"], schema["resolutions"])
     schema["resolutions_off"] = [r for r in schema["resolutions"] if r not in allowed]
     schema["resolutions"] = allowed
-    if generation_models.has_models(schema):   # each model's lengths, references and frames, for the form to keep to
-        schema["models"] = generation_models.catalog(schema, await request.app.state.generation_models.live(schema["id"]))
     return schema
-
-
-@router.get("/generation/models")
-async def generation_model_list(request: Request, user: dict = Depends(current_user)):
-    """The generation server's models, by workflow: {workflow id: [model]} (generation_models.catalog), from the
-    presets files and, when it can be read, the generation server's own list."""
-    state, found = request.app.state, {}
-    for item in await state.catalog.listing():
-        if item.get("source") == "generation" and not item.get("error"):
-            schema = workflows.describe(await state.catalog.load(item["id"]))
-            if not generation_models.has_models(schema):   # a voiceover, music, lip sync …: one model, no list
-                continue
-            found[item["id"]] = generation_models.catalog(schema, await state.generation_models.live(item["id"]))
-    return {"models": found}
 
 
 @router.post("/estimate", dependencies=[limited("estimate", 120, 60)])
@@ -349,10 +305,16 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
     # The length of a video the user brought to an upscaler or a lip sync, measured here: it is what the job is charged by.
     videos = {r["id"] for r in schema["refs"] if r["kind"] == "video"} if by_source(wf) else set()
     settings.pop("source_seconds", None)
+    # A provider's model that limits its reference videos' lengths: each one's length, for limits_problem.
+    clip_limits = ((wf["profile"].get("provider") or {}).get("limits") or {}).get("reference_clips")
+    measured = {r["id"] for r in schema["refs"] if r["kind"] == "video"} if clip_limits else set()
+    video_seconds = {}
 
     async def measure(slot, data, filename):
         if slot in videos:
             settings["source_seconds"] = await _video_seconds(state, data, filename) or settings.get("source_seconds")
+        if slot in measured:
+            video_seconds[slot] = settings["source_seconds"] if slot in videos else await _video_seconds(state, data, filename)
 
     # @names of the project's kit in the prompt ("@Violet at @Bonfire Clearing") go into the free slots that fit them,
     # and the prompt calls them by the words the model ties to those slots.
@@ -371,7 +333,7 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
             keeper = await offload(kit.keeper_of, state.db, user["id"], project_id) if project_id else user["id"]   # a shared project's kit is its owner's
             with as_everyone() if keeper != user["id"] else contextlib.nullcontext():
                 asset = await state.db.aone("SELECT * FROM assets WHERE id = ? AND user_id = ?", (ref["asset_id"], keeper))
-            path = asset and await offload(storage.here, state.assets_dir / str(keeper) / asset["filename"])
+            path = asset and state.assets_dir / str(keeper) / asset["filename"]
             if not asset or not path.is_file():
                 raise HTTPException(400, "A saved asset used here no longer exists.")
             data = path.read_bytes()
@@ -382,6 +344,13 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
             # Only a file this user added: another user's file name must not be usable.
             if not await offload(owns_upload, state.db, user["id"], ref["comfy_name"]):
                 raise HTTPException(400, "A reference file used here is not one of yours. Add it again.")
+            if slot in measured:   # a kept clip (the clip before, under Chain): its length, for the model's limits
+                try:
+                    data = await offload(state.storage.read_bytes, REFERENCES, str(ref["comfy_name"]))
+                except (OSError, KeyError, ValueError):
+                    data = None
+                if data:
+                    video_seconds[slot] = await _video_seconds(state, data, str(ref["comfy_name"]))
             refs[slot] = {"comfy_name": str(ref["comfy_name"]), "name": str(ref.get("name", ""))[:200]}
     kinds = {r["id"]: r["kind"] for r in schema["refs"]}
     labels = {r["id"]: r["label"] for r in schema["refs"]}
@@ -405,12 +374,8 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
 
     resolution_note = await offload(fit_resolution, state, schema, settings)   # a resolution switched off is made at the next one allowed
     _, ctx = workflows.build_prompt(wf, dict(settings, clips=1))  # fails here, not in the queue, if a setting is wrong
-    if generation_models.has_models(schema):   # what the chosen model can't take, said now (its lengths, references, frames)
-        problem = generation_models.problem(schema, settings, await state.generation_models.live(wf["id"]))
-        if problem:
-            raise HTTPException(400, problem)
     if wf["profile"].get("provider"):   # a provider's model: its limits, said now rather than by the provider in the queue
-        problem = provider_workflows.limits_problem(wf, schema, settings)
+        problem = provider_workflows.limits_problem(wf, schema, settings, video_seconds)
         if problem:
             raise HTTPException(400, problem)
     ctx = dict(workflows.context(schema, settings), seed=ctx.get("seed"))
@@ -421,7 +386,7 @@ async def create_job(request: Request, user: dict = Depends(current_user)):
         settings["prompt"] = str(values.get(roles["prompt"]["id"], roles["prompt"]["default"]) or "")
         needs_caption(wf, settings, roles["prompt"]["id"])
     settings["details"] = [[c["label"].split(" (")[0], values.get(c["id"], c["default"])] for c in schema["controls"] if not c["role"]]
-    settings["workflow_title"] = generation_models.title_of(schema, settings.get("options"))
+    settings["workflow_title"] = schema["title"]
     quote = await price(state, wf, settings, user["id"])
     name = str(settings.get("name") or wf["id"].split("/", 1)[1]).strip()[:80]
     over = await offload(state.credits.cap_problem, user["id"], quote["credits"])
@@ -449,28 +414,13 @@ async def delete_job(job_id: str, request: Request, user: dict = Depends(current
 
 @router.get("/ref-preview")
 async def ref_preview(name: str, request: Request, user: dict = Depends(current_user)):
-    """Show a reference of this user's (used by "Re-run"): the studio's own copy, or, for one kept before the studio
-    kept them, the main render server's."""
+    """Show a reference of this user's (used by "Re-run"): the studio's own copy."""
     state = request.app.state
     if not await offload(owns_upload, state.db, user["id"], name):
         raise HTTPException(404, "No such file.")
-    if await offload(kept_reference, state.storage, name):
-        return await offload(state.storage.response, REFERENCES, name)
-    try:
-        response = await state.comfy.view(name, "", "input")
-    except httpx.HTTPError:
-        raise HTTPException(404, "This file is on the render server, which does not answer now.")
-    if response.status_code != 200:
-        await response.aclose()
-        raise HTTPException(404, "ComfyUI no longer has this file.")
-
-    async def body():
-        try:
-            async for chunk in response.aiter_bytes():
-                yield chunk
-        finally:
-            await response.aclose()
-    return StreamingResponse(body(), media_type=response.headers.get("content-type", "application/octet-stream"))
+    if not await offload(kept_reference, state.storage, name):
+        raise HTTPException(404, "This file is not kept any more: add it again.")
+    return await offload(state.storage.response, REFERENCES, name)
 
 
 @router.websocket("/events")

@@ -9,7 +9,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import agent, credits, edits, media, motion, sequence, skills, storage
+from .. import agent, credits, edits, media, motion, sequence, skills
 from ..db import as_everyone, offload
 from .deps import costly, current_user
 
@@ -44,7 +44,7 @@ async def export_timeline(body: dict, request: Request, user: dict = Depends(cur
                            (clip.get("id"), user["id"]))
         if row is None:
             raise HTTPException(404, "A clip on the timeline is no longer in your library.")
-        if not (await offload(storage.here, await offload(state.outputs.folder, user["id"]) / row["filename"])).is_file():
+        if not (await offload(state.outputs.folder, user["id"]) / row["filename"]).is_file():
             raise HTTPException(404, "The file of {} is missing from storage.".format(row["name"]))
         try:
             parts.append({"id": row["id"], "start": float(clip.get("start") or 0), "end": float(clip.get("end") or 0)})
@@ -72,7 +72,7 @@ async def assemble(body: dict, request: Request, user: dict = Depends(current_us
     parts = []
     for clip in clips:
         row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (clip.get("id") if isinstance(clip, dict) else None, user["id"]))
-        if row is None or not (await offload(storage.here, folder / row["filename"])).is_file():
+        if row is None or not (folder / row["filename"]).is_file():
             raise HTTPException(404, "A shot of the cut is no longer in your library.")
         try:
             parts.append({"id": row["id"], "start": float(clip.get("start") or 0), "end": float(clip.get("end") or 0), "fade": clip.get("fade") is True})
@@ -81,7 +81,7 @@ async def assemble(body: dict, request: Request, user: dict = Depends(current_us
     music = None
     if body.get("music"):
         row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'audio'", (body["music"], user["id"]))
-        if row is None or not (await offload(storage.here, folder / row["filename"])).is_file():
+        if row is None or not (folder / row["filename"]).is_file():
             raise HTTPException(404, "The music of the cut is no longer in your library.")
         music = row["id"]
 
@@ -110,8 +110,8 @@ async def add_sound(body: dict, request: Request, user: dict = Depends(current_u
         if rows[key] is None:
             raise HTTPException(400, "Choose {} from your library.".format(what))
     folder = await offload(state.outputs.folder, user["id"])
-    if not (await offload(storage.here, folder / rows["video"]["filename"])).is_file() or \
-            not (await offload(storage.here, folder / rows["audio"]["filename"])).is_file():
+    if not (folder / rows["video"]["filename"]).is_file() or \
+            not (folder / rows["audio"]["filename"]).is_file():
         raise HTTPException(404, "A file is missing from storage.")
     replace = body.get("replace") is True
     project_id = await offload(_workspace()._project_id, request, user, body.get("project_id")) or rows["video"]["project_id"]
@@ -172,7 +172,7 @@ async def _motion_seconds(state, user, body):
     row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (body.get("source"), user["id"]))
     if row is None:
         raise HTTPException(400, "Select a video on the canvas first: {} is laid over a video.".format(template["title"].lower()))
-    source = await offload(storage.here, await offload(state.outputs.folder, user["id"]) / row["filename"])
+    source = await offload(state.outputs.folder, user["id"]) / row["filename"]
     if not source.is_file():
         raise HTTPException(404, "The file of {} is missing from storage.".format(row["name"]))
     return (await media.probe(source))["seconds"], credits.OVERLAY

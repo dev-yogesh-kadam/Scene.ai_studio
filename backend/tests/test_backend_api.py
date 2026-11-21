@@ -42,8 +42,8 @@ def _adas_things(client):
     assert client.put("/api/boards/agent-t1", json={"project": project, "data": {"runs": [{"instruction": "ada's"}]}}).json() == {"ok": True}
     assert client.put("/api/runs/run1/state", json={"path": "/secret", "value": "ada's"}).status_code == 200
     assert client.post("/api/library/{}/share".format(made)).status_code == 200
-    job = client.post("/api/jobs", data={"settings": json.dumps({"workflow": "video/h3_all_in_one",
-                                                                 "values": {"100:value": "She waves."}})}).json()["id"]
+    job = client.post("/api/jobs", data={"settings": json.dumps({"workflow": "video/@seedance_2_5",
+                                                                 "values": {"2:value": "She waves."}})}).json()["id"]
     signed_in(client, BOB)
     return {"project": project, "item": made, "entry": entry, "plan": plan, "job": job}
 

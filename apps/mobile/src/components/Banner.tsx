@@ -13,7 +13,7 @@ const tones = {
 
 export type Tone = keyof typeof tones;
 
-/** A notice above a list: the render server is off, an admin's message, an error. */
+/** A notice above a list: the jobs are paused, an admin's message, an error. */
 export function Banner({ tone = 'info', text, icon }: { tone?: Tone; text: string; icon?: IconName }) {
   const look = tones[tone] ?? tones.info;
   return (

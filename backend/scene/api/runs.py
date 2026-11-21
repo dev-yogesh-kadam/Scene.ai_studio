@@ -86,16 +86,29 @@ async def core_delete(request: Request, path: str, project: int = 0, run: str = 
     return {"deleted": await offload(_guarded, lambda: shared.delete(path))}
 
 
-# ---------------------------------------------------------------- what the agent remembers of the user (recall.py)
+# ---------------------------------------------------------------- what the agent remembers of the user in one module (recall.py)
+
+def _module(request, user, project):
+    """The module whose memory is asked for: one the user has a role in. Memory belongs to a module; there is none outside."""
+    project = project_ref(project)
+    if not project:
+        raise HTTPException(400, recall.NO_MODULE)
+    if not sharing.role_in(request.app.state.db, user["id"], project)[0]:
+        raise HTTPException(404, "No such project.")
+    return project
+
 
 @router.get("/remembered")
-async def my_memory(request: Request, user: dict = Depends(current_user)):
-    return {"entries": await offload(recall.entries, request.app.state.db, user["id"])}
+async def my_memory(request: Request, project: int = 0, user: dict = Depends(current_user)):
+    """What the agent remembers of the user in this module (`project`, required)."""
+    module = await offload(_module, request, user, project)
+    return {"entries": await offload(recall.entries, request.app.state.db, user["id"], module)}
 
 
 @router.delete("/remembered")
-async def forget_memory(request: Request, key: str, user: dict = Depends(current_user)):
+async def forget_memory(request: Request, key: str, project: int = 0, user: dict = Depends(current_user)):
+    module = await offload(_module, request, user, project)
     try:
-        return {"forgotten": await offload(recall.forget, request.app.state.db, user["id"], key)}
+        return {"forgotten": await offload(recall.forget, request.app.state.db, user["id"], module, key)}
     except recall.RecallError as error:
         raise HTTPException(400, str(error))

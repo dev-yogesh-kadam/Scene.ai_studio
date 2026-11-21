@@ -11,7 +11,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from .. import audit, storage
+from .. import audit
 from ..db import as_everyone, offload
 from ..security import token_hash
 from .deps import current_user, limited
@@ -99,9 +99,6 @@ async def shared_page(token: str, request: Request):
 async def shared_file(token: str, request: Request, download: bool = False):
     _, row = await offload(_shared, request, token)
     path = request.app.state.outputs.folder(row["user_id"]) / row["filename"]
-    elsewhere = storage.signed(request.app.state, "outputs", path, path.name if download else None)
-    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
-        return elsewhere
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path, filename=path.name if download else None, headers={"Cache-Control": "private, max-age=3600"})

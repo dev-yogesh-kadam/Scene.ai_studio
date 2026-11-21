@@ -1,16 +1,15 @@
 // The smoke test run at every stop of the React migration, over HTTP only, against a studio of its own
-// (support/studio.mjs): sign in, Home, Canvas, one image job queued then cancelled and refunded (or, with the fake
-// render server, made), the phone site, and the admin console on its own port with none of its files on the studio's.
+// (support/studio.mjs) whose models are the fake v1 provider's (support/fake-v1.mjs): sign in, Home, Canvas, one image
+// job made, the phone site, and the admin console on its own port with none of its files on the studio's.
 //
 //   node apps/web/tests/smoke/smoke.mjs                 the web app's build (build apps/web first)
-//   node apps/web/tests/smoke/smoke.mjs --fake-comfy    the job runs to "done" on the fake ComfyUI
 //
-// The accounts are made in the throwaway database: smoke-admin@local.test (the first account is the admin) and
-// smoke-test@local.test (a user, which the test signs in as).
+// The accounts are made in the throwaway database: smoke-admin@local.test (the first account is the admin, who gives
+// the studio the fake provider's key) and smoke-test@local.test (a user, which the test signs in as).
 
+import { addToStudio, startFakeV1 } from '../support/fake-v1.mjs';
 import { client, startStudio } from '../support/studio.mjs';
 
-const args = new Set(process.argv.slice(2));
 const PASSWORD = 'Smoke-test-2026-pass';
 
 const results = [];
@@ -22,13 +21,10 @@ function check(name, ok, detail = '') {
 let fake = null;
 let studio = null;
 try {
-  if (args.has('--fake-comfy')) {
-    const { startFakeComfy } = await import('../support/fake-comfy.mjs');
-    fake = await startFakeComfy();
-  }
-  studio = await startStudio({ comfyUrl: fake ? fake.url : 'http://127.0.0.1:9' });
+  fake = await startFakeV1();
+  studio = await startStudio();
   console.log(`studio ${studio.base}, console ${studio.console}, data in ${studio.home}`);
-  await run(studio);
+  await run(studio, fake);
 } catch (error) {
   check('the smoke test ran to the end', false, error.stack || String(error));
   if (studio) console.log(studio.log().slice(-4000));
@@ -40,7 +36,7 @@ const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
 process.exit(failed.length ? 1 : 0);
 
-async function run(studio) {
+async function run(studio, fake) {
   const admin = client(studio.base);
   const made = await admin.call('/api/auth/register', {
     method: 'POST',
@@ -52,6 +48,8 @@ async function run(studio) {
     `status ${made.status}`,
   );
   await admin.call('/api/auth/logout', { method: 'POST' });
+  await addToStudio(studio, fake, { email: 'smoke-admin@local.test', password: PASSWORD }, client);
+  check('the admin gives the studio the fake provider', true);
 
   const anyone = client(studio.base);
   const user = await anyone.call('/api/auth/register', {
@@ -110,7 +108,7 @@ async function run(studio) {
     check(`Canvas's data: ${path.split('?')[0]}`, answer.status === 200, `status ${answer.status}`);
   }
 
-  // One image job: queued, then cancelled and refunded (or, on the fake render server, made)
+  // One image job: queued, then made by the fake provider
   const listed = await me.call('/api/workflows');
   const images = (listed.data.workflows || []).filter((w) => (w.kind || String(w.id).split('/')[0]) === 'image');
   check('there are image workflows', images.length > 0, `${images.length} image workflows`);
@@ -141,36 +139,22 @@ async function run(studio) {
     queued && queued.status,
   );
 
-  if (fake) {
-    const done = await waitFor(async () => {
-      const jobs = (await me.call('/api/jobs')).data.jobs || [];
-      const found = jobs.find((j) => j.id === job.id);
-      return found && ['done', 'failed', 'cancelled'].includes(found.status) ? found : null;
-    }, 120_000);
-    check(
-      'the job runs to "done" on the fake render server',
-      done && done.status === 'done',
-      done ? done.status : 'timed out',
-    );
-    const library = await me.call(`/api/library?project=${id}`);
-    const items = Array.isArray(library.data) ? library.data : library.data.items || [];
-    check('the image is in the library', items.length > 0, `${items.length} items`);
-    if (items.length) {
-      const file = await me.call(`/api/library/${items[0].id}/file`);
-      check("the image's file is served", file.status === 200, `status ${file.status}`);
-    }
-  } else {
-    const cancel = await me.call(`/api/jobs/${encodeURIComponent(job.id)}`, { method: 'DELETE' });
-    check('the job is cancelled', cancel.status === 200, `status ${cancel.status}`);
-    const back = await waitFor(async () => {
-      const now = (await me.call('/api/auth/me')).data.credits;
-      return now === credits ? now : null;
-    }, 10_000);
-    check(
-      'its credits are refunded',
-      back === credits,
-      `balance ${back ?? (await me.call('/api/auth/me')).data.credits}, was ${credits}`,
-    );
+  const done = await waitFor(async () => {
+    const jobs = (await me.call('/api/jobs')).data.jobs || [];
+    const found = jobs.find((j) => j.id === job.id);
+    return found && ['done', 'failed', 'cancelled'].includes(found.status) ? found : null;
+  }, 120_000);
+  check(
+    'the job runs to "done" on the fake provider',
+    done && done.status === 'done',
+    done ? done.status : 'timed out',
+  );
+  const library = await me.call(`/api/library?project=${id}`);
+  const items = Array.isArray(library.data) ? library.data : library.data.items || [];
+  check('the image is in the library', items.length > 0, `${items.length} items`);
+  if (items.length) {
+    const file = await me.call(`/api/library/${items[0].id}/file`);
+    check("the image's file is served", file.status === 200, `status ${file.status}`);
   }
 
   // The phone site

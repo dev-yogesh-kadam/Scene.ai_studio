@@ -1,5 +1,5 @@
 // Screenshots of pages, for the "same look" checks (not part of the test suites). The build runs in a studio of its own
-// with the same account and, with a scenario, the same content made on the fake ComfyUI. Shots taken before a change
+// with the same account and, with a scenario, the same content made by the fake v1 provider. Shots taken before a change
 // and after it are compared by look-compare.py.
 //
 //   node tests/look.mjs <out folder> <path>...      e.g. /projects  console:/users  /canvas/{ref}
@@ -12,7 +12,7 @@
 // LOOK_RUNS=talk            a conversation on the agent's board: talk, plan, ask, done
 import { writeFileSync } from 'node:fs';
 import { chromium } from '@playwright/test';
-import { startFakeComfy } from './support/fake-comfy.mjs';
+import { addToStudio, startFakeV1 } from './support/fake-v1.mjs';
 import { client, startStudio } from './support/studio.mjs';
 
 const out = process.argv[2];
@@ -130,12 +130,13 @@ function conversation(kind, made) {
 }
 
 const browser = await chromium.launch();
-const fake = process.env.LOOK_SCENARIO ? await startFakeComfy({ port: 8399, renderMs: 200 }) : null;
+const fake = process.env.LOOK_SCENARIO ? await startFakeV1({ port: 8399 }) : null;
 {
   const port = PORT;
-  const studio = await startStudio({ port, consolePort: port + 9, comfyUrl: fake ? fake.url : undefined });
+  const studio = await startStudio({ port, consolePort: port + 9 });
   try {
     await client(studio.base).call('/api/auth/register', { method: 'POST', json: account });
+    if (fake) await addToStudio(studio, fake, account, client); // the first account: an admin
     const project = process.env.LOOK_SCENARIO ? await seed(studio) : null;
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     if (process.env.LOOK_TAB)

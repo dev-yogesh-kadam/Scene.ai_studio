@@ -3,6 +3,8 @@ credits for everyone, backups, storage, and what the Overview adds."""
 
 import json
 
+import pytest
+
 from test_api import ADMIN, claude_works, console, post_job, register
 
 BOB = {"email": "bob@example.com", "password": "another one"}
@@ -49,17 +51,17 @@ def test_a_failed_job_is_explained_and_can_run_again_charged_or_free(client):
     console(client).put("/api/admin/queue", json={"paused": True})   # so the new runs stay waiting
     job = post_job(client).json()["id"]
     client.app.state.db.run("UPDATE jobs SET status = 'failed', error = ? WHERE id = ?",
-                            ("ComfyUI error in node 'KSampler': CUDA out of memory. Tried to allocate 2 GiB", job))
+                            ("No provider has a key for Seedance 2.5: add one in Servers & APIs → Providers.", job))
     detail = console(client).get("/api/admin/jobs/" + job).json()
-    assert "graphics memory" in detail["explained"]
-    assert "graphics memory" in console(client).get("/api/admin/jobs?status=failed").json()["jobs"][0]["explained"]
+    assert "No provider key in use has this model" in detail["explained"]
+    assert "No provider key in use" in console(client).get("/api/admin/jobs?status=failed").json()["jobs"][0]["explained"]
     before = client.get("/api/auth/me").json()["credits"]
     again = console(client).post("/api/admin/jobs/%s/retry" % job, json={}).json()
     assert again["credits"] == 100 and client.get("/api/auth/me").json()["credits"] == before - 100
     free = console(client).post("/api/admin/jobs/%s/retry" % job, json={"free": True}).json()
     assert free["credits"] == 0 and client.get("/api/auth/me").json()["credits"] == before - 100
     queued = client.app.state.db.one("SELECT settings, status FROM jobs WHERE id = ?", (free["id"],))
-    assert queued["status"] == "queued" and json.loads(queued["settings"])["options"]["quality"] == "high"
+    assert queued["status"] == "queued" and json.loads(queued["settings"])["options"]["resolution"] == "720p"
     assert console(client).post("/api/admin/jobs/%s/retry" % free["id"], json={}).status_code == 400   # it has not failed
 
 
@@ -151,9 +153,8 @@ def test_the_overview_lists_signups_and_warns_of_many_from_one_address(client):
     assert signups["open"] is True and signups["today"] == 3 and signups["recent"][0]["email"] == "guest1@example.com"
     assert signups["crowded"][0]["accounts"] == 3
     assert any("accounts were made from one address" in a["text"] for a in overview["attention"])
-    assert "since" in overview["server"] and overview["online"] == [] and "totals" in overview["economics"]
-    assert "since" in overview["attention"][0]["text"]                     # the render server is offline in the tests
-    assert console(client).post("/api/admin/server/check").json()["online"] is False
+    assert "server" not in overview and overview["online"] == [] and "totals" in overview["economics"]
+    assert console(client).post("/api/admin/server/check").status_code in (404, 405)   # no render server to check any more
 
 
 def test_the_overview_shows_who_is_online_and_on_which_page(client):
@@ -231,21 +232,25 @@ def test_maintenance_refuses_new_jobs_gives_their_credits_back_and_shows_its_mes
     assert "Turned on maintenance mode" in actions and "Turned off maintenance mode" in actions
 
 
-def test_the_servers_that_do_not_answer_are_problems(client, monkeypatch):
+@pytest.mark.no_models
+def test_no_models_offered_and_no_claude_are_problems(client, monkeypatch):
     import asyncio
+    import studio_models
     from scene import health
     claude_works(monkeypatch)
     register(client)
-    found = asyncio.run(health.problems(client.app.state))   # the render server is at an address nothing listens on
-    assert [p["key"] for p in found][:1] == ["render"] and found[0]["level"] == "critical"
+    found = asyncio.run(health.problems(client.app.state))   # no provider key offers any model
+    assert [p["key"] for p in found][:1] == ["models"] and found[0]["level"] == "critical"
     model = console(client).get("/api/admin/system").json()["model_server"]
     assert model["online"] is True and model["models"] == ["claude/sonnet", "claude/haiku"]
     client.app.state.agent.services = {}   # no models named: the agent can't plan
     health.forget(client.app.state, "model")
     found = asyncio.run(health.problems(client.app.state))
-    assert [p["key"] for p in found][:2] == ["render", "model"] and "claude_models" in found[1]["text"]
+    assert [p["key"] for p in found][:2] == ["models", "model"] and "claude_models" in found[1]["text"]
     attention = console(client).get("/api/admin/overview").json()["attention"]
-    assert attention[0]["text"].startswith("The render server") and "claude_models" in attention[1]["text"]
+    assert attention[0]["text"].startswith("No models are offered") and "claude_models" in attention[1]["text"]
+    studio_models.install(client.app.state)   # a provider key offers its models
+    assert [p["key"] for p in asyncio.run(health.problems(client.app.state))][:1] == ["model"]
 
 
 def test_the_watcher_sends_a_problem_found_twice_and_says_when_it_is_gone(client, monkeypatch):
@@ -259,18 +264,18 @@ def test_the_watcher_sends_a_problem_found_twice_and_says_when_it_is_gone(client
         return {}
     monkeypatch.setattr(phone, "send", fake_send)
     watcher = health.Watcher(client.app.state)
-    down = [health.problem("render", "critical", "The render server is down.", "system")]
+    down = [health.problem("models", "critical", "No models are offered.", "servers")]
 
     async def scenario():
         assert await watcher.step(down, now=1000) == []                  # once could be a hiccup
-        assert await watcher.step(down, now=1060) == [("critical", "The render server is down.")]
+        assert await watcher.step(down, now=1060) == [("critical", "No models are offered.")]
         assert await watcher.step(down, now=1120) == []                  # sent once, not every minute
-        assert await watcher.step([], now=1720) == [("resolved", "The render server answers again (after 11 min).")]
+        assert await watcher.step([], now=1720) == [("resolved", "Models are offered again (after 11 min).")]
         await watcher.http.aclose()
     asyncio.run(scenario())
-    assert sent == [("critical", "The render server is down."), ("resolved", "The render server answers again (after 11 min).")]
+    assert sent == [("critical", "No models are offered."), ("resolved", "Models are offered again (after 11 min).")]
     alerts = console(client).get("/api/admin/alerts").json()
-    assert alerts["open"] == [] and [(a["key"], a["started"], a["ended"]) for a in alerts["recent"]] == [("render", 1060, 1720)]
+    assert alerts["open"] == [] and [(a["key"], a["started"], a["ended"]) for a in alerts["recent"]] == [("models", 1060, 1720)]
 
 
 def test_phone_alerts_are_set_up_tested_and_never_show_the_token(client):
@@ -303,13 +308,13 @@ def test_an_alert_goes_to_telegram_and_ntfy_in_their_own_forms():
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http:
-            return await phone.send(http, Settings(), "critical", "The render server is down.")
+            return await phone.send(http, Settings(), "critical", "No models are offered.")
     results = asyncio.run(scenario())
     assert results == {"telegram": "it answered 403: Forbidden: bot was blocked", "ntfy": None}
     telegram, ntfy = seen
     assert str(telegram.url) == "https://api.telegram.org/bot1:tok/sendMessage"
-    assert json.loads(telegram.content) == {"chat_id": "42", "text": "Scene.ai: Critical\nThe render server is down."}
-    assert ntfy.content == b"The render server is down." and ntfy.headers["Priority"] == "5" and ntfy.headers["Title"] == "Scene.ai: Critical"
+    assert json.loads(telegram.content) == {"chat_id": "42", "text": "Scene.ai: Critical\nNo models are offered."}
+    assert ntfy.content == b"No models are offered." and ntfy.headers["Priority"] == "5" and ntfy.headers["Title"] == "Scene.ai: Critical"
 
 
 def test_the_console_hears_once_a_second_that_jobs_changed():

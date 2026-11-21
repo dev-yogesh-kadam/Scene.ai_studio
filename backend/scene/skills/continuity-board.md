@@ -10,7 +10,7 @@ words: \b(grid continuity|board continuity|continuity (board|grid|method)|stagin
 
 Every clip is a normal generation. What ties them together is one image: a numbered grid of stills from the clips made so far. The model reads it as the scene's history, and the highest panel as the state to start from. Any clip can be redone without breaking the others.
 
-**Studio:** the stills come from the film tool's keyframes (a clip of several shots: shots first, then keyframes with those "shots" and "pick" "last"; else "count"), and the grid from its board {"stills": [...], "panels": 6, "numbered": true}, which numbers, tiles and keeps the 0.4–2.5 shape itself: those are the ffmpeg_job and the ffmpeg-recipes here. On H3 Chunk the grid goes in the Extra Reference slot.
+**Studio:** the stills come from the film tool's keyframes (a clip of several shots: shots first, then keyframes with those "shots" and "pick" "last"; else "count"), and the grid from its board {"stills": [...], "panels": 6, "numbered": true}, which numbers, tiles and keeps the 0.4–2.5 shape itself: those are the ffmpeg_job and the ffmpeg-recipes here. The grid goes in the video model's numbered reference pictures, after the anchor and the sheets (its last @Image).
 
 ## First clip of a scene
 A normal generation, with no grid.

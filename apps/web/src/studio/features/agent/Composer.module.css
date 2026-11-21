@@ -338,8 +338,8 @@ filtered by the message). It floats over the conversation, just above the input.
   margin-bottom: 20px;
 }
 
-/* "Workflows for this chat": a tab for each kind, "Agent selects" first, then the generation server's models and
-ComfyUI's workflows in two sections. The tabs and "Agent selects" stay put; the list under them scrolls. */
+/* "Workflows for this chat": a tab for each kind, "Agent selects" first, then the providers' models. The tabs and
+"Agent selects" stay put; the list under them scrolls. */
 .pin-pop {
   display: flex;
   flex-direction: column;

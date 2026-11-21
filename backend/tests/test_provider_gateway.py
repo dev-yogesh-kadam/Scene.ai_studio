@@ -1,17 +1,15 @@
-"""The generation server as the studio's gateway, by keys (docs/servers.md, "Providers and keys" and "Moving off
-ComfyUI"): several keys pasted at once, what each key unlocks, What makes what with ComfyUI switched off one capability
-at a time, and the provider's voices (for Create and the agent's voices tool)."""
+"""The generation server as the studio's gateway, by keys (docs/servers.md, "Providers and keys"): several keys pasted
+at once, what each key unlocks, What makes what with a test key alone, and the provider's voices (for Create and the
+agent's voices tool). Each test with a provider adds its own (no_models): the test studio's is studio_models.py's.
+(What makes what with keys: test_providers.py.)"""
 
 import json
 
 import pytest
-from fastapi import HTTPException
 
 from fake_v1 import SEEDANCE, SPEECH, FakeV1
 from scene import agent_tools
-from scene.api import studio
 from scene.providers import registry, router as router_module
-from scene.providers.comfyui import capability_of
 from test_api import console, register
 
 TRANSCRIBE = {"id": "transcribe", "name": "Transcription", "capability": "transcribe", "best_for": "A transcript with times.",
@@ -47,6 +45,7 @@ def test_a_paste_is_read_one_key_a_line():
             registry.parse_keys(text)
 
 
+@pytest.mark.no_models
 def test_several_keys_are_checked_saved_and_labelled_and_never_given_back(client, monkeypatch):
     fake = FakeV1(models=(SEEDANCE, SPEECH, TRANSCRIBE), live=("sa_live_alpha1234", "sa_live_gamma9999"))
     fake.labels["sa_live_gamma9999"] = "Scene.ai prod · Voiceover"
@@ -75,90 +74,35 @@ def test_several_keys_are_checked_saved_and_labelled_and_never_given_back(client
     for answer in (got, again, desk.get("/api/admin/providers").json()):
         assert "alpha1234" not in json.dumps(answer) and "gamma9999" not in json.dumps(answer)
     assert desk.get("/api/admin/audit").json()["entries"][0]["action"] == "Added provider keys"
-    comfy = next(p for p in got["providers"] if p["kind"] == "comfyui")
-    assert all(k["unlocks"] == [] for k in comfy["keys"])   # a ComfyUI server's "models" are its workflows: not listed
 
 
-def test_comfyui_and_claude_keys_are_not_pasted_in_bulk(client):
+def test_on_this_pc_and_claude_keys_are_not_pasted_in_bulk(client):
     register(client)
     desk = console(client)
-    comfy = next(p for p in desk.get("/api/admin/providers").json()["providers"] if p["kind"] == "comfyui")
-    answer = desk.post("/api/admin/providers/keys/many", json={"provider_id": comfy["id"], "text": "sa_live_alpha1234"})
-    assert answer.status_code == 400 and "one at a time" in answer.json()["detail"]
+    kinds = {p["kind"]: p for p in desk.get("/api/admin/providers").json()["providers"]}
+    answer = desk.post("/api/admin/providers/keys/many", json={"provider_id": kinds["claude_local"]["id"], "text": "sa_live_alpha1234"})
+    assert answer.status_code == 400 and "has no key" in answer.json()["detail"]
+    answer = desk.post("/api/admin/providers/keys/many", json={"provider_id": kinds["local_tools"]["id"], "text": "sa_live_alpha1234"})
+    assert answer.status_code == 400 and "needs no key" in answer.json()["detail"]
 
 
 # ---------------------------------------------------------------- what makes what
 
-def test_the_comfyui_workflows_are_sorted_into_finer_capabilities():
-    assert [capability_of(w) for w in ("video/h3_all_in_one", "video/video_ltx2_5_t2v", "video/video_v2v_wan_vace",
-                                       "video/video_outpaint_wan_vace", "video/video_wan_animate2",
-                                       "video/talking_head_narration", "video/video_lipsync", "audio/audio_transcribe",
-                                       "audio/audio_separate_voice", "upscaler/utility_seedvr2_3b_int8_upscale_video")] == [
-        "text_to_video", "text_to_video", "video_to_video", "outpaint", "animate", "talking_head", "lip_sync",
-        "transcribe", "separate_voice", "upscale_video"]
-
-
-def test_comfyui_is_switched_off_for_a_capability_only_while_a_live_key_makes_it(client, monkeypatch):
-    fake = FakeV1(models=(SEEDANCE, SPEECH, TRANSCRIBE))
-    through(monkeypatch, fake)
-    register(client)
-    desk = console(client)
-    add_key(desk, "sa_live_alpha1234", label="All")
-    state = client.app.state
-
-    def row(answer, capability="transcribe"):
-        return next(r for r in answer["capabilities"] if r["capability"] == capability)
-
-    seen = row(desk.get("/api/admin/providers/capabilities").json())
-    assert [m["id"] for m in seen["models"]] == ["transcribe"] and seen["live"] is True
-    assert "audio/audio_transcribe" in [w["id"] for w in seen["comfy"]]
-    assert (seen["state"], seen["comfyui_on"], seen["can_switch_off"]) == ("comfyui", True, False)
-    assert "router is not on" in seen["why_not"]
-    refused = desk.put("/api/admin/providers/capabilities/transcribe", json={"comfyui": False})
-    assert refused.status_code == 400 and "router is not on" in refused.json()["detail"]
-    assert desk.put("/api/admin/providers/capabilities/flying", json={"comfyui": True}).status_code == 404
-    assert desk.put("/api/admin/providers/capabilities/transcribe", json={"comfyui": "no"}).status_code == 400
-
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
-    seen = row(desk.get("/api/admin/providers/capabilities").json())
-    assert (seen["state"], seen["can_switch_off"]) == ("both", True)
-    nothing = row(desk.get("/api/admin/providers/capabilities").json(), "outpaint")
-    assert nothing["models"] == [] and "No provider key" in nothing["why_not"]   # only ComfyUI does it: it stays
-
-    answer = desk.put("/api/admin/providers/capabilities/transcribe", json={"comfyui": False}).json()
-    assert (row(answer)["state"], row(answer)["comfyui_on"]) == ("provider", False)
-    assert state.credits.enabled("audio/audio_transcribe") is False
-    assert state.credits.enabled("audio/audio_separate_voice") is True   # another capability: still ComfyUI's
-    assert state.credits.enabled("audio/@transcribe") is True   # the provider's own model
-    assert state.credits.enabled_of(["audio/audio_transcribe", "audio/audio_separate_voice"]) == {"audio/audio_separate_voice"}
-    with pytest.raises(HTTPException) as refused:
-        studio.switched_on(state, "audio/audio_transcribe", None)
-    assert "Transcription is no longer made on ComfyUI" in refused.value.detail
-
-    desk.put("/api/admin/providers/router", json={"mode": "off"})   # the router off: ComfyUI makes everything again
-    assert state.credits.enabled("audio/audio_transcribe") is True
-    assert row(desk.get("/api/admin/providers/capabilities").json())["state"] == "comfyui"
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
-    assert state.credits.enabled("audio/audio_transcribe") is False   # the choice was kept
-    desk.put("/api/admin/providers/capabilities/transcribe", json={"comfyui": True})
-    assert state.credits.enabled("audio/audio_transcribe") is True
-    assert [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]][:1] == ["Switched ComfyUI on for a capability"]
-
-
-def test_a_test_key_alone_does_not_let_comfyui_go(client, monkeypatch):
+@pytest.mark.no_models
+def test_a_model_only_a_test_key_has_is_marked(client, monkeypatch):
     fake = FakeV1(live=(), test=("sa_test_beta5678",))
     through(monkeypatch, fake)
     register(client)
     desk = console(client)
     add_key(desk, "sa_test_beta5678")
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
     seen = next(r for r in desk.get("/api/admin/providers/capabilities").json()["capabilities"] if r["capability"] == "text_to_video")
-    assert seen["live"] is False and seen["can_switch_off"] is False and "Only test keys" in seen["why_not"]
+    assert seen["state"] == "provider" and seen["live"] is False
     assert [k["mode"] for k in seen["models"][0]["keys"]] == ["test"]
 
 
 # ---------------------------------------------------------------- voices
 
+@pytest.mark.no_models
 def test_the_providers_voices_are_listed_for_anyone_signed_in(client, monkeypatch):
     fake = FakeV1()
     through(monkeypatch, fake)

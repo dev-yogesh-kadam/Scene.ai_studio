@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 
-from . import aftercare, backup, claude, claude_connection, endpoints, generation_models, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault, versions
+from . import aftercare, backup, claude, claude_connection, endpoints, health, langfuse_trace, media, motion, phone_site, roles, semantic, sequence, shared, staff, traces, vault
 from .agent import Agent, AgentError
 from .api import admin, auth, bulk, client_errors, console as console_api, film, film_ops, kit as kit_api, library, mobile, plans as plans_api, providers as providers_api, runs, shares, studio, workspace
 from .catalog import Catalog
@@ -24,7 +24,6 @@ from .providers import registry as provider_registry
 from .providers.router import Router
 from .providers.workflows import ProviderWorkflows
 from .comfy import workflows
-from .comfy.client import ComfyError
 from .config import load_settings
 from .credits import Credits
 from .db import as_everyone, open_database
@@ -224,13 +223,10 @@ def create_app(settings=None):
     with as_everyone():
         vault.seal_stored(db)   # secrets saved before they were encrypted
     endpoints.seed(db, settings)   # the servers and APIs of the console's Servers section
-    provider_registry.seed(db, settings)   # the providers and keys (migration 0015), ComfyUI's kept in step with endpoints
-    comfy_pool = endpoints.ComfyPool(db, settings.comfy_url)
-    comfy = comfy_pool.main
+    provider_registry.seed(db, settings)   # the providers and keys (migrations 0015-0019): where every model comes from
     staff.configure(db)   # the console's roles as an admin last saved them
-    catalog = Catalog(settings.path("workflows_dir"), comfy, storage / "cache" / "node_definitions.json")
-    catalog.providers = ProviderWorkflows(db)   # the providers' models, offered as workflows while the router is on
-    router = Router(db, settings, catalog, comfy_pool)   # which provider and key run each provider model
+    catalog = Catalog(ProviderWorkflows(db))   # the providers' models, offered as workflows
+    router = Router(db, settings)   # which provider and key run each model
     credits = Credits(db, settings)
     # The agent tabs' Claude sessions run in a folder of the studio's storage that never changes (Claude Code finds a
     # session by its folder), with either connection (Claude on this PC, an API key).
@@ -306,12 +302,10 @@ def create_app(settings=None):
     async def lifespan(app):
         quiet_resets(asyncio.get_running_loop())
         hub.loop = asyncio.get_running_loop()
-        app.state.jobs = JobManager(db, comfy, catalog, credits, app.state.outputs, notify, storage / "tmp", settings.node_path,
+        app.state.jobs = JobManager(db, catalog, credits, app.state.outputs, notify, storage / "tmp", settings.node_path,
                                     storage / "assets")
-        app.state.jobs.pool = comfy_pool
-        app.state.jobs.router = router   # the providers' models (and, in shadow mode, what it would pick for the rest)
+        app.state.jobs.router = router   # which provider and key make each job
         app.state.jobs.storage = app.state.storage   # where the files jobs use are kept (references.keep_reference)
-        app.state.jobs.hold_offline = settings.hold_queue_offline
         app.state.jobs.agent = agent   # writes the captions some image models need, just before they render
         app.state.jobs.langfuse = app.state.traces.langfuse   # each finished job, as a span of its turn in Langfuse
         aftercare.install(app.state)   # a shot the agent planned is checked once it is made, with its panel open or not
@@ -340,7 +334,6 @@ def create_app(settings=None):
         db.serving = False
         for worker in workers + list(app.state.plans.tasks.values()):   # a plan goes on after the next start
             worker.cancel()
-        await comfy_pool.close()
         await claude.close_all()   # the conversations' live Claude Code programs
         db.close()
 
@@ -349,10 +342,7 @@ def create_app(settings=None):
     app.state.settings = settings
     app.state.db = db
     app.state.tell_plans = app_tell_plans
-    app.state.comfy = comfy
-    app.state.comfy_pool = comfy_pool
     app.state.router = router
-    app.state.generation_models = generation_models.ModelList(comfy_pool)   # the generation server's models (its own list)
     app.state.catalog = catalog
     app.state.hub = hub
     app.state.credits = credits
@@ -382,33 +372,20 @@ def create_app(settings=None):
     app.state.storage_dir = storage
     app.state.output_dir = settings.path("output_dir") if settings.output_dir else storage / "outputs"
     app.state.outputs = Outputs(app.state.output_dir, db)
-    # Where the media are kept for good (storage.py): these folders, or Azure Blob Storage with these folders its cache.
+    # Where the media are kept (storage.py): these folders, one per kind.
     app.state.storage = stores.open_storage(settings, {"outputs": app.state.output_dir, "posters": app.state.output_dir,
                                                          "kit": app.state.assets_dir, "showcase": app.state.showcase_dir,
                                                          "references": storage / "references"})
-    app.state.outputs.storage = stores.ACTIVE = app.state.storage
-    media.on_removed = app.state.outputs.forget   # a result deleted here is deleted there too
-    media.on_made = app.state.outputs.keep        # and a poster made here is kept there
-    app.state.versions = versions.Shelf(db, catalog, storage / "workflow_versions")
     agent.recorder = app.state.traces = traces.Recorder(db, storage / "agent_calls")   # every call to its models
     app.state.traces.langfuse = langfuse_trace.Sender(db, credits)
     roles.apply(db, agent)   # the models an admin chose in the console for the agent's roles, over config.json
-    with as_everyone():
-        versions.look(app.state)   # what arrived while the app was stopped
     app.state.backup_dir = settings.path("backup_dir") if settings.backup_dir else storage / "backups"
     # The files a lost disk would take with it: the finished work, the kit's uploads, the motion projects and film pages
     # (pages.root). Copied into files/ beside the backups.
     app.state.backup_files = {"outputs": app.state.output_dir, "assets": app.state.assets_dir, "showcase": app.state.showcase_dir,
                               "motion": storage / "motion", "references": storage / "references"}
-    # Whether the render server answered the last time anyone asked, and since when that has been so.
-    app.state.server_seen = {"online": None, "since": time.time()}
-    app.state.model_seen = {"online": None, "since": time.time()}   # the same for the agent's model, Claude (health.py)
-
-    def saw_server(online):
-        seen = app.state.server_seen
-        if seen["online"] is not online:
-            seen.update(online=online, since=time.time())
-    app.state.saw_server = saw_server
+    # Whether the agent's model, Claude, answered the last time anyone asked, and since when that has been so (health.py).
+    app.state.model_seen = {"online": None, "since": time.time()}
 
     @app.middleware("http")
     async def no_console_here(request, call_next):
@@ -475,13 +452,12 @@ def _answer_errors(app):
     @app.exception_handler(motion.MotionError)
     @app.exception_handler(sequence.SequenceError)
     @app.exception_handler(AgentError)
-    @app.exception_handler(ComfyError)
     async def known_error(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
     @app.exception_handler(httpx.HTTPError)
-    async def comfy_unreachable(request, exc):
-        return JSONResponse({"detail": "The render server (ComfyUI) can't be reached right now."}, status_code=502)
+    async def unreachable(request, exc):
+        return JSONResponse({"detail": "A service the studio uses can't be reached right now."}, status_code=502)
 
     @app.exception_handler(RequestValidationError)
     async def wrong_fields(request, exc):

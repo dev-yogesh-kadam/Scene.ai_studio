@@ -1,22 +1,19 @@
-"""Workflow handling for Scene.ai.
+"""The studio's workflow format: a graph of nodes and a profile of presets, which every model is offered in (a provider's
+model is made one by providers/workflows.build). From it: the controls and reference slots the studio can show
+(describe), the settings presets and estimates look at (context), and the input of one job (build_prompt).
 
-Reads ComfyUI workflows in either format (the normal "UI" save or the API export), finds the
-controls and reference slots the studio can show, and builds the graph sent to ComfyUI for one job.
-An optional "<name>.studio.json" file next to a workflow adds presets, time estimates and hints.
+The format began as ComfyUI's, whose workflow files the studio once read and ran; those files are archived
+(workflows/archive/) and the code that read them went with ComfyUI.
 """
 
 import copy
-import json
 import random
 import re
-from pathlib import Path
 
 # Short edge -> long edge for 16:9 / 9:16. All sizes are multiples of 32, as H3 needs.
 LONG_EDGE = {480: 864, 720: 1280, 768: 1344, 1080: 1920}
 SHORT_EDGE = {480: 480, 720: 736, 768: 768, 1080: 1088}
 
-CONTROL_AFTER_GENERATE = {"fixed", "increment", "decrement", "randomize"}
-NOTE_TYPES = {"Note", "MarkdownNote"}
 PRIMITIVES = {
     "PrimitiveStringMultiline": "text",
     "PrimitiveString": "string",
@@ -68,210 +65,7 @@ def _is_link(value):
 
 # ---------------------------------------------------------------- loading
 
-def load_workflow(path, object_info=None, workflow_id=None, sidecar=None):
-    """Read a workflow file. Returns {"id", "nodes", "info", "profile", "approximate"}.
-
-    "nodes" is the graph in API format, including bypassed nodes. "info" holds what the API format
-    can't: each node's mode (0 on, 2 muted, 4 bypassed) and socket types, used by finalize().
-    """
-    path = Path(path)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise WorkflowError("Can't read {}: {}".format(path.name, e))
-    approximate = False
-    if isinstance(data, dict) and isinstance(data.get("nodes"), list):
-        nodes, info, approximate = _from_ui(data, object_info)
-    elif isinstance(data, dict) and data and all(isinstance(v, dict) and "class_type" in v for v in data.values()):
-        nodes, info = data, {}
-    else:
-        raise WorkflowError("{} is not a ComfyUI workflow.".format(path.name))
-
-    profile = {}
-    sidecar = Path(sidecar) if sidecar else path.with_name(path.stem + ".studio.json")
-    if sidecar.is_file():
-        try:
-            profile = json.loads(sidecar.read_text(encoding="utf-8"))
-        except ValueError as e:
-            raise WorkflowError("Can't read {}: {}".format(sidecar.name, e))
-    return {"id": workflow_id or path.stem, "nodes": nodes, "info": info, "profile": profile, "approximate": approximate}
-
-
-GENERATION_NODES = ("GenerationVideo", "GenerationImage", "GenerationSpeech", "GenerationMusic", "GenerationSoundEffect",
-                    "GenerationLipsync", "GenerationUpscale",   # the generation server's own nodes: its models, not a workflow's
-                    "ProviderJob")   # a provider's model offered as a workflow (providers/workflows.py): a model too
-DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
-WIDGET_TYPES = ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO")
-_UNBOUND = object()
-
-
-def _from_ui(data, object_info):
-    """Turn a ComfyUI save into API format. Subgraphs are unpacked: a node inside the subgraph
-    instance 105 gets the id "105:<inner id>", the same naming ComfyUI's own API export uses."""
-    subgraphs = {s["id"]: s for s in (data.get("definitions") or {}).get("subgraphs") or []}
-    state = {"nodes": {}, "info": {}, "approximate": False, "alias": {}}
-    _add_graph(data["nodes"], data.get("links") or [], "", {}, subgraphs, object_info, state, 0)
-    # A link to a subgraph's output now points at the node inside that produces it.
-    for node in state["nodes"].values():
-        for name, value in list(node["inputs"].items()):
-            for _ in range(10):
-                if not _is_link(value) or (str(value[0]), value[1]) not in state["alias"]:
-                    break
-                value = state["alias"][(str(value[0]), value[1])]
-            if value is None:
-                del node["inputs"][name]
-            else:
-                node["inputs"][name] = value
-    return state["nodes"], state["info"], state["approximate"]
-
-
-def _add_graph(node_list, link_list, prefix, outer, subgraphs, object_info, state, depth):
-    """Add one graph's nodes. `outer` maps a subgraph input slot to what feeds it from outside:
-    a link, or a plain value set on the subgraph node."""
-    if depth > 8:
-        raise WorkflowError("This workflow nests subgraphs too deeply.")
-    links = {}
-    for link in link_list:
-        if isinstance(link, dict):
-            links[link["id"]] = (link["origin_id"], link["origin_slot"])
-        else:
-            links[link[0]] = (link[1], link[2])
-
-    for n in node_list:
-        nid, ntype = prefix + str(n["id"]), n.get("type")
-        if ntype in NOTE_TYPES:
-            continue
-        if ntype == "PrimitiveNode":  # old-style value node: its value is copied into whatever it feeds
-            state["info"][nid] = {"literal": (n.get("widgets_values") or [None])[0]}
-            continue
-        ins = n.get("inputs") or []
-        inputs = {}
-        for i in ins:
-            if i.get("link") in links:
-                origin, slot = links[i["link"]]
-                value = outer.get(slot, _UNBOUND) if origin == -10 else [prefix + str(origin), slot]
-                if value is not _UNBOUND:
-                    inputs[i["name"]] = value
-
-        if ntype in subgraphs:
-            if n.get("mode", 0) != 0:
-                continue  # a muted or bypassed subgraph contributes nothing
-            graph = subgraphs[ntype]
-            named = n.get("widgets_values_named")
-            if not isinstance(named, dict):  # values are listed in the order of the subgraph's value inputs
-                names = [i["name"] for i in graph.get("inputs", []) if i.get("type") in WIDGET_TYPES]
-                named = dict(zip(names, n.get("widgets_values") or []))
-            bindings = {}
-            for index, graph_input in enumerate(graph.get("inputs", [])):
-                name = graph_input["name"]
-                if name in inputs:
-                    bindings[index] = inputs[name]
-                elif named.get(name) is not None:
-                    bindings[index] = named[name]
-            _add_graph(graph.get("nodes", []), graph.get("links", []), nid + ":", bindings, subgraphs, object_info, state, depth + 1)
-            for link in graph.get("links", []):
-                if isinstance(link, dict) and link["target_id"] == -20:
-                    inside = bindings.get(link["origin_slot"]) if link["origin_id"] == -10 \
-                        else ["{}:{}".format(nid, link["origin_id"]), link["origin_slot"]]
-                    state["alias"][(nid, link["target_slot"])] = inside
-            continue
-
-        widgets, exact = _widget_values(n, object_info)
-        state["approximate"] = state["approximate"] or not exact
-        for name, value in widgets.items():
-            inputs.setdefault(name, value)
-        state["nodes"][nid] = {"class_type": ntype, "inputs": inputs}
-        if n.get("title"):
-            state["nodes"][nid]["_meta"] = {"title": n["title"]}
-        state["info"][nid] = {
-            "mode": n.get("mode", 0),
-            "virtual": ntype == "Reroute",
-            "ins": [(i["name"], i.get("type")) for i in ins],
-            "outs": [o.get("type") for o in n.get("outputs") or []],
-        }
-
-
-def _widget_values(node, object_info):
-    """Map a UI node's widgets_values list to input names. Returns (values, exact)."""
-    values = node.get("widgets_values")
-    if not values:
-        return {}, True
-    if isinstance(values, dict):
-        return {k: v for k, v in values.items() if v is not None}, True
-    embedded = [(i["name"], i.get("type")) for i in node.get("inputs") or [] if "widget" in i]
-    out, complete = _assign(embedded, values)
-    if complete:
-        return out, True
-    if object_info and node.get("type") in object_info:
-        # Values left over: the definitions in hand do not fit the node as it was saved (a node list saved from an older
-        # ComfyUI). The job could then go out without a setting the node needs, as video_minimax_h3_i2v's save node
-        # once went without its "format"; marked as guessed, the catalog fetches the definitions afresh.
-        return _assign(_widgets_from_info(object_info[node["type"]]), values)
-    if embedded:
-        return out, False
-    raise WorkflowError(
-        "Can't read the settings of node '{}'. Start ComfyUI so the studio can look the node up, "
-        "or export this workflow with Workflow > Export (API).".format(node.get("title") or node.get("type")),
-        needs_info=True)
-
-
-def _assign(widgets, values):
-    out, pos = {}, 0
-    widgets = list(widgets)
-    while widgets:
-        name, wtype = widgets.pop(0)
-        if pos >= len(values):
-            break
-        value = values[pos]
-        pos += 1
-        # Seed-like numbers are followed by a "fixed / randomize" value that is not a node input.
-        if wtype in ("INT", "FLOAT") and pos < len(values) and isinstance(values[pos], str) \
-                and values[pos] in CONTROL_AFTER_GENERATE:
-            pos += 1
-        # A dynamic combo is followed by the widgets of the option that is chosen, named "<combo>.<widget>".
-        if isinstance(wtype, list):
-            chosen = next((o for o in wtype if o.get("key") == value), None)
-            if chosen:
-                widgets[:0] = _widgets_from_info(chosen, name + ".")
-        if value is None or str(wtype).endswith("UPLOAD"):
-            continue
-        out[name] = value
-    return out, not any(v is not None for v in values[pos:])
-
-
-def _is_dynamic_combo(wtype, opts):
-    """A dynamic combo by its shape, whatever ComfyUI's name for its type ("COMFY_DYNAMICCOMBO_V3" now): a list of
-    options, each {"key": ..., "inputs": ...}. A type not known here is skipped, and a skipped "format" fails the save."""
-    options = opts.get("options")
-    return str(wtype).startswith("COMFY_DYNAMICCOMBO") or (
-        wtype not in WIDGET_TYPES and isinstance(options, list) and bool(options)
-        and all(isinstance(o, dict) and "key" in o for o in options))
-
-
-def _widgets_from_info(node_info, prefix=""):
-    """The widgets of a node (or of one dynamic combo option), in order. A dynamic combo's type is its option list."""
-    inputs = node_info.get("input") or node_info.get("inputs") or {}
-    spec = {}
-    for group in ("required", "optional"):
-        spec.update(inputs.get(group) or {})
-    order = [n for group in ("required", "optional") for n in (node_info.get("input_order", {}).get(group) or [])]
-    widgets = []
-    for name in order or list(spec):
-        entry = spec.get(name)
-        if not entry:
-            continue
-        wtype = entry[0]
-        opts = entry[1] if len(entry) > 1 and isinstance(entry[1], dict) else {}
-        if isinstance(wtype, list):
-            wtype = "COMBO"
-        if wtype == DYNAMIC_COMBO or _is_dynamic_combo(wtype, opts):
-            wtype = opts.get("options") or []
-        elif wtype not in ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO") or opts.get("forceInput"):
-            continue
-        widgets.append((prefix + name, wtype))
-        if opts.get("image_upload") or opts.get("video_upload") or opts.get("audio_upload"):
-            widgets.append(("upload", "IMAGEUPLOAD"))
-    return widgets
+GENERATION_NODES = ("ProviderJob",)   # a provider's model offered as a workflow (providers/workflows.py): a model
 
 
 def finalize(nodes, info, enabled=(), disabled=()):
@@ -473,6 +267,13 @@ def describe(wf):
         }
 
     confirm = profile.get("confirm") or []
+    provider = profile.get("provider") or {}
+    resolution_option = None
+    if provider:   # its Resolution option, by the resolution each choice is: {"id", "by": {720: "720p"}}
+        option = next((o for o in profile.get("options", []) if o["id"] == "resolution"), None)
+        by = {int(found.group(1)): c["id"] for c in (option or {}).get("choices", [])
+              for found in [re.match(r"^(\d{3,4})p$", str(c["id"]))] if found}
+        resolution_option = {"id": option["id"], "by": by} if by else None
     slots = {}
     for slot, words in SLOT_WORDS.items():
         match = next((r["id"] for r in refs if words in r["label"].lower()), None)
@@ -485,9 +286,10 @@ def describe(wf):
         "description": profile.get("description", ""),
         # When to pick this workflow over the others of its kind (the presets file's "pick_when"), for the agent.
         "pick_when": str(profile.get("pick_when") or ""),
-        # Where it is made: "generation" for the generation server's models (its own nodes, generation_models.py),
-        # "comfy" for a ComfyUI workflow. The two are told apart everywhere they are offered.
+        # Where it is made: "generation" for a provider's model (its one ProviderJob node, providers/workflows.py).
         "source": "generation" if any(str(n.get("class_type") or "") in GENERATION_NODES for n in nodes.values()) else "comfy",
+        # The lengths its model makes ({"min", "max"} seconds, as its provider says), or {} when it does not say.
+        "seconds": dict(((profile.get("provider") or {}).get("limits") or {}).get("seconds") or {}),
         "controls": controls,
         "refs": refs,
         "options": [final_first(o) for o in profile.get("options", [])],
@@ -501,7 +303,12 @@ def describe(wf):
         # It takes a seed: a new random one on every job, unless one is given (a fixed seed, "Reuse seed").
         "seeded": bool(targets) or "seed" in roles,
         "max_clips": MAX_CLIPS,
-        "resolutions": sorted(SHORT_EDGE),
+        "resolutions": sorted(resolution_option["by"]) if resolution_option else [] if provider else sorted(SHORT_EDGE),
+        # A provider's model whose Resolution is an option ("480p", "720p", "1080p"): which choice each resolution is.
+        "resolution_option": resolution_option,
+        "capability": str(provider.get("capability") or ""),   # a provider's model's kind of work (text_to_video, music …)
+        # The most characters its prompt takes, as its provider says (Seedance: 10,000); 0 when not said.
+        "prompt_chars": int(provider.get("prompt_chars") or 0),
         "approximate": wf["approximate"],
         # The presets file says the prompt may be left empty: the workflow has its own instruction, the prompt only adds notes.
         "prompt_optional": bool(profile.get("prompt_optional")),
@@ -556,8 +363,9 @@ def ref_naming(profile, image_refs):
     said = " ".join(hints)
     make = next((make for pattern, make in REF_TOKENS if pattern.search(said)), None) if image_refs else None
     tokens = [make(n) for n in range(1, len(image_refs) + 1)] if make else []
-    if image_refs and all(r.get("tag") for r in image_refs):   # a list of references says how each is named
-        tokens = [r["tag"] for r in image_refs]
+    listed = [r for r in image_refs if r.get("order")]   # a list of references (a provider's: its first and last frame aside)
+    if listed and all(r.get("tag") for r in listed):   # ...says how each is named
+        tokens = [r["tag"] for r in listed]
     money = NOT_FOR_MONEY.search(" ".join(hints + [str(profile.get("description", ""))]))
     return {"tokens": tokens, "unique": len(set(tokens)) == len(tokens),
             "hint": next((h for h in hints if REF_HINT.search(h)), "") if image_refs else "",

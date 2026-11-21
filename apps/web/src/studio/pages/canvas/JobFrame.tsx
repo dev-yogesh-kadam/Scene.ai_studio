@@ -64,9 +64,7 @@ export const JobFrame = memo(function JobFrame({
       <div className={s.slate}>
         <b>{job.workflow.split('/')[0]}</b>
         {/* words only while it waits (its place in the queue); while it runs, the clock and the animation are enough */}
-        <span>
-          {waiting ? (job.waiting_for_server ? 'waiting for the render server' : `position ${job.position}`) : ''}
-        </span>
+        <span>{waiting ? `position ${job.position}` : ''}</span>
       </div>
     </div>
   );
@@ -99,7 +97,7 @@ function FailedFrame({ job, spot, admin }: { job: CanvasJob; spot: Spot; admin: 
   );
 }
 
-/** What a failed job was asked to make and what became of it. An admin also sees the render server's own words. */
+/** What a failed job was asked to make and what became of it. An admin also sees the provider's own words. */
 function failedDetails(job: CanvasJob, admin: boolean) {
   const st = (job.settings ?? {}) as {
     resolution?: number;
@@ -139,7 +137,7 @@ function failedDetails(job: CanvasJob, admin: boolean) {
         </dl>
         {admin && job.error ? (
           <details className={css('failed-raw')}>
-            <summary>What the render server said</summary>
+            <summary>What the provider said</summary>
             <pre>{job.error}</pre>
           </details>
         ) : null}

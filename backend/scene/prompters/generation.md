@@ -1,10 +1,10 @@
 id: generation
-title: Generation server models (Kling, Seedance, Wan 3, Gemini, Grok, Happy Horse, Nano Banana, GPT Image, Seedream)
-workflows: ^(video|image)/generation_(?!minimax_h3)
+title: The providers' other video and picture models (Kling, Gemini, Grok, Happy Horse, FLUX 3, Nano Banana, GPT Image, Seedream, Ideogram)
+workflows: ^(video|image)/@(?!minimax_h3|seedance_|wan_3_0)
 length: 50 to 180 words
 limit: 400
 ---
-These models run on the provider through the generation server; each workflow's prompt_tips say what its own model
+These models run on a provider (Studio_automation); each workflow's prompt_tips say what its own model
 takes (lengths, shapes, frames, references) and win over this guide. Write plain prose, the most important first:
 the subject and how it looks → what happens (a video: one action, in the order it happens; a picture: the moment) →
 the place → framing, angle and camera move → the light → the style and finish. Say what is there, never what is not.

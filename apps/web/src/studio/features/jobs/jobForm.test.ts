@@ -7,11 +7,8 @@ import {
   newForm,
   offered,
   optionsShown,
-  pickValue,
-  pickerGroups,
-  splitPick,
+  pickerEntries,
   warningsOf,
-  withModel,
   type Workflow,
 } from './jobForm';
 
@@ -162,108 +159,22 @@ describe('options some choices leave out', () => {
   });
 });
 
-// ---------------------------------------------------------------- the generation server's models
+// ---------------------------------------------------------------- the providers' models
 
-const gen: Workflow = {
-  ...wf,
-  id: 'video/generation_video',
-  title: 'Generation video',
-  source: 'generation',
-  options: [
-    {
-      id: 'model',
-      label: 'Model',
-      default: 'minimax_h3_max',
-      top: true,
-      choices: [
-        { id: 'minimax_h3_max', label: 'MiniMax H3 Max' },
-        { id: 'kling_3_0_standard', label: 'Kling 3.0 Standard' },
-      ],
-    },
-  ],
-  refs: [
-    { id: 'first', label: 'First frame', kind: 'image', optional: true },
-    { id: 'last', label: 'Last frame', kind: 'image', optional: true },
-    { id: 'ref_1', label: 'Reference image 1', kind: 'image', optional: true, order: 1 },
-    { id: 'ref_2', label: 'Reference image 2', kind: 'image', optional: true, order: 2 },
-  ],
-  slots: { first_frame: 'first', last_frame: 'last' },
-  models: [
-    {
-      model: 'minimax_h3_max',
-      name: 'MiniMax H3 Max',
-      about: '',
-      resolutions: ['480p'],
-      shapes: ['16:9'],
-      sound: 'always',
-      frames: ['first', 'last'],
-      seconds: { min: 5, max: 15 },
-      references: 1,
-    },
-    {
-      model: 'kling_3_0_standard',
-      name: 'Kling 3.0 Standard',
-      about: '',
-      resolutions: ['720p'],
-      shapes: ['16:9'],
-      sound: 'fixed',
-      frames: ['first'],
-      seconds: { min: 3, max: 10 },
-      references: 0,
-    },
-  ],
-};
-
-describe("the generation server's models", () => {
-  it('are offered apart from the ComfyUI workflows, one by one', () => {
-    const groups = pickerGroups([
-      { id: 'video/h3', kind: 'video', title: 'H3', source: 'comfy' },
-      {
-        id: 'video/generation_video',
-        kind: 'video',
-        title: 'Generation video',
-        source: 'generation',
-        models: [
-          { id: 'minimax_h3_max', label: 'MiniMax H3 Max' },
-          { id: 'kling_4_0', label: 'Kling 4' },
-        ],
-      },
+describe("the providers' models", () => {
+  it('are offered one by one, each a workflow of its own', () => {
+    const entries = pickerEntries([
+      { id: 'video/@seedance_2_5', kind: 'video', title: 'Seedance 2.5', source: 'generation', provider: true },
+      { id: 'video/@kling_4_0', kind: 'video', title: 'Kling 4', source: 'generation', provider: true },
     ]);
-    expect(groups.map((g) => g.label)).toEqual(['Workflows (ComfyUI)', 'Models (generation server)']);
-    expect(groups[0].entries.map((e) => e.value)).toEqual(['video/h3']);
-    expect(groups[1].entries.map((e) => e.value)).toEqual([
-      'video/generation_video#minimax_h3_max',
-      'video/generation_video#kling_4_0',
-    ]);
-    expect(splitPick('video/generation_video#kling_4_0')).toEqual(['video/generation_video', 'kling_4_0']);
-    expect(splitPick('video/h3')).toEqual(['video/h3', null]);
-    expect(pickValue(gen, { model: 'kling_3_0_standard' })).toBe('video/generation_video#kling_3_0_standard');
-    expect(pickValue(wf, { mode: 'text' })).toBe('video/h3');
-    // a generation workflow with no Model setting (lip sync, a voiceover …) is one model of its own
-    const solo = pickerGroups([
-      { id: 'video/generation_lipsync', kind: 'video', title: 'Generation lip sync', source: 'generation' },
-    ]);
-    expect(solo).toEqual([
-      {
-        label: 'Models (generation server)',
-        entries: [{ value: 'video/generation_lipsync', label: 'Generation lip sync' }],
-      },
+    expect(entries).toEqual([
+      { value: 'video/@seedance_2_5', label: 'Seedance 2.5' },
+      { value: 'video/@kling_4_0', label: 'Kling 4' },
     ]);
   });
 
-  it("keep the length within the chosen model's range", () => {
-    expect(lengthChoices(gen, { model: 'minimax_h3_max' }, 5)).toEqual([5, 10, 15]);
-    expect(lengthChoices(gen, { model: 'kling_3_0_standard' }, 5)).toEqual([3, 5, 10]);
-    expect(lengthChoices(wf, { mode: 'text' }, 7)).toEqual([5, 7, 10, 15]);
-    const moved = withModel(gen, { model: 'minimax_h3_max' }, { d: 15 }, 'kling_3_0_standard');
-    expect(moved).toEqual({ options: { model: 'kling_3_0_standard' }, values: { d: 10 } });
-  });
-
-  it("show only the model's own frames and references", () => {
-    const h3 = { model: 'minimax_h3_max' };
-    const kling = { model: 'kling_3_0_standard' };
-    expect(gen.refs.filter((r) => inUse(r, h3, gen)).map((r) => r.id)).toEqual(['first', 'last', 'ref_1']);
-    expect(gen.refs.filter((r) => inUse(r, kling, gen)).map((r) => r.id)).toEqual(['first']);
-    expect(gen.refs.filter((r) => inUse(r, kling)).length).toBe(4); // without the workflow: the presets file alone
+  it('offer 5, 10 and 15 seconds and the length set now', () => {
+    expect(lengthChoices(5)).toEqual([5, 10, 15]);
+    expect(lengthChoices(7)).toEqual([5, 7, 10, 15]);
   });
 });

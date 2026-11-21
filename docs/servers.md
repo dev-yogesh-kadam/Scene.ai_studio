@@ -1,19 +1,28 @@
 # Servers and folders on the studio PC
 
-Scene.ai talks to a render server, and to Anthropic's Claude models for the agent. All of it is set in
-`config.json` in the repo root. That file is ignored by git, so it has to be set on every machine
-the app runs on, and it is where the secret keys are: **do not open, print or copy it**; change single
-lines of it, and check the models with `scripts/check_models.py`.
+Scene.ai makes everything with **providers**: Studio_automation (the generation server) over the Scene Provider API v1,
+and **On this PC**, the studio's own tools. The agent's models are Anthropic's Claude. The settings are in `config.json`
+in the repo root. That file is ignored by git, so it has to be set on every machine the app runs on, and it is where the
+secret keys are: **do not open, print or copy it**; change single lines of it, and check the models with
+`scripts/check_models.py`.
 
-| Server | Address | `config.json` key | Where it runs |
+| Service | Address | Set in | Where it runs |
 |---|---|---|---|
-| ComfyUI (rendering) | `http://100.123.221.34:8188` | `comfy_url` | The Windows render PC (Zoro), reached over Tailscale |
-| Generation server (provider videos, pictures, sound) | `http://100.71.159.106:8189` | the console (Servers & APIs → Providers): one `sa_live_…` key per model or kind of work | This PC (LUFI), `D:\Studio_automation`: the Scene Provider API v1, and ComfyUI's API while the router is off. The studio's way to everything it generates, ComfyUI less and less (Moving off ComfyUI, below) |
+| Studio_automation (videos, pictures, voiceover, music, sound effects, lip sync, upscales, control maps) | `http://127.0.0.1:8189` | the console (Servers & APIs → Providers): one `sa_live_…` key per kind of work | This PC (LUFI), `D:\Studio_automation`. It reaches the cloud models (Frameo) itself; the studio only ever sends it jobs with keys |
+| On this PC (transcription, voice separation) | none | built in (migration 0018); its Python is `local_tools_python` | This PC: `backend/local_tools/run.py`, run with `.venv-audio` on the GPU (Tools on this PC, below) |
 | Claude (the agent's models) | Anthropic, through Claude Code | the console's Providers (Claude on this PC, Anthropic); `claude_models` | The `claude` signed in on this PC, run by the studio itself, or the same `claude` with an API key ("Claude on this PC", below) |
 
+**No ComfyUI** (since 18 November). The studio once rendered on ComfyUI servers (the render PC, Zoro) and reached
+Studio_automation dressed as one. Both are gone: the load balancer, the ComfyUI client and adapter, the
+generation server's ComfyUI disguise (`generation_*` workflows, `generation_models.py`), the render-server checks, the
+workflow-file history and the settings `comfy_url`, `workflows_dir` and `hold_queue_offline` (migration 0019 took the
+ComfyUI rows out of the database). The workflow files are kept in `workflows/archive/comfyui_2026-11-18/`, never read.
+`scene/comfy/workflows.py` keeps its name: it is the studio's own workflow format, which every provider model is
+offered in (`providers/workflows.py`).
+
 **The agent uses Anthropic's Claude models only** (since 31 October). Ollama, Gemini, Kimi and every other
-OpenAI-style service were taken out, with their settings, the GPU sharing that existed only for Ollama, and the
-endpoints of the admin console that pointed at them (`scene/endpoints.py` deletes any left in the database).
+OpenAI-style service were taken out, with their settings and the endpoints of the admin console that pointed at them
+(`scene/endpoints.py` deletes any left in the database).
 
 | Key | Default | What |
 |---|---|---|
@@ -24,18 +33,18 @@ endpoints of the admin console that pointed at them (`scene/endpoints.py` delete
 | `claude_context` | 1000000 | Tokens of context the models have; a session is compacted at 90% of it. |
 | `claude_connection` | `this_pc` | How the studio reaches Claude Code: `this_pc` (Claude on this PC: its sign-in) or `api_key` (below). |
 | `anthropic_api_key` | | The Anthropic API key. A secret: `SCENE_ANTHROPIC_API_KEY` or the console, never `config.json`. |
+| `local_tools_python` | `.venv-audio/Scripts/python.exe` | The Python the tools on this PC run with (Tools on this PC, below). Missing: those tools are not offered. |
 
-The last two are set in the admin console (Servers & APIs → **Providers**: "The agent uses", and the Anthropic
+The Claude ones are set in the admin console (Servers & APIs → **Providers**: "The agent uses", and the Anthropic
 provider's key), which wins over `config.json`; a `SCENE_*` variable wins over both, and the console then shows that
 key as fixed.
 
 The agent's model is used for: the agent's answers and plans, the structured caption that Ideogram 4 needs (written
-by the render worker just before the render), describing NeuralCore's pictures, Compact, and the check of a result.
-With Claude unreachable, those stop and everything else works.
+just before the job is sent), describing NeuralCore's pictures, Compact, and the check of a result. With Claude
+unreachable, those stop and everything else works.
 
 ```json
 {
-  "comfy_url": "http://100.123.221.34:8188",
   "agent_model": "sonnet",
   "default_workflow": ""
 }
@@ -57,68 +66,60 @@ scenes) send spaces until their JSON is ready.
 .venv\Scripts\python.exe scripts\check_models.py
 ```
 
-## The render servers and the load balancer
-
-Every ComfyUI server of the console (Servers & APIs → Providers, the ComfyUI ones) is a row of `endpoints`, kept in step with its provider. The load balancer
-(`backend/scene/balancer.py`, run by the queue's worker in `jobs.py`) places each waiting render:
-
-- **What a server can do.** "Workflows" (the column `models`): patterns of the workflow ids it takes, fnmatch style,
-  matched against the whole id and the file's name (`generation_*` takes `video/generation_video`). A server
-  with patterns takes only those, and a workflow some server's patterns claim goes only to the servers that claim it.
-  A server without patterns takes everything no server claims, when it has the workflow's nodes (its `/object_info`,
-  read the first time a render could go there and every 30 minutes; unknown counts as having them).
-- **How much it runs at once.** "Jobs at once" (the column `slots`, 1 to 16, migration 0014): 1 for ComfyUI, about 4
-  for the generation server, which spreads its jobs over the provider accounts itself.
-- **Which one.** Of the servers that can do it and have a slot free, the least busy (running / slots), the first on a
-  tie, asked whether it answers. A render that has to wait does not hold up the renders behind it that another server
-  can do. A render no server in use could ever do fails at once, saying why, and its credits come back.
-- **Who and where.** Every graph is sent with `extra_data` = `{"scene": {"user", "project", "module", "job"}}`: the
-  generation server logs, limits and sorts its jobs by it (a job on a project's own canvas is in the module "Main
-  canvas"). ComfyUI ignores it.
-
-The generation server's models reach the studio two ways, picked by the provider router's switch (below): as its own
-provider over the Scene Provider API v1 (router `on`), or, the way it was first added, dressed as a ComfyUI server
-(router `off` or `shadow`). That second way stays working until the router has been on for a week; it is described
-under "The fallback path".
-
 ## Providers and keys
 
-Every model service the studio uses is a **provider** with **one or more keys**, in one registry (migration 0015,
-`backend/scene/providers/`), listed in the admin console under Servers & APIs → **Providers**. Adding a key is the only
-step to use a provider's models.
+Every model the studio uses comes from a **provider** with **one or more keys**, in one registry (migrations
+0015-0019, `backend/scene/providers/`), listed in the admin console under Servers & APIs → **Providers**. Adding a key is
+the only step to use a provider's models.
 
 | Word | Meaning | Example |
 |---|---|---|
 | Capability | a kind of job | `text_to_video`, `image`, `speech`, `transcribe`, `agent_llm` |
-| Provider | a service with one address and one adapter (`kind`) | "Generation server" (`scene_provider_v1`), "Zoro" (`comfyui`), "Anthropic", "Claude on this PC" (`claude_local`: no address, no key) |
-| Key | a credential for one provider; a provider can have many | `sa_live_…` "studio A", "studio B" |
-| Model | something a key unlocks, for one capability, by the provider's own id | `seedance_2_5`, `nano-banana-pro`, `speech` |
+| Provider | a service with one address and one adapter (`kind`) | "Studio automation" (`scene_provider_v1`), "On this PC" (`local_tools`: built in, one key with no secret), "Anthropic", "Claude on this PC" (`claude_local`: no address, no key) |
+| Key | a credential for one provider; a provider can have many | `sa_live_…` "Scene.ai · Video: all", "Scene.ai · Music: all" |
+| Model | something a key unlocks, for one capability, by the provider's own id | `seedance_2_5`, `nano-banana-pro`, `speech`, `transcribe` |
 
 **The tables.** `providers` (kind, name, base_url, active, priority), `provider_keys` (label, the key sealed with
 `vault.py`, its last 4, active, priority, `max_concurrent`, `daily_cap` in studio credits, `status` ok / invalid /
 no_credit / rate_limited / unknown, `cooldown_until`, `last_error`, what the provider's whoami last said), and
-`provider_models` (each key's `GET /v1/models`, read every 10 minutes, the last good answer kept). A job made through a
-provider keeps the key it ran with (`jobs.provider_key`, for the daily cap) and `jobs.provider`: provider, model, key
-**label**, the provider's job id and `X-Request-Id`, its quote and cost. Never a key. Job logs and the job's Langfuse
-span carry the same.
+`provider_models` (each key's `GET /v1/models`, read at start and every 10 minutes, the last good answer kept). A job
+made through a provider keeps the key it ran with (`jobs.provider_key`, for the daily cap) and `jobs.provider`:
+provider, model, key **label**, the provider's job id and `X-Request-Id`, its quote and cost (a chain's lists each
+clip). Never a key. Job logs and the job's Langfuse span carry the same.
 
-**Adding a key.** Add key: pick a provider (or "New: …" a type, with its address the first time for a self-hosted
-one), paste the key, optionally a label, max at once and daily cap, Save. The studio asks the provider at once
-(`whoami` and `models`) and says "Works · 22 models · 91,296 credits" or the provider's exact words; a key that fails is
-saved only on **Save anyway**. Per key: Test, Edit (label, max at once, daily cap), Switch off, Remove. Keys are never
-sent back to a page: only their label and last 4. An environment variable can still fix a key (`SCENE_ANTHROPIC_API_KEY`,
-an env file): it is listed, marked as set by that variable, and can only be tested.
+**Models in the studio.** Each model a key unlocks is offered in the pickers, Create, the phone site and the agent's
+catalog as `<folder>/@<model id>` (`video/@seedance_2_5`, `audio/@transcribe`), its form built from `input_schema` and
+`limits` (`providers/workflows.py`). A model's length and reference counts are checked before a job is charged. A model
+with a prompt, a length and a first frame makes **long videos of several clips** (`jobs._run_provider_chain`): each clip
+its own call (`Idempotency-Key` `scene-job-<id>-clip-<n>`), starting on the last frame of the one before, the prompt's
+parts split by a line of dashes, then joined. A **lip sync whose voice track has music under it** (`clean_voice`) has
+the voice taken out on this PC first (`jobs._clean_voice_here`). The provider's price is shown in the console's Pricing
+beside each model, as a starting point; the studio's price is set there as for any workflow. With "new models start for
+admins only" (Workflows section) a model a key newly unlocks is offered to admins alone until one offers it to everyone.
 
-**A key per model or per kind of work.** The generation server's keys have scopes (`*`, `text_to_video:*`,
+**Adding a key.** Add key: pick a provider (or "New: …" a type, with its address the first time), paste the key,
+optionally a label, max at once and daily cap, Save. The studio asks the provider at once (`whoami` and `models`) and
+says "Works · 22 models · 91,296 credits" or the provider's exact words; a key that fails is saved only on **Save
+anyway**. Per key: Test, Edit (label, max at once, daily cap), Switch off, Remove. Keys are never sent back to a page:
+only their label and last 4. An environment variable can still fix a key (`SCENE_ANTHROPIC_API_KEY`, an env file): it is
+listed, marked as set by that variable, and can only be tested. On this PC takes no key and can't be removed (switch it
+off instead).
+
+**A key per model or per kind of work.** Studio_automation's keys have scopes (`*`, `text_to_video:*`,
 `text_to_video:seedance_2_5`, `speech:*` …), so its panel can make one key for each model or each kind of work, many at
 once ("Make keys for…", then **Copy all**: one `label<TAB>key` a line). In Add key, **Several keys** takes that paste
 (`POST /api/admin/providers/keys/many`, `registry.parse_keys`): one key a line, as `label<TAB>key`, `label: key` or the
 key alone, at most 50; each is checked like a single key (4 at a time) and saved when it works (or on Save anyway); a key
 with no label takes the label the provider's whoami gives it; a key the provider already has is left out ("Already here
-as …"); a new provider is made by the first key saved. Under each key of a Scene provider the console says what it
-unlocks ("Unlocks Video: Seedance 2.5 · Voiceover: Speech", `registry.unlocks`, from its last read `/v1/models`). The
-router needs nothing more: for each job it takes the keys whose models include the job's model, so a key per model
-spreads the work by model, and several keys for one model share it.
+as …"); a new provider is made by the first key saved. Under each key the console says what it unlocks ("Unlocks Video:
+Seedance 2.5 · Voiceover: Speech", `registry.unlocks`). The router needs nothing more: for each job it takes the keys
+whose models include the job's model, so a key per model spreads the work by model, and several keys for one model
+share it. On 18 November the studio was given nine live keys, one per kind of work.
+
+**What makes what** (under Providers; `GET /api/admin/providers/capabilities`, `registry.coverage`) lists each kind of
+work (`base.CAPABILITY_WORDS`) and the models that make it, with their keys (a model only test keys have is marked).
+Video to video, outpaint and character animation are made by the video models that edit a reference video
+(`limits.reference_video_edits`: Seedance, Wan); the agent's recipes for them are in `agent.py`.
 
 **Voices.** `GET /api/voices?q=&language=` (any signed-in user) and the agent's `voices` tool list the voiceover
 model's voices from the provider's `GET /v1/voices`, asked with the first key that has the `speech` model, kept 10
@@ -130,15 +131,14 @@ model unavailable), **RequestProblem** (invalid, refused: never retried).
 
 - `scene_provider_v1` (`v1.py`): the contract in `C:\Scene\provider-plan\02-provider-api-v1.md`, with its first
   implementer's changes. Bearer key; `Idempotency-Key` `scene-job-<job id>` (`-clip-<n>` for a clip), the same on every
-  retry; `metadata.scene` as ComfyUI's `extra_data.scene`; polling every 3 s, backing off to 15 s; errors by the
+  retry; `metadata.scene` = `{"user", "project", "module", "job"}`; polling every 3 s, backing off to 15 s; errors by the
   contract's table. A test key's job ends `test_mode`: "The provider: Test mode: would cost N credits", never retried.
   The quote is `{credits, source}` (the price list's estimate at POST, the provider's once quoted); `cost` is null until
   the job ends. File inputs are those marked `x-file` in the model's `input_schema`, sent as `POST /v1/files` ids.
-- `comfyui` (`comfyui.py`): wraps what always rendered. Its "models" are the studio's ComfyUI workflows this server takes
-  (its Workflows patterns), each with a capability from its folder and name (`video/*v2v*` video_to_video,
-  `*outpaint*` outpaint, `*animate*` animate, `*talking_head*` talking_head, any other `video/` text_to_video,
-  `audio/*transcribe*` transcribe …). ComfyUI renders still go through `jobs.py` and the load balancer: nothing about them changed. Each
-  ComfyUI provider is kept in step with its row of `endpoints` both ways, so the balancer reads them as before.
+  The provider has no cancel: a job cancelled once it started is still finished and charged there; the studio gives
+  the user's credits back and says so.
+- `local_tools` (`local.py`): On this PC (below). It answers as a Scene provider does, free (quote and cost 0), one job
+  at a time.
 - `anthropic` (`anthropic_api.py`): the agent's model (`agent_llm`) with an API key. Only the check of a key lives here
   (Anthropic's `GET /v1/models`); the agent's calls go through `claude.py`. `claude_local` (Claude on this PC) has no
   adapter: it has no key to check, and its card's status is `claude_connection.status` (below).
@@ -149,76 +149,37 @@ keys in cooldown, at their max at once (else what whoami says, else 1) or over t
 (retry_after, else 60 s; an hour for no credit; until fixed for invalid) and the next key is tried once; on a
 ProviderProblem the next provider offering the model, once; a RequestProblem fails the job with the provider's words.
 It fails over only before a job has started at a provider. A model no key could ever make fails at once, its credits
-given back: "No provider has a key for Seedance 2.5: add one in Servers & APIs → Providers."
+given back: "No provider has a key for Seedance 2.5: add one in Servers & APIs → Providers." The queue (`jobs.py`)
+starts each waiting job as soon as a key that can make it has room, and a job of a workflow that is not a model (an old
+ComfyUI one) fails at once, saying so.
 
-**The switch** `provider_router` (a setting, on the Providers page; **off** by default):
+### Tools on this PC
 
-- `off`: today's paths only. The generation server is reached as a ComfyUI server (the fallback path below).
-- `shadow`: today's paths do the work; for each render the router also notes which provider and key it would have
-  picked, on the job (`jobs.provider` → `shadow`: would, did, agree) and in the log. It changes nothing about where a
-  job runs. To compare: `SELECT provider->'shadow'->>'agree' AS agree, COUNT(*) FROM jobs GROUP BY 1`.
-- `on`: the v1 providers' models are offered in the pickers, Create and the agent's catalog as `<folder>/@<model id>`
-  (`video/@seedance_2_5`, `audio/@speech`), under "Models", their forms built from `input_schema` and `limits`
-  (`providers/workflows.py`), and made through their providers. The `generation_*` workflow files are not offered.
-  ComfyUI's workflows stay with the load balancer. A model's length and reference counts are checked before a job is
-  charged. Long videos of several clips are not offered for these models yet. The provider's price is shown in the
-  console's Pricing beside each model, as a starting point; the studio's price is set there as for any workflow.
+**On this PC** (`local_tools`, migration 0018) makes what no cloud provider offers the studio: **transcription**
+(`audio/@transcribe`, `audio/@transcribe_video`: faster-whisper large-v3) and **voice separation**
+(`audio/@separate_voice`: Demucs htdemucs). `providers/local.py` runs `backend/local_tools/run.py` with the Python of
+`local_tools_python`, one process a job, one job at a time (the GPU is shared), and never imports it: PyTorch and the
+models stay out of the studio's own Python.
 
-### Moving off ComfyUI
+- A transcript is `transcript.json` `{"language", "segments": [{"start", "end", "speaker", "text"}], "words": [{"start",
+  "end", "word", "speaker", "aligned"}]}` (seconds, 3 decimals) and `transcript.srt` (`[SPEAKER_00] text` a line), as
+  ComfyUI's SceneTranscribe made them. **Speaker labels are not set up yet**: every line is `SPEAKER_00` (they need
+  pyannote and a Hugging Face token).
+- Voice separation makes `voice.wav` and `music_fx.wav` at the input's sample rate and exact length; `music_fx` is the
+  input minus the voice, so the two add back up to it.
+- A tool whose software is missing is not offered, and the provider's alerts say what to install.
 
-The plan is that the studio makes everything through the generation server's keys, and ComfyUI goes, one kind of work
-at a time (`C:\Scene\provider-plan\06-comfyui-overlap-and-removal.md`; the generation server's side:
-`07-prompt-studio-automation-keys-and-gateway.md`). The console's **What makes what** (under Providers;
-`GET /api/admin/providers/capabilities`, `registry.coverage`) lists each kind of work (`base.CAPABILITY_WORDS`): the
-providers' models that make it, with their keys (a model only test keys have is marked "(test key)"), ComfyUI's
-workflows that make it, and who makes it now: Providers and ComfyUI, Providers only, ComfyUI only.
+Setting it up (done on LUFI on 18 November; about 6 GB with the models):
 
-**Stop using ComfyUI** for a kind of work (`PUT /api/admin/providers/capabilities/<capability>` `{"comfyui": false}`,
-the setting `comfyui_off`, audited) takes ComfyUI's workflows of that kind out of Create, the agent's catalog and the
-phone site, and refuses a job sent to one: "Transcription is no longer made on ComfyUI: pick one of the providers'
-models." (`credits.enabled`, `studio.switched_on`). It is allowed only while the router is `on` and a **live** key makes
-that kind of work, so something always makes it; **Use ComfyUI again** is allowed at any time. With the router not
-`on` the list is kept but has no effect, so switching the router off brings every ComfyUI workflow back. The studio's
-own inner steps (taking the voice out before a ComfyUI lip sync, `jobs.CLEAN_VOICE`) still run on ComfyUI while there is
-one. Kinds of work no provider makes yet (video to video, outpaint, character animation) stay on ComfyUI until the
-generation server offers them (part 4 of the prompt: ComfyUI behind the generation server).
+```bat
+py -3.14 -m venv .venv-audio
+.venv-audio\Scripts\python -m pip install torch==2.11.0 torchaudio --index-url https://download.pytorch.org/whl/cu128
+.venv-audio\Scripts\python -m pip install faster-whisper demucs soundfile
+.venv-audio\Scripts\python backend\local_tools\run.py check
+```
 
-The order, with a week of watching between steps (06's plan): music, video upscale, lip sync, pictures, video; then
-transcription and voice separation once the generation server makes them; then the rest. When What makes what says
-"ComfyUI makes nothing now" for a month, the `comfyui` provider, `comfy/`, `balancer.py`'s node code and the
-`generation_*` workflows can be removed.
-
-**The agent's provider.** "The agent uses" picks Claude on this PC (the default) or Anthropic (the setting
-`agent_provider`); it is in use from the next call to Claude, in every process, with no restart. Anthropic's key is
-the provider's first working key (a fixed one first); Anthropic with no key is refused ("Paste an Anthropic API key, or
-pick Claude on this PC"), never run on the PC's sign-in. Claude on this PC is a **personal subscription**: while it is
-in use the console says "Personal Claude subscription", sign-up is closed whatever Settings says, and only admins can
-use the agent. Picking Anthropic lifts both. Switching reopens each conversation's live session the new way, going on
-with the same session (both run in the studio's one `home`). The route `/api/admin/claude-connection` gives the card
-its status (and still takes the old card's save, written into the registry); `claude_connection.py` reads the registry
-first, the settings rows only on a database without it.
-
-**Migrations 0016 and 0017.** 0016 added the `claude_local` provider ("Claude on this PC") and moved `agent_provider`
-to it when the agent used the LUFI bridge. On a new database (Anthropic with no key, never picked) it leaves the agent
-unset, so the studio's start picks by `config.json`'s `claude_connection`: Claude on this PC by default, the API key
-for the test studios. 0017 deleted the LUFI bridge's provider (`claude_bridge`) with its keys and the settings
-`claude_bridge_url` and `claude_bridge_key`; its downgrade puts the provider back with no address and no key.
-
-**Migration 0015** copied what was there: each ComfyUI server of `endpoints` → a `comfyui` provider with one key (its
-api_key; its Jobs at once as max at once); the Claude connection → an `anthropic` provider (always) and a
-`claude_bridge` provider (when it had an address or a key), with `agent_provider` set to the one in use. Langfuse stays
-in `endpoints`. Nothing was deleted: `endpoints`, the settings and the generation-server code stay until the router has
-been on for a week (`C:\Scene\provider-plan\01-design.md`, section 8).
-
-### The fallback path: the generation server as a ComfyUI server
-
-While the router is `off` or `shadow`, the generation server is a ComfyUI provider whose Workflows are `generation_*`
-(4 at once). Its models are workflows: `workflows/video/generation_video` and `workflows/image/generation_image`, whose
-Model setting is the model; its Resolution, Shape and Sound are that model's own (`backend/scene/generation_models.py`).
-What each model takes comes from its `GET /generation/models`, kept 10 minutes. Beside them are its single-model tools:
-`audio/generation_speech`, `audio/generation_music`, `audio/generation_sound_effect`, `video/generation_lipsync`,
-`upscaler/generation_upscale`. Its errors read "The provider: <reason>". The provider has no cancel: a job cancelled once
-it started is still finished and charged there; the studio gives the user's credits back and says so.
+The models download on first use into `storage/models` (faster-whisper large-v3, about 3 GB; htdemucs, about 80 MB).
+On LUFI's RTX 4060 Ti a 5-minute voice-over transcribes in about a minute once the model is in, and separates in 22 s.
 
 ### Claude on this PC
 
@@ -289,20 +250,21 @@ Once Claude on this PC works:
 ## Changing them
 
 - **Restart the app** after editing `config.json`. It is read once, when the app starts.
-- The `SCENE_COMFY_URL` and `SCENE_AGENT_MODEL` variables override `config.json`.
-- The ComfyUI address can also be changed in the admin console (Settings tab). That value is saved
-  in the database and **wins over `config.json`** from then on. If a change to `comfy_url` in
-  `config.json` seems to have no effect, check the admin console.
+- A `SCENE_*` variable (`SCENE_AGENT_MODEL` …) overrides `config.json`.
+- Providers and their keys are changed in the admin console (Servers & APIs → Providers) while the app runs: no
+  restart.
 
 ## Checking that they answer
 
 ```bash
-curl http://100.123.221.34:8188/system_stats
+curl http://127.0.0.1:8189/v1/whoami -H "Authorization: Bearer <a sa_live_ key>"
+.venv-audio\Scripts\python.exe backend\local_tools\run.py check
 .venv\Scripts\python.exe scripts\check_models.py
 ```
 
-The first needs Tailscale connected and ComfyUI running on the render PC. The second needs the Claude connection working
-(the console's card says so).
+The first needs Studio_automation running (its panel: `http://127.0.0.1:8189/panel/`); the console's Providers page
+does the same with **Test** on each key. The second says whether transcription and voice separation can run on this
+PC. The third needs the Claude connection working (the console's card says so).
 
 # The public address (Cloudflare Tunnel)
 
@@ -319,7 +281,7 @@ other machines.
 
 The studio PC's internet connection is behind the provider's shared address (CGNAT), so a port cannot
 be forwarded to it. The tunnel dials out to Cloudflare instead, and no port is opened on the router.
-ComfyUI is not behind the tunnel and must stay that way: the app reaches it over Tailscale.
+Studio_automation is not behind the tunnel and must stay that way: the app reaches it on this PC.
 
 | Thing | Where |
 |---|---|
@@ -380,6 +342,6 @@ Restart the app after changing it. The database records only file names, so file
 to be moved by hand into the new folder, keeping their sub-folders. A sub-folder still named by user
 id (`1`, `2`, …), as they were before 4 October, is renamed to the email the first time it is needed.
 
-**Inputs.** A reference file added to a job is not kept by the studio. It is sent straight to the
-render PC and stays in ComfyUI's `input` folder there, named `scene_<hash>_<name>`. Only files saved
-as **assets** are kept here, in `storage\assets\<user id>\`.
+**Inputs.** A reference file added to a job is kept by the studio (`storage\references\`, named
+`scene_<hash>_<name>`, `references.keep_reference`) and sent to the provider when the job runs (`POST /v1/files`).
+Files saved as **assets** are kept in `storage\assets\<user id>\`.

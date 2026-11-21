@@ -309,7 +309,7 @@ export async function compactContext(chat: AgentChat, run: Run) {
   chat.changed();
   try {
     const done = await compactSession<RunContext>({
-      run: chat.env.session || 'main',
+      ...(chat.env.session ? { run: chat.env.session } : {}),
       project_id: chat.env.project() || null,
     });
     run.context = { ...done.context, compacted: true };

@@ -74,7 +74,11 @@ export function KitPanel({ project, selected, active, focus }: Props) {
     queryFn: () => coreMemory(project),
     enabled: !!project && active && scope === 'module',
   });
-  const you = useQuery({ queryKey: ['remembered'], queryFn: remembered, enabled: active && scope === 'you' });
+  const you = useQuery({
+    queryKey: ['remembered', project],
+    queryFn: () => remembered(project),
+    enabled: !!project && active && scope === 'you',
+  });
   const loadedAt = Math.max(cast.dataUpdatedAt, memory.dataUpdatedAt, scope === 'you' ? you.dataUpdatedAt : 0);
   const stamp = fetching ? 'fetching the sheet’s pictures…' : loadedAt ? 'refreshed ' + ago(loadedAt / 1000) : '';
   useEffect(() => {
@@ -85,7 +89,7 @@ export function KitPanel({ project, selected, active, focus }: Props) {
     Promise.all([
       client.invalidateQueries({ queryKey: ['kit', project] }),
       client.invalidateQueries({ queryKey: ['core', 'memory', project] }),
-      client.invalidateQueries({ queryKey: ['remembered'] }),
+      client.invalidateQueries({ queryKey: ['remembered', project] }),
     ]);
   const entries = cast.data ?? [];
   const fail = (e: unknown) => void tell((e as Error).message);
@@ -227,18 +231,20 @@ export function KitPanel({ project, selected, active, focus }: Props) {
           className={s['views-seg']}
           choices={[
             { id: 'module', label: 'This module', hint: 'What this module keeps' },
-            { id: 'you', label: 'You', hint: 'What the agent remembers of you in every project' },
+            { id: 'you', label: 'You', hint: 'What the agent remembers of you in this module' },
           ]}
           current={scope}
           onPick={setScope}
         />
       </div>
       <div className={s['kit-body']}>
-        {scope === 'you' ? (
+        {scope === 'you' && !project ? (
+          <p className="small muted">Memory belongs to a module: open a project first.</p>
+        ) : scope === 'you' ? (
           <YouView
             found={you.data}
             error={you.error?.message}
-            onForget={(key) => void forget(key).then(() => reload(), fail)}
+            onForget={(key) => void forget(project, key).then(() => reload(), fail)}
           />
         ) : (
           <ModuleMemory

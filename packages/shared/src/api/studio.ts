@@ -1,4 +1,4 @@
-// The studio as a whole: is the render server up, any message from the admins, your credits, and plans waiting for you.
+// The studio as a whole: the page version, any message from the admins, your credits, and plans waiting for you.
 import { postJson, request } from './client';
 import type { Announcement, Credits, KitEntry, Status, WaitingPlan } from '../types/api';
 

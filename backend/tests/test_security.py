@@ -47,27 +47,22 @@ def test_an_upload_must_be_what_its_name_says(client):
     assert security.content_matches("audio", b"ID3\x04" + b"0" * 20) and not security.content_matches("image", b"ID3\x04")
 
 
-def test_a_reference_file_of_another_user_cannot_be_used_or_seen(client, monkeypatch):
-    sent = []
-
-    async def upload(name, data, content_type=None):
-        sent.append(name)
-        return name
-    monkeypatch.setattr(client.app.state.comfy, "upload", upload)
+def test_a_reference_file_of_another_user_cannot_be_used_or_seen(client):
     account(client)
-    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}}
-    made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("face.png", PNG, "image/png")})
+    client.app.state.jobs.pause(True)   # the jobs wait: what is sent to the provider is only sent when one runs
+    settings = {"workflow": "video/@seedance_2_5", "values": {"2:value": "She waves."}}
+    made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:4:image": ("face.png", PNG, "image/png")})
     assert made.status_code == 200
-    assert sent == []   # kept by the studio: no render server is asked when a job is added
+    assert not [c for c in client.provider.calls if c["path"] == "/v1/files"]   # kept by the studio: the provider is not asked
     mine = "scene_{}_face.png".format(hashlib.sha1(PNG).hexdigest()[:10])
     assert client.get("/api/ref-preview", params={"name": mine}).content == PNG   # its owner sees it, from the studio's copy
-    again = dict(settings, refs={"201:image": {"comfy_name": mine}})
+    again = dict(settings, refs={"4:image": {"comfy_name": mine}})
     assert client.post("/api/jobs", data={"settings": json.dumps(again)}).status_code == 200   # the owner may reuse it
 
     account(client, "eve@example.com")
     assert client.post("/api/jobs", data={"settings": json.dumps(again)}).status_code == 400
     assert client.get("/api/ref-preview", params={"name": mine}).status_code == 404
-    traversal = dict(settings, refs={"201:image": {"comfy_name": "scene_0123456789_../../secret.png"}})
+    traversal = dict(settings, refs={"4:image": {"comfy_name": "scene_0123456789_../../secret.png"}})
     assert client.post("/api/jobs", data={"settings": json.dumps(traversal)}).status_code == 400
 
 

@@ -1,6 +1,5 @@
 // The Overview's cards that act: who is online, new accounts, the queue and its controls, recent activity, earnings.
 
-import { useState } from 'react';
 import { api } from '../../../common/api';
 import { useConsole } from '../shared/context';
 import { ago, failed, number, sure } from '../shared/ui';
@@ -142,37 +141,7 @@ export function Signups({ s }: { s: Overview['signups'] }) {
   );
 }
 
-function CheckNow() {
-  const { refresh } = useConsole();
-  const [word, setWord] = useState('Check now');
-  const [busy, setBusy] = useState(false);
-  return (
-    <button
-      className="btn small quiet"
-      title="Ask the render server now instead of waiting for the next refresh"
-      disabled={busy}
-      onClick={() => {
-        setBusy(true);
-        setWord('Checking…');
-        api<{ online: boolean }>('/api/admin/server/check', { method: 'POST' }).then(
-          (found) => {
-            setWord(found.online ? 'Online' : 'Still offline');
-            setTimeout(() => void refresh(), 900);
-          },
-          (e: Error) => {
-            failed(e);
-            setBusy(false);
-            setWord('Check now');
-          },
-        );
-      }}
-    >
-      {word}
-    </button>
-  );
-}
-
-export function QueueCard({ q, server }: { q: Queue; server: Overview['server'] }) {
+export function QueueCard({ q }: { q: Queue }) {
   const { go } = useConsole();
   const act = useAct();
   const running = q.running;
@@ -198,15 +167,6 @@ export function QueueCard({ q, server }: { q: Queue; server: Overview['server'] 
         <button className="btn small quiet" onClick={() => go('jobs')}>
           All jobs
         </button>
-      </div>
-      <div className={css('server-line')}>
-        <span className={css('dot ' + (server.online ? 'online' : 'offline'))} />
-        <span className="muted small">
-          {server.online
-            ? `Render server online since ${clock(server.since)} · ComfyUI ${server.version}`
-            : `Render server offline since ${clock(server.since)}`}
-        </span>
-        <CheckNow />
       </div>
       {q.paused && (
         <div className={css('alert warning static')}>

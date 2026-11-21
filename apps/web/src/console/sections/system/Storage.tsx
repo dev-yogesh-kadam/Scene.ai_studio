@@ -1,4 +1,4 @@
-// Who uses the space: finished work and assets by user, the largest files, and what sits on the render PC.
+// Who uses the space: finished work and assets by user, the largest files, and the reference files people added.
 
 import { api } from '../../../common/api';
 import { openViewer } from '../../../common/media/Viewer';
@@ -24,7 +24,11 @@ type Largest = {
 export type Storage = {
   people: { name: string; email: string; bytes: number; files: number; asset_bytes: number; asset_files: number }[];
   largest: Largest[];
-  render_server: { total: number; by_user: { user_name: string; user_email: string; files: number; newest: number }[] };
+  // the reference files people added (the uploads), by user; the name is the backend's
+  render_server?: {
+    total: number;
+    by_user: { user_name: string; user_email: string; files: number; newest: number }[];
+  };
 };
 
 export function StorageCards({ st }: { st: Storage }) {
@@ -87,30 +91,30 @@ export function StorageCards({ st }: { st: Storage }) {
           empty="Nothing made yet."
         />
       </div>
-      <div className={css('card')}>
-        <div className={css('card-head')}>
-          <h2>Files on the render PC</h2>
-          <span className="muted small">{`${number(rs.total)} reference files`}</span>
+      {rs && (
+        <div className={css('card')}>
+          <div className={css('card-head')}>
+            <h2>Reference files</h2>
+            <span className="muted small">{`${number(rs.total)} reference files`}</span>
+          </div>
+          <p className="muted small">
+            Pictures, videos and sounds people added as references, kept by the studio for their jobs and sent to the
+            provider that makes each one.
+          </p>
+          {rs.by_user.length ? (
+            <Table
+              head={['User', 'Files', 'Newest']}
+              rows={rs.by_user.map((u) => [
+                <Person key="p" name={u.user_name} email={u.user_email} />,
+                number(u.files),
+                ago(u.newest),
+              ])}
+            />
+          ) : (
+            <p className="muted">None recorded yet.</p>
+          )}
         </div>
-        <p className="muted small">
-          Pictures, videos and sounds people added as references are sent to the render PC and stay in ComfyUI&apos;s
-          input folder, named scene_&lt;code&gt;_&lt;name&gt;. The studio can count them but cannot delete them: ComfyUI
-          has no way to delete a file over its connection. To free the space, delete old scene_ files in that folder on
-          the render PC.
-        </p>
-        {rs.by_user.length ? (
-          <Table
-            head={['User', 'Files', 'Newest']}
-            rows={rs.by_user.map((u) => [
-              <Person key="p" name={u.user_name} email={u.user_email} />,
-              number(u.files),
-              ago(u.newest),
-            ])}
-          />
-        ) : (
-          <p className="muted">None recorded yet.</p>
-        )}
-      </div>
+      )}
     </>
   );
 }

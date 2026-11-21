@@ -154,10 +154,6 @@ async def poster(video):
             return await _make_poster(video, target)
 
 
-on_removed = None   # told each file remove_result deletes (main.py sets it: the storage deletes its copy too)
-on_made = None      # told each poster or frame made here (main.py sets it: the storage keeps it)
-
-
 def remove_result(path):
     """Delete a finished file and what was made from it for its thumbnail: its poster and a video's keyframes. On
     Windows a file ffmpeg still reads (its poster being made, a moment after it was) is tried again for two seconds:
@@ -168,10 +164,6 @@ def remove_result(path):
     if posters.is_dir():
         for made in [*posters.glob(glob.escape(path.name) + "*.jpg"), *posters.glob(glob.escape(path.name) + "*.webp")]:   # <name>.jpg, <name>.<tenth>.jpg, <name>.webp
             _gone(made)
-            if on_removed:
-                on_removed(made)
-    if on_removed:   # where the media are kept for good (main.py: Outputs.forget)
-        on_removed(path)
 
 
 def _gone(path, tries=20):
@@ -209,11 +201,7 @@ async def make_poster_soon(path):
     """Make a new result's poster now, so its thumbnail is ready when the page asks. Best effort."""
     try:
         made = await poster(path)
-        webp = await asyncio.to_thread(make_webp, made)   # a smaller copy for the browsers that take it, made once
-        if on_made:
-            for one in (made, webp):
-                if one:
-                    await asyncio.to_thread(on_made, one)
+        await asyncio.to_thread(make_webp, made)   # a smaller copy for the browsers that take it, made once
     except (MediaError, OSError):
         pass
 

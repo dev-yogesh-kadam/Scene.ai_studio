@@ -8,7 +8,7 @@ import { CreditMark, Icon } from '../../common/components/Icon/Icon';
 import { Segmented } from '../../common/components/Segmented';
 import { tabTitle } from '../../common/format';
 import { THEMES, useAppearance } from '../../common/hooks/useAppearance';
-import { useJobs, useStatus, useStudioLive } from '../live';
+import { useJobs, useStudioLive } from '../live';
 import { PAGES, SIDEBAR_PAGES } from '../pages';
 import { pageOf } from '../place';
 import { consoleAddress, useSession } from '../session';
@@ -146,11 +146,9 @@ function PageTitle({ at }: { at: string }) {
   return null;
 }
 
-/** The pages, the queue and (for an admin) the render server: in the sidebar or the dropdown. */
+/** The pages and the queue: in the sidebar or the dropdown. */
 function PagesList({ active, inMenu, onPick }: { active: number; inMenu: boolean; onPick: () => void }) {
   const location = useLocation();
-  const { user } = useSession();
-  const status = useStatus();
   const at = PAGES.find((p) => p.path === pageOf(location.pathname));
   const shown = PAGES.filter((p) => !p.under && !p.menu);
   return (
@@ -168,19 +166,6 @@ function PagesList({ active, inMenu, onPick }: { active: number; inMenu: boolean
         <i className={css('cell-mark stepping')} />
         {active === 1 ? '1 job in the queue' : `${active} jobs in the queue`}
       </span>
-      {/* Whether the render server answers is the admin's business; other users are not shown it. */}
-      {user.role === 'admin' && (
-        <div className={css('server')}>
-          <span className={css('dot ' + (status.online == null ? '' : status.online ? 'online' : 'offline'))} />
-          <span>
-            {status.online == null
-              ? 'Checking render server…'
-              : status.online
-                ? 'Render server online'
-                : 'Render server offline'}
-          </span>
-        </div>
-      )}
     </>
   );
 }

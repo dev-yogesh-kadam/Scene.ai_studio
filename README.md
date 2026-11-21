@@ -1,16 +1,15 @@
 # Scene.ai
 
 Scene.ai is a web studio for creating videos, images and music with AI. People sign in, describe what
-they want in a form or to an agent, and get the result in their library. The rendering is done by a
-[ComfyUI](https://github.com/comfyanonymous/ComfyUI) server, which users never see.
-
-Workflows are included for video (MiniMax H3), images (FLUX.2, FLUX 3 Klein, Qwen Image 2.1, Krea 2 Turbo, HunyuanImage 2.1) and music
-(MiniMax Music 3), and for upscaling a video (SeedVR2). Any other ComfyUI workflow only needs its
-file to be added.
+they want in a form or to an agent, and get the result in their library. The models come from **providers**, which
+users never see: a Scene provider over the Scene Provider API v1 (Studio_automation, which reaches the cloud models:
+Seedance, Kling, Wan, MiniMax, Nano Banana, GPT Image, Seedream, voiceover, music, sound effects, lip sync, upscales),
+and **On this PC**, the studio's own transcription and voice separation. Adding a provider key in the admin console
+is the only step to use its models (see [docs/servers.md](docs/servers.md), "Providers and keys").
 
 ## Quick start
 
-You need Python 3.10 or newer and a running ComfyUI server. Two things are optional:
+You need Python 3.10 or newer and a provider key (a Scene provider's `sa_live_…` key). Three things are optional:
 
 - [Claude Code](https://claude.com/claude-code), signed in on this PC (run `claude`, then `/login`): the agent and
   "Improve prompt" use Anthropic's Claude models through it, and no other language model. The studio runs that
@@ -18,6 +17,8 @@ You need Python 3.10 or newer and a running ComfyUI server. Two things are optio
   use the agent), or the same `claude` with an Anthropic API key added to the Anthropic provider. Pick one in the
   admin console, Servers & APIs → Providers, "The agent uses". See [docs/servers.md](docs/servers.md).
 - Node.js 22 or newer, for motion graphics. See [docs/motion.md](docs/motion.md).
+- `.venv-audio` (PyTorch, faster-whisper, Demucs), for transcription and voice separation on this PC. See
+  [docs/servers.md](docs/servers.md), "Tools on this PC".
 
 | System | Start |
 |---|---|
@@ -31,9 +32,9 @@ and, when Node.js is there, installs HyperFrames into `motion/`. Then:
 2. Press "Create an account" under the sign-in form. The first account becomes the admin. Signing in
    lands on All projects.
 3. Open the admin console at http://localhost:8090 (or **Admin console** in the studio's menu) and
-   sign in with the same email and password. In its Settings section, check the ComfyUI address. The
-   dot in the studio's sidebar turns green when it answers. In Servers & APIs → Providers, the "Claude on this PC"
-   card says who Claude Code is signed in as; press Check after signing it in.
+   sign in with the same email and password. In Servers & APIs → Providers, press Add key and paste a provider's key:
+   its models are offered in the studio at once. The "Claude on this PC" card says who Claude Code is signed in as;
+   press Check after signing it in.
 
 The admin console is a site of its own: its own port, its own sign-in (admins only, with their
 second step when it is on), and it is the only place the admin routes are. By default it listens on
@@ -51,13 +52,12 @@ from `apps/mobile/` (`npm run build`; `scripts/start.bat` does it the first time
 
 | Path | Contents |
 |---|---|
-| `backend/scene/` | The server (FastAPI). `api/` holds the routes, `comfy/` talks to ComfyUI, `jobs.py` is the queue. |
+| `backend/scene/` | The server (FastAPI). `api/` holds the routes, `providers/` the providers, their keys and the router, `jobs.py` is the queue. `backend/local_tools/` the tools run on this PC. |
 | `backend/tests/` | Tests. Run them with `pytest` from `backend/`. |
-| `apps/web/` | The web app in React + TypeScript (Vite): the studio and the admin console, two separate builds into `apps/web/dist/` (the start scripts build it when it is missing or older than its source). Tests in `apps/web/tests/` (Playwright, the smoke test, the fake ComfyUI). |
+| `apps/web/` | The web app in React + TypeScript (Vite): the studio and the admin console, two separate builds into `apps/web/dist/` (the start scripts build it when it is missing or older than its source). Tests in `apps/web/tests/` (Playwright, the smoke test, the fake Scene provider). |
 | `apps/mobile/` | The phone site (Expo), served at `/m/`. |
 | `packages/shared/` | TypeScript both apps use: the API client and its types, the NDJSON reader, the live connection, formatting. |
-| `workflows/video/`, `workflows/image/`, `workflows/audio/` | The ComfyUI workflows users can run. `workflows/reports/` holds the render PC's model lists and is not read by the app. |
-| `workflows/upscaler/` | Workflows that make a video the user has larger. They appear as "Upscale video" on the Canvas. |
+| `workflows/` | Not read by the app: `archive/` keeps the ComfyUI workflows the studio once ran (until 18 November 2026), `reports/` the render PC's model lists of then. |
 | `motion/` | Motion graphics: the HyperFrames packages (`package.json`) and the templates. |
 | `content/` | Source material, not read by the app: `craft-skills/v1` and `v2` (the craft skills the studio's own skills in `backend/scene/skills/` were made from) and `skill-maps/` (HTML maps of the skills, see its README). |
 | `scripts/` | Start scripts for each system, and `check_models.py`, which checks the agent's models and that no key can reach git. |
@@ -90,7 +90,6 @@ from `apps/mobile/` (`npm run build`; `scripts/start.bat` does it the first time
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `comfy_url` | `http://127.0.0.1:8188` | ComfyUI address. An admin can also change it in the admin console. |
 | `agent_model` | the first of `claude_models` | The Claude model the agent uses unless the user picks another, for example `sonnet`. |
 | `claude_models` | `sonnet, opus, haiku` | The Claude models the agent offers, as Claude Code names them. |
 | `claude_fast_model` | `haiku` | The model for small jobs: captions, notes, checks. Empty uses the one in use. |
@@ -125,7 +124,7 @@ cd backend && ../.venv/bin/python -m pytest      # tests
 cd backend && ../.venv/bin/python -m scene       # run the app
 ```
 
-On Windows the Python is `.venv\Scripts\python.exe`. The tests need no ComfyUI, Claude or Node.js.
+On Windows the Python is `.venv\Scripts\python.exe`. The tests need no provider, Claude or Node.js: each test studio's models come from a fake provider.
 
 The client apps are npm workspaces (`apps/*`, `packages/*`), installed once at the root:
 
@@ -135,8 +134,8 @@ npm run typecheck           # TypeScript, every workspace
 npm run lint                # ESLint
 npm test                    # unit tests: the phone site (Jest), the web app and the shared package (Vitest)
 npm run build -w apps/web   # the React studio and console, into apps/web/dist/
-npm run e2e                 # build, then Playwright (Chromium) against a studio of its own and a fake ComfyUI
-npm run smoke               # the smoke test over HTTP (--react, --fake-comfy), against a studio of its own
+npm run e2e                 # build, then Playwright (Chromium) against a studio of its own and a fake Scene provider
+npm run smoke               # the smoke test over HTTP, against a studio of its own and the fake provider
 npm run dev -w apps/web     # the React studio on http://localhost:5173, /api sent to SCENE_STUDIO_URL (default :8080)
 ```
 

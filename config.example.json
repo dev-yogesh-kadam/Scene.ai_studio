@@ -1,6 +1,5 @@
 {
-  "_note": "Copy to config.json. Passwords and keys (database_url, database_owner_url, restore_test_url, redis_url, embedding_api_key, azure_storage_connection_string, anthropic_api_key) go in scene.env, SCENE_* environment variables or (the Anthropic key) the admin console, never here. 8080 is the code's default port; the studio PC runs on 8081 (docs/ports.md).",
-  "comfy_url": "http://127.0.0.1:8188",
+  "_note": "Copy to config.json. Passwords and keys (database_url, database_owner_url, restore_test_url, redis_url, embedding_api_key, anthropic_api_key) go in scene.env, SCENE_* environment variables or (the Anthropic key) the admin console, never here. 8080 is the code's default port; the studio PC runs on 8081 (docs/ports.md).",
   "agent_model": "",
   "claude_models": "sonnet, opus, haiku",
   "claude_fast_model": "haiku",

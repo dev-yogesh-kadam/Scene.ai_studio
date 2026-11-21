@@ -23,7 +23,6 @@ export function progress(job: Job, now = Date.now() / 1000): number | null {
 export function statusLine(job: Job): string {
   switch (job.status) {
     case 'queued':
-      if (job.waiting_for_server) return 'Waiting for the render server to come back';
       if (job.position === 1) return 'Next in line';
       return job.position ? `#${job.position} in line` : 'Waiting in line';
     case 'running': {
@@ -75,7 +74,6 @@ const FIELDS = [
   'clip',
   'clips',
   'position',
-  'waiting_for_server',
   'reason',
   'cost',
   'project_id',

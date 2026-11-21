@@ -5,7 +5,7 @@ import json
 import time
 
 from scene import moderation
-from test_api import JOB, console, post_job, register
+from test_api import JOB, PROMPT, console, post_job, register
 
 
 def item(client, user_id, name, prompt):
@@ -51,4 +51,4 @@ def test_a_prompt_with_a_listed_word_is_refused_and_its_credits_given_back(clien
     desk.put("/api/admin/moderation/settings", json={"words": ["waves"], "mode": "flag"})       # flagging alone lets it run
     assert post_job(client).status_code == 200
     assert desk.put("/api/admin/moderation/settings", json={"words": [], "mode": "ban"}).status_code == 400
-    assert JOB["values"]["100:value"] == "She waves."
+    assert JOB["values"][PROMPT] == "She waves."

@@ -10,7 +10,6 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class Settings:
-    comfy_url: str = "http://127.0.0.1:8188"
     agent_model: str = ""         # the model the agent uses unless the user picks another ("sonnet"); empty = the first one
     # The agent's models are Anthropic's Claude, and only Claude, through Claude Code. Offered as "claude/<name>" in the
     # model picker.
@@ -35,7 +34,6 @@ class Settings:
     console_hours: int = 12       # how long a sign-in to the console lasts
     mobile_site_dir: str = "apps/mobile/dist"   # the phone site, built from apps/mobile/ (npm run build), served at /m/
     share_days: int = 30          # how long a share link opens its item without signing in; 0 turns share links off
-    workflows_dir: str = "workflows"
     storage_dir: str = "storage"
     # The tools that run on this PC (transcription, voice separation: providers/local.py): the Python they run with,
     # kept apart from the studio's own because it holds PyTorch (docs/servers.md, "Tools on this PC"). Missing: those
@@ -51,22 +49,16 @@ class Settings:
     # tests); "off" says nothing.
     database_loop_guard: str = "warn"
     # The studio's time zone: what a "day" is in the console's charts and the analytics, whatever the database server's
-    # or the machine's own is (on Azure both are UTC). An IANA name.
+    # or the machine's own is. An IANA name.
     time_zone: str = "Asia/Kolkata"
     output_dir: str = ""          # where finished images and videos are kept; empty = "outputs" inside storage_dir
-    # Where the media are kept for good (storage.py): "local" (these folders, the default) or "azure" (Azure Blob Storage,
-    # with these folders as its cache). For Azure: a connection string (an account key, or Azurite's), or, on Azure
-    # itself, the account's URL (https://<account>.blob.core.windows.net) and the app's managed identity; the container;
-    # how long a link a browser is given stays good.
+    # Where the media are kept (storage.py): "local", the folders on this PC, is the only choice. Any other value stops
+    # the studio at start-up.
     storage_backend: str = "local"
-    azure_storage_connection_string: str = ""
-    azure_storage_account_url: str = ""
-    azure_storage_container: str = "scene"
-    storage_sas_minutes: int = 15
     # Redis, for what several app processes share (shared.py): caches, live messages, rate limits. Empty = off, one
-    # process, as always. Azure Cache for Redis: rediss://:<access key>@<name>.redis.cache.windows.net:6380/0.
+    # process, as always. For example redis://127.0.0.1:6379/0.
     redis_url: str = ""
-    log_format: str = ""          # "json": each line the app writes as a JSON object (logs.py), for Azure Monitor
+    log_format: str = ""          # "json": each line the app writes as a JSON object (logs.py), for a log store
     # Search by meaning (semantic.py; needs pgvector and migration 0011's table): off by default. The vectors come from
     # an embedding API: "voyage" (Voyage AI, embedding_api_key) or "azure_openai" (embedding_endpoint, the deployment in
     # embedding_model, embedding_api_key).
@@ -77,8 +69,7 @@ class Settings:
     embedding_model: str = ""
     backup_dir: str = ""          # where the daily copies of the database go; empty = "backups" inside storage_dir
     backup_keep: int = 14         # how many days of copies are kept; 0 = no backups
-    # Which copies are made: the database's (pg_dump) and the media files'. On Azure both are off: the database has
-    # Azure's backups, Blob Storage its soft delete and versions.
+    # Which copies are made: the database's (pg_dump) and the media files'.
     backup_database: bool = True
     backup_files: bool = True
     # A weekly test that the newest database copy restores: it is loaded into a scratch database made with this account
@@ -104,10 +95,6 @@ class Settings:
     signup_invite: str = ""
     first_account_local: bool = True   # the first account (the admin) can only be made from the machine the app runs on
     session_days: int = 30
-    # While the render server does not answer, renders wait in the queue instead of failing one after another, and a
-    # render cut off by it going away goes back to the front of the queue (at most RESUMES times). Off only where there
-    # is no render server at all (the tests).
-    hold_queue_offline: bool = True
     secure_cookies: bool = False  # set true when the app is served over https
     signup_credits: int = 0       # credits a new account starts with (the console's Settings may set another number)
     signups_per_day: int = 3      # new accounts one visitor address may make in a day; 0 = no limit
@@ -119,8 +106,11 @@ class Settings:
 
 # Settings that hold a password or a key: they belong in the environment (SCENE_*, an env file),
 # not in config.json. One there is still read, for one more release, with a warning at start.
-SECRETS = ("database_url", "database_owner_url", "restore_test_url", "azure_storage_connection_string", "redis_url",
-           "embedding_api_key", "anthropic_api_key")
+SECRETS = ("database_url", "database_owner_url", "restore_test_url", "redis_url", "embedding_api_key", "anthropic_api_key")
+
+# Settings an older studio had and this one no longer reads (the Azure Blob storage, removed 2026-11-21). One still set
+# is ignored, with a warning at start, so a stale config.json or scene.env never stops the studio.
+RETIRED = ("azure_storage_connection_string", "azure_storage_account_url", "azure_storage_container", "storage_sas_minutes")
 
 
 def read_env_file(path):
@@ -155,5 +145,9 @@ def load_settings(config_file=None):
         if field.type is bool and isinstance(value, str):
             value = value.lower() in ("1", "true", "yes", "on")
         setattr(settings, field.name, field.type(value))
+    for name in RETIRED:
+        if name in saved or "SCENE_" + name.upper() in environment:
+            settings.warnings.append("{} is set but no longer read (the media are kept in local folders only): remove it "
+                                     "from config.json or the environment.".format(name))
     settings.config_file = str(config_file) if config_file.is_file() else ""
     return settings

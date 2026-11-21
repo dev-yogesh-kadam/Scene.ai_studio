@@ -340,8 +340,13 @@ def schema_problems(answer):
 
 
 def _workflows():
-    root = HERE.parents[1] / "workflows"
-    return {"{}/{}".format(p.parent.name, p.name[:-len(".studio.json")]) for p in root.glob("*/*.studio.json")}
+    """The ids of the evals studio's models (tests/studio_models.py, studio.studio): each is a workflow "<folder>/@<id>"."""
+    from scene.providers.workflows import workflow_id
+    tests = str(HERE.parent / "tests")
+    if tests not in sys.path:
+        sys.path.insert(0, tests)
+    import studio_models
+    return {workflow_id(m["capability"], m["id"]) for m in studio_models.MODELS} - {None}
 
 
 # ---------------------------------------------------------------- a run

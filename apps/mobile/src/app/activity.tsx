@@ -6,7 +6,7 @@ import { RefreshControl, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { listJobs, removeJob, retryJob } from '@scene/shared/api/runs';
-import { announcement, status } from '@scene/shared/api/studio';
+import { announcement } from '@scene/shared/api/studio';
 import { Banner, type Tone } from '@/components/Banner';
 import { Button, IconButton } from '@/components/Button';
 import { EmptyState } from '@/components/EmptyState';
@@ -38,7 +38,6 @@ export default function ActivityScreen() {
     // everything has ended; never while the screen is hidden.
     refetchInterval: (query) => (focused ? pollEvery(live, !!query.state.data?.jobs.some(isActive)) : false),
   });
-  const server = useQuery({ queryKey: ['status'], queryFn: status, refetchInterval: focused ? 20_000 : false });
   const notice = useQuery({
     queryKey: ['announcement'],
     queryFn: announcement,
@@ -133,12 +132,7 @@ export default function ActivityScreen() {
   if (jobs.data?.paused)
     banners.push({
       tone: 'warning',
-      text: 'An admin paused the renders. Your jobs wait in line and start when they resume.',
-    });
-  if (server.data && !server.data.online)
-    banners.push({
-      tone: 'warning',
-      text: "The render server is offline. Jobs wait and start by themselves when it's back.",
+      text: 'An admin paused the jobs. Yours wait in line and start when they resume.',
     });
   if (jobs.error) banners.push({ tone: 'danger', text: jobs.error.message });
 
@@ -210,7 +204,6 @@ export default function ActivityScreen() {
             refreshing={jobs.isRefetching && !jobs.isPending}
             onRefresh={() => {
               void jobs.refetch();
-              void server.refetch();
             }}
             progressViewOffset={barInset}
             tintColor={colors.textSecondary}

@@ -16,9 +16,6 @@ import {
   inUse,
   loadCatalog,
   loadWorkflow,
-  pickValue,
-  splitPick,
-  withModel,
   type Quote,
   type Slot,
   type Workflow,
@@ -56,8 +53,7 @@ const blank = (kind: Kind): Form => ({
   refNote: '',
 });
 
-const used = (form: Form) =>
-  new Set((form.wf?.refs ?? []).filter((s) => inUse(s, form.options, form.wf)).map((s) => s.id));
+const used = (form: Form) => new Set((form.wf?.refs ?? []).filter((s) => inUse(s, form.options)).map((s) => s.id));
 
 export function useActionForm({ project, startFrom }: { project: number | null; startFrom: Item | null }) {
   const client = useQueryClient();
@@ -98,25 +94,14 @@ export function useActionForm({ project, startFrom }: { project: number | null; 
     latest.current = { form, text };
   });
 
-  // `picked`: a workflow's id, or a generation server model as "<workflow id>#<model>" (jobForm.pickValue).
+  // `id`: the chosen model's workflow ("image/@nano-banana-pro").
   const selectWorkflow = useCallback(
-    async (picked: string, catalog?: WorkflowRow[]) => {
+    async (id: string, catalog?: WorkflowRow[]) => {
       try {
-        const [id, model] = splitPick(picked);
-        const now = latest.current.form;
-        if (model && now.wf?.id === id) {
-          // another model of the same workflow: the references and the prompt stay, the length keeps to the model
-          const next = withModel(now.wf, now.options, now.values, model);
-          setForm((was) => ({ ...was, ...next }));
-          userPrefs.setStudio({ workflows: { [now.kind]: picked } });
-          return;
-        }
         const wf = await loadWorkflow(id);
         const { form: was, text: typed } = latest.current;
-        const defaults = Object.fromEntries(wf.options.map((o) => [o.id, o.default]));
-        const fresh = Object.fromEntries(wf.controls.map((c) => [c.id, c.default]));
-        const chosen = model ? withModel(wf, defaults, fresh, model) : { options: defaults, values: fresh };
-        const options = chosen.options;
+        const options = Object.fromEntries(wf.options.map((o) => [o.id, o.default]));
+        const values = Object.fromEntries(wf.controls.map((c) => [c.id, c.default]));
         const to = { wf, slots: refSlots(wf, was.kind, options) };
         // The picture references the user gave, in order, go with them to the new model, as many as it takes.
         const from =
@@ -134,12 +119,12 @@ export function useActionForm({ project, startFrom }: { project: number | null; 
           refs: carried.refs,
           refNote: carried.note,
           allRefs: false,
-          values: chosen.values,
+          values,
           options,
           resolution: wf.size ? wf.size.resolution : null,
           orientation: wf.size ? wf.size.orientation : null,
         });
-        userPrefs.setStudio({ workflows: { [was.kind]: pickValue(wf, options) } });
+        userPrefs.setStudio({ workflows: { [was.kind]: wf.id } });
         setNote('');
       } catch (e) {
         showError(e);
@@ -163,13 +148,13 @@ export function useActionForm({ project, startFrom }: { project: number | null; 
         latest.current.form = { ...latest.current.form, catalog };
         setForm((now) => ({ ...now, catalog }));
         if (!catalog.length) {
-          setNote(`No ${kind} workflows yet. Save a ComfyUI workflow into the workflows/${kind} folder, then reload.`);
+          setNote(`No ${kind} models yet. An admin adds a provider key in the console, then reload.`);
           return;
         }
         // The model the user picked last for this kind (or the studio's default, when one is set). With neither, none
         // is picked for them: they choose it in the Model list.
         const last = userPrefs.studio().workflows[kind] || list.default || '';
-        const wanted = catalog.find((w) => w.id === splitPick(last)[0]);
+        const wanted = catalog.find((w) => w.id === last);
         if (wanted) await selectWorkflow(last, catalog);
       } catch (e) {
         showError(e);
@@ -285,7 +270,7 @@ export function useActionForm({ project, startFrom }: { project: number | null; 
     const wf = form.wf;
     if (!wf || blocked) return;
     if (byRole(wf, 'prompt') && !text.trim()) return setNote('Write a prompt first.');
-    const missing = wf.refs.filter((r) => inUse(r, form.options, wf)).find((r) => !r.optional && !refs[r.id]);
+    const missing = wf.refs.filter((r) => inUse(r, form.options)).find((r) => !r.optional && !refs[r.id]);
     if (missing) return setNote(`Add a file for "${missing.label.split(' (')[0]}".`);
     const dur = byRole(wf, 'duration');
     const ctx: Record<string, unknown> = {
@@ -312,7 +297,7 @@ export function useActionForm({ project, startFrom }: { project: number | null; 
       const extra: Record<string, { comfy_name: string; name: string }> = {};
       const inUseNow = used(form);
       for (const [slot, r] of Object.entries(refs)) {
-        // library items are sent to the render server now
+        // library items become references now
         if (!r.itemId || !inUseNow.has(slot)) continue;
         const ref = await asReference(r.itemId, r.takes);
         extra[slot] = { comfy_name: ref.comfy_name, name: ref.name };

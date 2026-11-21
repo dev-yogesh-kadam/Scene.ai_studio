@@ -157,42 +157,52 @@ def test_switched_off_resolutions_step_down_or_up(client):
     assert credits.resolutions_off() == {"video": ["1080"]}
 
 
+SEEDANCE = "video/@seedance_2_5"   # JOB's model: 480p, 720p and 1080p
+
+
 def test_a_job_at_a_resolution_switched_off_is_made_at_the_next_and_says_so(client):
     register(client)   # the first account: the admin
     desk = console(client)
-    assert desk.put("/api/admin/workflows/resolutions", json={"key": "video/h3_all_in_one", "off": ["1080"]}).json() == \
-        {"key": "video/h3_all_in_one", "off": ["1080"]}
+    desk.get("/api/admin/workflows")   # the console's Workflows section, as it opens
+    assert desk.put("/api/admin/workflows/resolutions", json={"key": SEEDANCE, "off": ["1080"]}).json() == \
+        {"key": SEEDANCE, "off": ["1080"]}
     assert desk.put("/api/admin/workflows/resolutions", json={"key": "video", "off": ["480", "720", "1080"]}).status_code == 400
     assert desk.put("/api/admin/workflows/resolutions", json={"key": "video/nope", "off": []}).status_code == 404
     assert desk.put("/api/admin/workflows/resolutions", json={"key": "video", "off": ["2160"]}).status_code == 400
-    assert desk.get("/api/admin/workflows/resolutions").json()["off"] == {"video/h3_all_in_one": ["1080"]}
+    assert desk.get("/api/admin/workflows/resolutions").json()["off"] == {SEEDANCE: ["1080"]}
     report = desk.get("/api/admin/workflows").json()
-    assert next(w for w in report["workflows"] if w["id"] == "video/h3_all_in_one")["resolutions_off"] == ["1080"]
+    assert next(w for w in report["workflows"] if w["id"] == SEEDANCE)["resolutions_off"] == ["1080"]
 
-    form = client.get("/api/workflows/video/h3_all_in_one").json()
-    assert form["resolutions"] == [480, 720, 768] and form["resolutions_off"] == [1080]
-    asked = dict(JOB, values={**JOB["values"], "501:value": 1080})
+    form = client.get("/api/workflows/video/@seedance_2_5").json()
+    assert form["resolutions"] == [480, 720] and form["resolutions_off"] == [1080]
+    asked = dict(JOB, options={**JOB["options"], "resolution": "1080p"})
     quote = client.post("/api/estimate", json=asked).json()
-    assert quote["resolution_note"] == "1080p is switched off for this workflow, so it is made at 768p."
-    reply = post_job(client, values=asked["values"]).json()
+    assert quote["resolution_note"] == "1080p is switched off for this workflow, so it is made at 720p."
+    reply = post_job(client, options=asked["options"]).json()
     assert reply["resolution_note"] == quote["resolution_note"]
     settings = next(j for j in client.get("/api/jobs").json()["jobs"] if j["id"] == reply["id"])["settings"]
-    assert settings["values"]["501:value"] == 768 and settings["resolution_note"] == reply["resolution_note"]
-    assert post_job(client).json()["resolution_note"] == ""   # 720, the default, is on
+    assert settings["options"]["resolution"] == "720p" and settings["resolution_note"] == reply["resolution_note"]
+    assert post_job(client).json()["resolution_note"] == ""   # 720p, JOB's, is on
 
 
-def test_a_workflow_of_a_fixed_size_steps_down_too(client):
+def test_a_models_resolutions_can_be_switched_off_on_a_studio_just_started(client):
+    register(client)
+    assert console(client).put("/api/admin/workflows/resolutions", json={"key": SEEDANCE, "off": ["1080"]}).status_code == 200
+
+
+def test_a_models_resolution_steps_down_for_its_kind_too(client):
     state = client.app.state
-    schema = workflows.describe(asyncio.run(state.catalog.load("video/video_v2v_ltx23_iclora")))
-    assert schema["size"]["resolution"] == 720
+    schema = workflows.describe(asyncio.run(state.catalog.load(SEEDANCE)))
+    assert schema["resolution_option"]["id"] == "resolution"
     state.credits.set_resolutions_off("video", ["720"])
-    settings = {"resolution": None}
+    settings = {"options": {"resolution": "720p"}}
     assert studio.fit_resolution(state, schema, settings) == "720p is switched off for this workflow, so it is made at 480p."
-    assert settings["resolution"] == 480 and settings["resolution_note"]
-    settings = {"resolution": 1080}
-    assert studio.fit_resolution(state, schema, settings) == "" and settings["resolution"] == 1080 and "resolution_note" not in settings
+    assert settings["options"]["resolution"] == "480p" and settings["resolution_note"]
+    settings = {"options": {"resolution": "1080p"}}
+    assert studio.fit_resolution(state, schema, settings) == "" and settings["options"]["resolution"] == "1080p"
+    assert "resolution_note" not in settings
     state.credits.set_resolutions_off("video", ["480", "720", "1080"])   # (the console refuses this; the studio says so)
     with pytest.raises(HTTPException):
-        studio.fit_resolution(state, schema, {"resolution": 720})
-    audio = workflows.describe(asyncio.run(state.catalog.load("audio/audio_transcribe")))
-    assert studio.fit_resolution(state, audio, {}) == ""   # no resolution to change
+        studio.fit_resolution(state, schema, {"options": {"resolution": "720p"}})
+    speech = workflows.describe(asyncio.run(state.catalog.load("audio/@speech")))
+    assert speech["resolutions"] == [] and studio.fit_resolution(state, speech, {}) == ""   # no resolution to change

@@ -137,8 +137,8 @@ export const BENCH: string[][] = [
 // Questions before signing up, answered from what the studio does.
 export const FAQ: string[][] = [
   [
-    'Do I need to know ComfyUI or own a GPU?',
-    'No. The studio runs the models on its render PC. You write, look and choose; there is no node graph to wire.',
+    'Do I need to know AI tools or own a GPU?',
+    'No. The studio runs the models for you. You write, look and choose; there is nothing to install or wire up.',
   ],
   [
     'Will my character look the same from shot to shot?',

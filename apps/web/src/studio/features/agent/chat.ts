@@ -64,6 +64,8 @@ export class AgentChat {
   halted = false; // Stop generation was pressed: the plan being carried out goes no further
   boarding = false; // a storyboard or an animation is being planned
   collecting = false;
+  collectAgain = false; // a job finished while results were being collected: collect once more after
+  collectRetry: ReturnType<typeof setTimeout> | null = null; // a finished job whose item was not in the library yet
   reservedCredits = 0; // promised to auto-retakes queued in this burst of reviews, not yet off the balance
   jobs: Job[] = [];
   credits = 0;

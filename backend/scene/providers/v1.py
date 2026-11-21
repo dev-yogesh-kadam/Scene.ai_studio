@@ -3,7 +3,7 @@ provider that speaks it (Studio_automation now; later any service of ours).
 
 - The key goes in `Authorization: Bearer`, never in the address or the body.
 - `POST /v1/jobs` carries an `Idempotency-Key` made from the studio's job id (and clip number), so a retry of the same
-  job never pays twice; `metadata.scene` is what ComfyUI's graphs carried as `extra_data.scene`.
+  job never pays twice; `metadata.scene` says who a job is for and where it was made (jobs._who).
 - A job is followed by polling `GET /v1/jobs/{id}` (every POLL_FIRST seconds, backing off to POLL_MOST).
 - Every error is mapped by the contract's table onto the three problem kinds of base.py.
 - Every answer's `X-Request-Id` is kept on the problem or the result, for the job's log.

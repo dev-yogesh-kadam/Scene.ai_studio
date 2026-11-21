@@ -4,6 +4,8 @@ on in its shots (what the cast was). One store for what the cast and the shared 
 import asyncio
 import json
 
+import pytest
+
 from scene import kit, memory
 from test_agent_conversation import model
 from test_agent_shots import hosted
@@ -85,20 +87,23 @@ def test_the_always_on_entries_fill_the_slots_meant_for_them_in_order(client):
                               ("Clearing", "clearing", "location"), ("Vlog Camera", "camera", "prop")):
         add(client, items[item], name, type_, always=True, project=project)
     on = kit.always(db, me["id"], project)
-    master = kit.fills(schema_of(client, "video/h3_all_in_one"), on)
-    # one main character and her other angle, one second person, the place and the prop: as many as the slots take
-    assert [(f["name"], f["slot"], f["said_as"]) for f in master] == [
-        ("Violet", "201:image", "the main character"), ("Violet", "202:image", "the main character"),
-        ("Alice", "203:image", "the second person"), ("Clearing", "205:image", "the background"), ("Vlog Camera", "206:image", "the prop")]
-    chunk = kit.fills(schema_of(client, "video/h3_chunk"), on)
-    assert [(f["name"], f["slot"]) for f in chunk if f["role"] == "character"] == [
-        ("Violet", "201:image"), ("Alice", "202:image"), ("Lily", "203:image"), ("Hazel", "204:image"), ("Madelyn", "212:image")]
+    # Seedance's list of reference pictures takes any of them: the characters first, one picture each, in their order,
+    # then the place and the prop. Its first and last frame are never filled from the kit.
+    seedance = kit.fills(schema_of(client, "video/@seedance_2_5"), on)
+    assert [(f["name"], f["slot"], f["said_as"]) for f in seedance] == [
+        ("Violet", "ref_1", "the main character"), ("Alice", "ref_2", "the second person"), ("Lily", "ref_3", "the third person"),
+        ("Hazel", "ref_4", "the fourth person"), ("Madelyn", "ref_5", "the fourth person"), ("Clearing", "ref_6", "the background"),
+        ("Vlog Camera", "ref_7", "the prop")]
+    # a model that takes fewer: as many as it takes
+    pictures = kit.fills(schema_of(client, "image/@nano_banana_pro"), on)
+    assert [f["name"] for f in pictures] == ["Violet", "Alice", "Lily", "Hazel", "Madelyn", "Clearing"]
+    assert kit.fills(schema_of(client, "video/@kling_4_0"), on) == []   # a first frame only
     # a shot that leaves the place out, and one that has Alice in a slot already (by her library item)
     alice = next(e for e in on if e["name"] == "Alice")
-    fewer = kit.fills(schema_of(client, "video/h3_all_in_one"), on, left_out={next(e["id"] for e in on if e["name"] == "Clearing")},
+    fewer = kit.fills(schema_of(client, "video/@seedance_2_5"), on, left_out={next(e["id"] for e in on if e["name"] == "Clearing")},
                       used_items={alice["made_from"]})
-    assert [(f["name"], f["slot"]) for f in fewer] == [("Violet", "201:image"), ("Violet", "202:image"), ("Lily", "203:image"),
-                                                       ("Vlog Camera", "206:image")]
+    assert [(f["name"], f["slot"]) for f in fewer] == [("Violet", "ref_1"), ("Lily", "ref_2"), ("Hazel", "ref_3"), ("Madelyn", "ref_4"),
+                                                       ("Vlog Camera", "ref_5")]
     words = kit.described(on)
     assert 'character "Violet" (asset %d): in prompts call it "the main character"' % on[0]["id"] in words
     assert words.count('"Violet"') == 1 and '"leave_out"' in words
@@ -109,12 +114,12 @@ def test_a_planned_shot_gets_the_always_on_entries_but_those_it_leaves_out(clien
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     violet = add(client, picture(client, me["id"], "v", project=project), "Violet", "character", True, project)
     clearing = add(client, picture(client, me["id"], "c", project=project), "Clearing", "location", True, project)
-    shot = {"tool": "generate", "workflow": "video/h3_all_in_one", "name": "Close-up", "prompt": "The main character smiles at the camera."}
+    shot = {"tool": "generate", "workflow": "video/@seedance_2_5", "name": "Close-up", "prompt": "The main character smiles at the camera."}
     asked = model(monkeypatch, client, {"thought": "", "reply": "Two shots.", "steps": [
         dict(shot, name="Wide"), dict(shot, leave_out=[clearing["id"]])]})
     plan = client.post("/api/agent/plan", json={"instruction": "two shots of Violet", "project_id": project}).json()
     wide, close = plan["steps"]
-    assert [(u["asset"], u["slot"], u["cast"]) for u in wide["uses"]] == [(violet["id"], "201:image", True), (clearing["id"], "205:image", True)]
+    assert [(u["asset"], u["slot"], u["cast"]) for u in wide["uses"]] == [(violet["id"], "ref_1", True), (clearing["id"], "ref_2", True)]
     assert [u["asset"] for u in close["uses"]] == [violet["id"]]
     assert 'character "Violet" (asset %d)' % violet["id"] in asked[0] and '"always": true' in asked[0]
 
@@ -177,37 +182,40 @@ def test_assets_of_no_project_are_not_used_anywhere(client):
     assert client.post("/api/kit/import", json={"project_id": project, "ids": [1]}).status_code in (404, 405)
 
 
-def test_at_names_in_a_prompt_go_into_the_slots_that_fit_them(client, monkeypatch):
+# A form whose reference slots say what goes in them: a character and her other angle, a second person, a background
+# (kit.SLOT_WORDS reads the labels).
+LABELLED = {"slots": {}, "refs": [{"id": "1:image", "label": "Character 1", "kind": "image"},
+                                  {"id": "2:image", "label": "Character 1 (other angle)", "kind": "image"},
+                                  {"id": "3:image", "label": "Character 2", "kind": "image"},
+                                  {"id": "4:image", "label": "Background", "kind": "image"}]}
+
+
+def test_at_names_in_a_prompt_go_into_the_slots_that_fit_them(client):
     me = register(client)
     project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     violet = add(client, picture(client, me["id"], "v", project=project, about="A woman with wavy purple hair."), "Violet", "character", False, project)
     clearing = add(client, picture(client, me["id"], "c", project=project), "Bonfire Clearing", "location", False, project)
-    schema = schema_of(client, "video/h3_all_in_one")
     on = kit.entries(client.app.state.db, me["id"], project)
-    said, placed = kit.mentions(schema, "@Violet walks into @bonfire clearing at night. @Violet smiles. @Nobody waves.", on)
+    said, placed = kit.mentions(LABELLED, "@Violet walks into @bonfire clearing at night. @Violet smiles. @Nobody waves.", on)
     assert said == "the main character walks into the background at night. the main character smiles. @Nobody waves."
-    assert placed == {"201:image": violet["id"], "205:image": clearing["id"]}
+    assert placed == {"1:image": violet["id"], "4:image": clearing["id"]}
     # a slot the user filled already is left alone: the next one that fits is used
-    said, placed = kit.mentions(schema, "@Violet", on, taken={"201:image"})
-    assert (said, placed) == ("the second person", {"203:image": violet["id"]})   # 202 is the main character's other angle
-    # with no slot for her, she is said by what she shows
-    plain = dict(schema, refs=[])
-    assert kit.mentions(plain, "@Violet dances.", on) == ("A woman with wavy purple hair dances.", {})
+    said, placed = kit.mentions(LABELLED, "@Violet", on, taken={"1:image"})
+    assert (said, placed) == ("the second person", {"3:image": violet["id"]})   # 2 is the main character's other angle
+    # with no slot for her (a model that takes no pictures), she is said by what she shows
+    words_only = schema_of(client, "image/@seedream_5")
+    assert kit.mentions(words_only, "@Violet dances.", on) == ("A woman with wavy purple hair dances.", {})
 
-    # through the Create page: the job gets her as its reference, and the prompt the words for her slot
-    sent = []
 
-    async def upload(name, data, content_type=None):
-        sent.append(name)
-        return name
-    monkeypatch.setattr(client.app.state.comfy, "upload", upload)
-    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "@Violet waves at the camera."}, "options": {"engine": "reference"},
-                "project_id": project}
+def test_at_names_go_into_a_models_list_of_reference_pictures_from_the_create_page(client):
+    me = register(client)
+    project = client.post("/api/projects", json={"name": "Film"}).json()["id"]
+    add(client, picture(client, me["id"], "v", project=project, about="A woman with wavy purple hair."), "Violet", "character", False, project)
+    settings = {"workflow": "video/@seedance_2_5", "values": {"2:value": "@Violet waves at the camera."}, "project_id": project}
     made = client.post("/api/jobs", data={"settings": json.dumps(settings)})
     assert made.status_code == 200, made.text
-    job = client.app.state.db.one("SELECT settings FROM jobs WHERE id = ?", (made.json()["id"],))
-    kept = json.loads(job["settings"])
-    assert kept["values"]["100:value"] == "the main character waves at the camera." and "201:image" in kept["refs"]
+    kept = json.loads(client.app.state.db.one("SELECT settings FROM jobs WHERE id = ?", (made.json()["id"],))["settings"])
+    assert "ref_1" in (kept.get("refs") or {}), (kept["values"], kept.get("refs"))
 
 
 def test_a_model_that_takes_no_pictures_is_told_what_the_always_on_entries_show():

@@ -199,8 +199,8 @@ export function YouView({
   return (
     <>
       <p className={cx('small muted', s['memory-lead'])}>
-        What the agent remembers of you in every project: how you like to work and what you keep using. It never
-        overrides what you ask.
+        What the agent remembers of you in this module: how you like to work here and what you keep using. Other
+        modules keep their own. It never overrides what you ask.
       </p>
       {found.entries.length ? (
         <div className={s['mem-inner']}>

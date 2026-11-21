@@ -142,9 +142,10 @@ test('Servers: Add key opens its form, and Langfuse its own; Cancel leaves each'
   await main(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(main(page).getByLabel('Key', { exact: true })).toBeHidden();
   await main(page).getByRole('button', { name: 'Add', exact: true }).click(); // Langfuse's
-  await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeVisible();
+  await expect(main(page).getByPlaceholder('Langfuse')).toBeVisible();
   await main(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(main(page).getByPlaceholder('Zoro, Kaggle…')).toBeHidden();
+  await expect(main(page).getByPlaceholder('Langfuse')).toBeHidden();
+  await expect(main(page)).not.toContainText(/ComfyUI|Provider router/);
 });
 
 test('Servers, Providers: a key that fails is not saved; one that works shows its models and credits, never itself', async ({
@@ -168,11 +169,14 @@ test('Servers, Providers: a key that fails is not saved; one that works shows it
   await form.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(form).toBeHidden(); // it worked: the form closes
   const provider = main(page).locator('[data-testid^="provider-"]', { hasText: 'Fake generation server' });
-  await expect(provider.getByText('2 models · 1 key')).toBeVisible();
+  await expect(provider.getByText('3 models · 1 key')).toBeVisible();
   await expect(provider.getByText('Works · 91,296 credits')).toBeVisible();
   await expect(provider.getByText('…1234')).toBeVisible();
   await expect(main(page)).not.toContainText(LIVE_KEY);
-  await expect(main(page).getByTestId('router-words')).toContainText('Off:');
+  // What makes what: read only, each kind of work with the models that make it (the setup's key makes pictures)
+  const makes = main(page).getByTestId('what-makes-what');
+  await expect(makes.getByTestId('capability-image')).toContainText('Picture');
+  await expect(makes.getByRole('button')).toHaveCount(0);
   await provider.getByRole('button', { name: 'Remove' }).last().click(); // the provider's own, after its key's
   await page
     .getByRole('dialog')
@@ -261,12 +265,11 @@ test('Sessions: the list, and its filter', async ({ page }) => {
   await expect(main(page).getByText(/No session matches|No agent tab/)).toBeVisible();
 });
 
-test('System: its cards, and Check now', async ({ page }) => {
+test('System: its cards, and no render server', async ({ page }) => {
   await open(page, 'system');
   for (const name of [
     'Alerts',
     'Maintenance',
-    'Render server',
     'Agent model',
     'Scene.ai app',
     'Disk',
@@ -279,8 +282,8 @@ test('System: its cards, and Check now', async ({ page }) => {
   await expect(main(page).getByText(/ · PostgreSQL$/)).toBeVisible();
   await expect(main(page).getByText(/pg_restore -h localhost/)).toBeVisible();
   await expect(main(page).getByText(/SQLite|scene\.db/)).toHaveCount(0);
-  await main(page).getByRole('button', { name: 'Check now' }).click();
-  await expect(main(page).getByRole('button', { name: 'Check now' })).toBeEnabled();
+  await expect(main(page).getByRole('heading', { name: 'Render server' })).toHaveCount(0);
+  await expect(main(page).getByRole('button', { name: 'Check now' })).toHaveCount(0);
 });
 
 test('System, Checks: each check a row, ok or its problem (the checks added to the answer here), and no axe problem', async ({
@@ -293,7 +296,6 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
       ...((await real.json()) as Record<string, unknown>),
       checks: {
         database: { online: true, seconds: 0.002, detail: '' },
-        render: { online: false, url: 'http://render:8188', since: now - 600, detail: '' },
         model: {
           mode: 'this_pc',
           online: true,
@@ -323,8 +325,8 @@ test('System, Checks: each check a row, ok or its problem (the checks added to t
   });
   await open(page, 'system');
   const checks = card(page, 'Checks');
-  await expect(checks.getByText('2 problems')).toBeVisible();
-  await expect(checks.getByRole('row', { name: /Render server.*Problem.*http:\/\/render:8188/ })).toBeVisible();
+  await expect(checks.getByText('1 problem')).toBeVisible();
+  await expect(checks.getByRole('row', { name: /Render server/ })).toHaveCount(0);
   await expect(checks.getByRole('row', { name: /Motion pages.*Run npm install in motion/ })).toBeVisible();
   await expect(
     checks.getByRole('row', {
@@ -466,12 +468,7 @@ test('Pricing: the cards, a workflow opened, a package added and deleted', async
 
 test("Workflows: the cards, the filter, and a workflow's drawer", async ({ page }) => {
   await open(page, 'workflows');
-  for (const name of [
-    'Changes from the render PC',
-    'Compared with the render server',
-    'Resolutions for everyone',
-    'Workflows',
-  ])
+  for (const name of ['Models offered', 'Resolutions for everyone', 'Workflows'])
     await expect(main(page).getByRole('heading', { name, exact: true, level: 2 })).toBeVisible();
   const list = card(page, 'Workflows');
   await list.getByRole('button', { name: 'Off', exact: true }).click();
@@ -481,7 +478,7 @@ test("Workflows: the cards, the filter, and a workflow's drawer", async ({ page 
   const drawer = page.locator('[role=dialog]');
   for (const name of ['Offered to', 'Try it', 'About it'])
     await expect(drawer.getByRole('heading', { name })).toBeVisible();
-  await expect(drawer.getByRole('heading', { name: /^Versions \(/ })).toBeVisible();
+  await expect(drawer.getByRole('heading', { name: /^Versions|^Missing/ })).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: 'Test run' })).toBeVisible();
   await drawer.getByRole('button', { name: 'Admins only' }).click();
   await expect(drawer.getByRole('button', { name: 'Admins only' })).toHaveAttribute('aria-pressed', 'true');

@@ -45,7 +45,7 @@ One camera per place, chosen at its first anchor and kept for every later state 
 
 ## 4. Prompt
 Seedream bends limbs and drops people unless the prompt follows Keep → Subject → Style: 80–150 words (up to 200 with 4+ figures that have sheets; extras don't count; one short clause each: where, facing, posture, a hand only when it holds something), positive words only (no "no", "without", "never"), one choice each (no "or", "if"), no digits, counts or measures ("a few steps up", never "the third stair") except the Image numbers.
-**Studio:** the anchors are made on FLUX.2 dev (Seedream is not here); the advice above stands for it as written, and "Image N" is FLUX.2's "image N", numbered in the order the references are given.
+**Studio:** the anchors are made on Seedream 5.0 Pro (`image/@seedream-5-0-pro`, up to 10 reference pictures) unless the chat chose another; the advice above stands for it as written, and "Image N" is its "image N", numbered in the order the references are given.
 ```
 Strictly keep the outfit and facial features of the figures in Image 1 and Image 2 completely unchanged.
 The figure in Image 1 <stands / sits / lies> <where in the place: near, mid or far; left, centre or right; against which set piece>, <facing which way against the camera>, <posture>, <her/his right/left hand on one object>. The figure in Image 2 <…>, <where against the figure in Image 1>.   (one sentence each)
@@ -60,7 +60,7 @@ Live-action film frame, camera <where it stands in the set>, looking toward <wha
 - A changed look with no look sheet: right after the Keep sentence, one sentence of the change ("The gown of the figure in Image 1 is soaked dark with red wine.").
 
 ## 5. Generate
-All anchors in one response: `image_create_edit` with FLUX.2 dev (`image/image_t2i_flux2_dev`), `resolution: 2K`, `aspect_ratio: 16:9` always, even for a 9:16 or 1:1 video (the anchor covers the whole place), references in the prompt's Image order: people, each in the look worn at that state, then creatures and props, the location sheet last. A later state of a place is a new generation from the same camera, never an edit of the earlier anchor. **Studio:** one "generate" step per anchor on FLUX.2 dev, final quality, landscape at its largest size (for 2K), the references in "uses" in that order, "save_to" "/anchors/<k>/image" (its library id is then at /anchors/<k>/image/item); all anchors in one plan, twelve steps at most.
+All anchors in one response: `image_create_edit` with `model_name: seedream-5-0-pro`, `resolution: 2K`, `aspect_ratio: 16:9` always, even for a 9:16 or 1:1 video (the anchor covers the whole place), references in the prompt's Image order: people, each in the look worn at that state, then creatures and props, the location sheet last. A later state of a place is a new generation from the same camera, never an edit of the earlier anchor. **Studio:** one "generate" step per anchor on Seedream 5.0 Pro (`image/@seedream-5-0-pro`; `model_name` is its workflow), its "resolution" 2K and its shape 16:9, the references in its numbered reference pictures through "uses" in that order (ref_1, ref_2 …, at most 10), "save_to" "/anchors/<k>/image" (its library id is then at /anchors/<k>/image/item); all anchors in one plan, twelve steps at most.
 
 Then post one CSV in chat: `anchor,scene and state,clips,link`. **Studio:** post it once the anchors are made, the link the [[item:<id>]] of each.
 
@@ -68,4 +68,4 @@ Then post one CSV in chat: `anchor,scene and state,clips,link`. **Studio:** post
 ```
 /anchors/<k>    image, scene, place, camera, positions, clips, from_shot
 ```
-`positions` in set terms ("two paces behind Cal, at the foot of the stair"); `clips` lists every clip that takes this anchor. A clip takes the anchor of every state it covers, in order, first among its references. **Studio:** on H3 Chunk the anchor goes in the background / location slot, the scene anchor (<Picture 1>).
+`positions` in set terms ("two paces behind Cal, at the foot of the stair"); `clips` lists every clip that takes this anchor. A clip takes the anchor of every state it covers, in order, first among its references. **Studio:** the anchor is the clip's first reference picture (ref_1, @Image1), before the sheets.

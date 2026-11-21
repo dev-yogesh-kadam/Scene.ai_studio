@@ -1,5 +1,6 @@
 """The Scene Provider API v1 adapter (providers/v1.py) against a fake v1 server (fake_v1.py), and a job made through it
-with the provider router on (jobs._run_provider); shadow mode, and ComfyUI's renders left as they were."""
+(jobs._run_provider): offered, made, filed, failed over, chained; and a job of an old ComfyUI workflow, which fails at
+once. Each job test adds its own provider (no_models): the test studio's is studio_models.py's."""
 
 import asyncio
 import json
@@ -130,12 +131,10 @@ def prompt_of(client):
     return schema, roles
 
 
-def test_with_the_router_on_a_providers_model_is_offered_made_and_filed(client, monkeypatch):
+@pytest.mark.no_models
+def test_a_providers_model_is_offered_made_and_filed(client, monkeypatch):
     fake = FakeV1()
     desk, _ = a_provider(client, monkeypatch, fake)
-    ids = [w["id"] for w in client.get("/api/workflows").json()["workflows"]]
-    assert "video/@seedance_2_5" not in ids and "video/generation_video" in ids   # off: the ComfyUI disguise as before
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
     listed = {w["id"]: w for w in client.get("/api/workflows").json()["workflows"]}
     assert "video/@seedance_2_5" in listed and "audio/@speech" in listed and "video/generation_video" not in listed
     assert listed["video/@seedance_2_5"]["source"] == "generation" and listed["video/@seedance_2_5"]["title"] == "Seedance 2.5"
@@ -163,10 +162,10 @@ def test_with_the_router_on_a_providers_model_is_offered_made_and_filed(client, 
     assert client.app.state.router.running == {}   # its key was let go
 
 
+@pytest.mark.no_models
 def test_a_test_key_stops_at_the_providers_quote_and_the_credits_come_back(client, monkeypatch):
     fake = FakeV1()
     desk, _ = a_provider(client, monkeypatch, fake, secret="sa_test_beta5678")
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
     _, roles = prompt_of(client)
     before = client.get("/api/auth/me").json()["credits"]
     job_id = client.post("/api/jobs", data={"settings": json.dumps(dict(SEEDANCE_JOB, values={roles["prompt"]: "a cat"}))}).json()["id"]
@@ -175,12 +174,12 @@ def test_a_test_key_stops_at_the_providers_quote_and_the_credits_come_back(clien
     assert client.get("/api/auth/me").json()["credits"] == before
 
 
+@pytest.mark.no_models
 def test_a_revoked_key_fails_over_to_the_next_key_and_is_shown_invalid(client, monkeypatch):
     fake = FakeV1(live=("sa_live_alpha1234", "sa_live_gamma9999"))
     desk, added = a_provider(client, monkeypatch, fake)
     provider_id = added["provider_id"]
     desk.post("/api/admin/providers/keys", json={"provider_id": provider_id, "secret": "sa_live_gamma9999", "label": "studio B"})
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
     fake.revoked.add("sa_live_alpha1234")   # revoked in Studio_automation's panel
     _, roles = prompt_of(client)
     job_id = client.post("/api/jobs", data={"settings": json.dumps(dict(SEEDANCE_JOB, values={roles["prompt"]: "a cat"}))}).json()["id"]
@@ -191,10 +190,10 @@ def test_a_revoked_key_fails_over_to_the_next_key_and_is_shown_invalid(client, m
     assert json.loads(client.app.state.db.one("SELECT provider FROM jobs WHERE id = ?", (job_id,))["provider"])["key"] == "studio B"
 
 
+@pytest.mark.no_models
 def test_with_no_key_for_a_model_the_job_fails_at_once_and_its_credits_come_back(client, monkeypatch):
     fake = FakeV1()
     desk, added = a_provider(client, monkeypatch, fake)
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
     _, roles = prompt_of(client)
     before = client.get("/api/auth/me").json()["credits"]
     # Its one key found broken after the model was offered (the page still shows it): the queue fails it at once.
@@ -208,43 +207,17 @@ def test_with_no_key_for_a_model_the_job_fails_at_once_and_its_credits_come_back
     assert client.get("/api/auth/me").json()["credits"] == before
 
 
-# ---------------------------------------------------------------- shadow mode, and ComfyUI as it was
+# ---------------------------------------------------------------- a job of a ComfyUI workflow
 
-def test_shadow_mode_changes_nothing_about_where_a_render_runs(client, monkeypatch):
-    fake = FakeV1()
-    desk, _ = a_provider(client, monkeypatch, fake)
-    jobs, pool = client.app.state.jobs, client.app.state.comfy_pool
-    pool.nodes = {s["url"]: (None, time.time()) for s in pool.servers()}
-    job = {"id": "j-shadow", "workflow": "image/image_t2i_flux3_klein", "settings": json.dumps({"options": {}}), "user_id": 1}
-
-    def place():
-        return asyncio.run(jobs._place(dict(job), {}))
-    off = place()
-    desk.put("/api/admin/providers/router", json={"mode": "shadow"})
-    assert place() == off and off[0]["url"] == "http://127.0.0.1:9"   # the balancer's pick, whatever the router says
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
-    assert place() == off   # ComfyUI's workflows stay with the balancer, on too
-    desk.put("/api/admin/providers/router", json={"mode": "shadow"})
-    db = client.app.state.db
-    db.run("INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created) VALUES (?, ?, 'x', ?, 'video', '{}', 'running', ?)",
-           ("j-gen", client.get("/api/auth/me").json()["id"], "video/generation_video", time.time()))
-    disguised = {"id": "j-gen", "workflow": "video/generation_video", "settings": {"options": {"model": "seedance_2_5"}}}
-    asyncio.run(jobs._shadow(disguised, {"name": "Generation server", "url": "http://fake-v1"}))
-    note = json.loads(db.one("SELECT provider FROM jobs WHERE id = 'j-gen'")["provider"])["shadow"]
-    assert note["would"]["provider"] == "Generation server" and note["model"] == "seedance_2_5" and note["agree"] is True
-    assert db.one("SELECT server FROM jobs WHERE id = 'j-gen'")["server"] in ("", None)   # the job's own row untouched
-
-
-def test_the_comfyui_adapter_lists_the_studios_workflows_as_its_models(client):
-    from scene.providers.comfyui import ComfyUI, capability_of
-    assert [capability_of(w) for w in ("video/h3_all_in_one", "audio/audio_transcribe_video", "audio/audio_separate_voice",
-                                       "upscaler/utility_seedvr2_3b_int8_upscale_video", "image/image_t2i_flux2_dev",
-                                       "video/video_lipsync", "audio/audio_minimax_music_3")] == [
-        "text_to_video", "transcribe", "separate_voice", "upscale_video", "image", "lip_sync", "music"]
-    found = asyncio.run(ComfyUI("http://127.0.0.1:9", client.app.state.catalog).models(""))
-    ids = {m["id"] for m in found}
-    assert "video/h3_all_in_one" in ids and not any("generation_" in i for i in ids)
-    assert next(m for m in found if m["id"] == "audio/audio_transcribe")["capability"] == "transcribe"
+def test_a_job_of_an_old_comfyui_workflow_fails_at_once(client):
+    """A job still queued from before ComfyUI went (its workflow a file's, not a model's) is never sent anywhere."""
+    from scene import jobs
+    me = register(client)
+    manager = client.app.state.jobs
+    job_id = manager.add(me["id"], "old shot", "video/h3_all_in_one", {"workflow": "video/h3_all_in_one", "values": {}}, "", 60, 0)
+    ended = wait_for(client, job_id)
+    assert ended["status"] == "failed" and ended["error"] == jobs.NOT_A_MODEL.format("video/h3_all_in_one")
+    assert not [c for c in client.provider.calls if c["path"] == "/v1/jobs"]   # nothing reached a provider
 
 
 def tiny_mp4(seconds=1):
@@ -260,11 +233,11 @@ def tiny_mp4(seconds=1):
         return out.read_bytes()
 
 
+@pytest.mark.no_models
 def test_a_long_video_is_chained_clip_by_clip_on_the_providers_model(client, monkeypatch):
     fake = FakeV1()
     fake.output = tiny_mp4()
     desk, _ = a_provider(client, monkeypatch, fake)
-    desk.put("/api/admin/providers/router", json={"mode": "on"})
     schema, roles = prompt_of(client)
     job = dict(SEEDANCE_JOB, clips=2, values={roles["prompt"]: "she walks to the stall\n---\nshe sits by the fountain", roles["duration"]: 5})
     made = client.post("/api/jobs", data={"settings": json.dumps(job)})

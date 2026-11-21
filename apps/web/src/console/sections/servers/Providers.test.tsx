@@ -38,10 +38,9 @@ const KEY: ProviderKey = {
 const DATA: ProvidersData = {
   kinds: {
     scene_provider_v1: 'Scene provider (v1)',
-    comfyui: 'ComfyUI',
     anthropic: 'Anthropic',
   },
-  self_hosted: ['scene_provider_v1', 'comfyui'],
+  self_hosted: ['scene_provider_v1'],
   providers: [
     {
       id: 1,
@@ -57,8 +56,6 @@ const DATA: ProvidersData = {
       agent: true,
     },
   ],
-  router: 'off',
-  modes: ['off', 'shadow', 'on'],
   agent_provider: 1,
   testing: '',
 };
@@ -84,7 +81,6 @@ const WITH_V1: ProvidersData = {
 };
 
 const COVERAGE: CoverageData = {
-  router: 'on',
   capabilities: [
     {
       capability: 'transcribe',
@@ -94,43 +90,27 @@ const COVERAGE: CoverageData = {
           id: 'transcribe',
           name: 'Transcription',
           providers: ['Zoro'],
-          keys: [{ label: 'A', mode: 'live', status: 'ok' }],
+          keys: [
+            { label: 'A', mode: 'live', status: 'ok' },
+            { label: 'B', mode: 'test', status: 'ok' },
+          ],
         },
       ],
       live: true,
-      comfy: [{ id: 'audio/audio_transcribe', title: 'Transcribe Audio' }],
-      comfyui_on: true,
-      can_switch_off: true,
-      why_not: '',
-      state: 'both',
-    },
-    {
-      capability: 'outpaint',
-      words: 'Outpaint',
-      models: [],
-      live: false,
-      comfy: [{ id: 'video/video_outpaint_wan_vace', title: 'Outpaint' }],
-      comfyui_on: true,
-      can_switch_off: false,
-      why_not: 'No provider key offers it yet.',
-      state: 'comfyui',
+      state: 'provider',
     },
     {
       capability: 'music',
       words: 'Music',
       models: [],
       live: false,
-      comfy: [],
-      comfyui_on: true,
-      can_switch_off: false,
-      why_not: 'x',
       state: 'none',
     },
   ],
 };
 
 // What was sent to the studio; each answer is the next of `answers`. What makes what (asked when the part shows) is
-// answered with `coverage` and not counted, unless it is a change (PUT).
+// answered with `coverage` and not counted.
 function serve(...answers: unknown[]) {
   return serveWith(COVERAGE, ...answers);
 }
@@ -236,16 +216,6 @@ describe('the Providers part', () => {
     expect(sent[1].body).toMatchObject({ provider_id: 3, save_anyway: true, secret: 'sa_live_wrong0000' });
   });
 
-  it('switches the router and says what each position does', async () => {
-    const user = userEvent.setup();
-    const sent = serve({ ...DATA, router: 'shadow' });
-    render(<ProvidersPart data={DATA} refresh={async () => undefined} />);
-    expect(screen.getByTestId('router-words')).toHaveTextContent('Off: renders go the way they always did');
-    await user.click(screen.getByRole('button', { name: 'Shadow' }));
-    expect(sent[0]).toMatchObject({ url: '/api/admin/providers/router', method: 'PUT', body: { mode: 'shadow' } });
-    expect(screen.getByTestId('router-words')).toHaveTextContent('Shadow: renders go the way they always did');
-  });
-
   it('shows what a key unlocks', () => {
     serve();
     const unlocks = [
@@ -303,34 +273,17 @@ describe('the Providers part', () => {
     expect(sent[1].body.kind).toBeUndefined();
   });
 
-  it('says what makes what, and stops ComfyUI for one kind of work', async () => {
-    const user = userEvent.setup();
-    const after: CoverageData = {
-      ...COVERAGE,
-      capabilities: [
-        { ...COVERAGE.capabilities[0], comfyui_on: false, state: 'provider' },
-        ...COVERAGE.capabilities.slice(1),
-      ],
-    };
-    const sent = serve(after);
+  it('says what makes what: each kind of work, its models and their keys, read only', async () => {
+    const sent = serve();
     render(<ProvidersPart data={WITH_V1} refresh={async () => undefined} />);
     const transcribe = await screen.findByTestId('capability-transcribe');
-    expect(transcribe).toHaveTextContent('Providers and ComfyUI');
-    expect(screen.queryByTestId('capability-music')).not.toBeInTheDocument(); // nothing makes it: not listed
-    const outpaint = screen.getByTestId('capability-outpaint');
-    expect(within(outpaint).getByRole('button', { name: 'Stop using ComfyUI' })).toBeDisabled();
-    expect(outpaint).toHaveTextContent('No provider key offers it yet.');
-    expect(screen.getByTestId('what-makes-what')).toHaveTextContent('ComfyUI still makes 2 kinds of work');
-    await user.click(within(transcribe).getByRole('button', { name: 'Stop using ComfyUI' }));
-    expect(sent[0]).toMatchObject({
-      url: '/api/admin/providers/capabilities/transcribe',
-      method: 'PUT',
-      body: { comfyui: false },
-    });
-    expect(await screen.findByText('Providers only')).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId('capability-transcribe')).getByRole('button', { name: 'Use ComfyUI again' }),
-    ).toBeEnabled();
+    expect(transcribe).toHaveTextContent('Transcription');
+    expect(transcribe).toHaveTextContent('A, B (test key)');
+    expect(screen.getByTestId('capability-music')).toHaveTextContent('Nothing makes this yet: add a provider key');
+    expect(screen.getByTestId('what-makes-what')).toHaveTextContent('Nothing makes 1 kind of work yet');
+    expect(within(screen.getByTestId('what-makes-what')).queryByRole('button')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/ComfyUI|router/i);
+    expect(sent).toEqual([]); // only read
   });
 });
 

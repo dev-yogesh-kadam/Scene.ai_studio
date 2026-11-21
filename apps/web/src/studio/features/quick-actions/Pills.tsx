@@ -62,7 +62,7 @@ export function Pills({ action }: { action: ActionForm }) {
       {dur && (
         <Pill
           name="Length"
-          choices={lengthChoices(wf, form.options, Number(form.values[dur.id])).map((d) => ({
+          choices={lengthChoices(Number(form.values[dur.id])).map((d) => ({
             id: d,
             label: d + ' s',
           }))}
@@ -117,7 +117,7 @@ export function Pills({ action }: { action: ActionForm }) {
           />
         ))}
       {wf.options
-        .filter((o) => !o.top && offered(o, form.options) && !(wf.source === 'generation' && o.id === 'model'))
+        .filter((o) => !o.top && offered(o, form.options))
         .map((o) => (
           <Pill
             key={o.id}

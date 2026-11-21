@@ -49,7 +49,7 @@ function Accounts({
         <h2>Accounts</h2>
       </div>
       <p className="muted small">
-        The render servers and the agent&apos;s model servers are set in Servers &amp; APIs.
+        The model providers and the agent&apos;s model servers are set in Servers &amp; APIs.
       </p>
       <label className="check" style={{ marginTop: 0 }}>
         <input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} />

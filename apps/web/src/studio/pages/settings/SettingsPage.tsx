@@ -73,8 +73,8 @@ export default function SettingsPage() {
               <h2>Administration</h2>
             </div>
             <p className="muted">
-              Users, credits, the render server and every job are managed in the admin console. It is a site of its own,
-              with its own sign-in.
+              Users, credits, the model providers and every job are managed in the admin console. It is a site of its
+              own, with its own sign-in.
             </p>
             <a className="btn" style={{ marginTop: 12 }} href={consoleAddress(user)} target="_blank" rel="noopener">
               Open admin console

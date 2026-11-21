@@ -111,12 +111,12 @@ def test_a_question_needs_two_options():
 
 def test_a_model_named_earlier_in_the_conversation_stays_offered(client, monkeypatch):
     register(client)
-    monkeypatch.setattr(client.app.state.settings, "default_workflow", "video/h3_all_in_one")   # as on the studio PC
+    monkeypatch.setattr(client.app.state.settings, "default_workflow", "video/@seedance_2_5")
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "ok", "steps": []})
-    client.post("/api/agent/plan", json={"instruction": "looks good, next step", "direction": "Models: video LTX-2.5, image FLUX.2 Klein 9B."})
+    client.post("/api/agent/plan", json={"instruction": "looks good, next step", "direction": "Models: video Kling 4.0, image Nano Banana Pro."})
     offered = seen[-1][1]["content"]
-    assert '"video/video_ltx2_5_t2v"' in offered       # named in the notes, so still offered
-    assert '"video/video_wan_animate2"' not in offered    # never named: left for the Create page
+    assert '"video/@kling_4_0"' in offered       # named in the notes, so still offered
+    assert '"video/@lip_sync"' not in offered    # never named: left for the Create page
 
 
 def test_the_tools_work_is_streamed_while_the_model_thinks(client, monkeypatch):
@@ -147,7 +147,7 @@ def test_a_runs_step_may_use_its_own_working_files(client, monkeypatch):
     db = db_of(client)
     ref = db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, run, created) "
                  "VALUES (?, 'edit/reference', 'image', 'Maya at 1500', 'maya.png', '{}', '{}', 'pm-1', 1)", (me["id"],))
-    use = dict(STEP, uses=[{"item": ref, "asset": 0, "slot": "201:image"}])
+    use = dict(STEP, uses=[{"item": ref, "asset": 0, "slot": "ref_1"}])
     hosted(monkeypatch, client, {"tool": "finish", "reply": "One shot.", "steps": [use]})
     in_run = client.post("/api/agent/plan", json={"instruction": "the anchor", "run": "pm-1"}).json()
     assert [u["name"] for u in in_run["steps"][0]["uses"]] == ["Maya at 1500"]

@@ -178,19 +178,19 @@ def test_renders_join_the_trace_of_the_turn_that_planned_them_and_others_have_th
     state.jobs.langfuse = sender
     for job_id in (planned, alone):
         job = state.db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
-        job.update(settings=json.loads(job["settings"]), started=job["created"] + 4, server="Zoro", server_url="http://zoro:8188")
+        job.update(settings=json.loads(job["settings"]), started=job["created"] + 4, server="Test provider", server_url="http://fake-v1")
         state.jobs._traced(job, "done", None)
     ours, theirs = sender.waiting
     assert ours["traceId"] == langfuse_trace.trace_id(seen["run"]) and theirs["traceId"] != ours["traceId"]
     first, second = _attributes(ours), _attributes(theirs)
     assert first["langfuse.observation.type"] == "span" and first["langfuse.trace.name"] == "Agent turn"
     assert second["langfuse.trace.name"] == "Render"
-    assert first["langfuse.observation.metadata.workflow"] == "video/h3_all_in_one" and first["langfuse.observation.metadata.server"] == "Zoro"
+    assert first["langfuse.observation.metadata.workflow"] == "video/@seedance_2_5" and first["langfuse.observation.metadata.server"] == "Test provider"
     assert first["langfuse.observation.metadata.queue_seconds"] == "4.0" and int(first["langfuse.observation.metadata.credits"]) > 0
 
     # a thumb on what it made is a score on that turn's trace
     item = state.db.run("INSERT INTO generations (user_id, job_id, workflow, kind, name, filename, settings, context, created) "
-                        "VALUES (1, ?, 'video/h3_all_in_one', 'video', 'Pour', 'p.mp4', '{}', '{}', ?)", (planned, time.time()))
+                        "VALUES (1, ?, 'video/@seedance_2_5', 'video', 'Pour', 'p.mp4', '{}', '{}', ?)", (planned, time.time()))
     state.traces.langfuse.scores.clear()
     _langfuse_row(state.db)
     assert client.put("/api/library/%d" % item, json={"rating": -1}).status_code == 200

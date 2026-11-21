@@ -61,7 +61,6 @@ export type Job = {
   clips: number;
   /** Place in line while queued (1 = next). */
   position: number | null;
-  waiting_for_server?: boolean;
   /** Why it failed, in words for its owner. */
   reason?: string;
   cost: number;
@@ -103,7 +102,7 @@ export type LibraryItem = {
 
 export type LibraryPage = { items: LibraryItem[]; next_offset: number | null };
 
-/** A setting of a workflow the phone offers (GET /api/mobile/workflows; comfy/workflows.describe). */
+/** A setting of a workflow the phone offers (GET /api/mobile/workflows). */
 export type Control = {
   id: string;
   type: 'text' | 'int' | 'float' | 'bool' | 'choice' | string;
@@ -140,7 +139,8 @@ export type Workflow = {
 export type JobSettings = {
   workflow: string;
   values: Record<string, unknown>;
-  /** A reference slot filled with a file already on the render server (POST /api/library/{id}/reference). */
+  /** A reference slot filled with a library item: the studio keeps it and sends it to the provider when the job runs
+   *  (POST /api/library/{id}/reference). */
   refs?: Record<string, { comfy_name: string; name: string }>;
   project_id?: number | null;
   options?: Record<string, string>;
@@ -175,8 +175,9 @@ export type Device = {
   notify_failed: boolean;
 };
 
-/** GET /api/status (studio.py): whether the render server answers. */
-export type Status = { online: boolean; version?: string; page?: string };
+/** GET /api/status (studio.py): the version of the page files (when the build was written, in seconds), so an open tab
+ *  knows a newer page is out. */
+export type Status = { page?: number };
 
 /** GET /api/announcement: the admins' message to everyone, if any. */
 export type Announcement = { text?: string; level?: string; until?: number | null; maintenance?: boolean };

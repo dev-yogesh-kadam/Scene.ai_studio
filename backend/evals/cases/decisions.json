@@ -24,7 +24,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "image/image_t2i_flux2_dev",
+      "workflow": "image/@seedream_5",
       "name": "Lighthouse",
       "prompt": "A lighthouse on a cliff in a storm, waves breaking.",
       "uses": [],
@@ -90,7 +90,7 @@
     "steps": [
      {
       "tool": "generate",
-      "workflow": "video/h3_all_in_one",
+      "workflow": "video/@seedance_2_5",
       "name": "Train",
       "prompt": "A steam train crosses a viaduct.",
       "duration": 6,

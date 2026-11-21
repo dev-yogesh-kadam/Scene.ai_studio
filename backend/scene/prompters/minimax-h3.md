@@ -1,6 +1,6 @@
 id: minimax-h3
 title: MiniMax H3
-workflows: ^video/h3_
+workflows: ^video/@minimax_h3
 length: 150 to 280 words: the blocks carry the scene, the shots stay one or two beats for a clip of one action
 limit: 450
 ---

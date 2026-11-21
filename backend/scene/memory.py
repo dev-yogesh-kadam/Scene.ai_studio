@@ -1,7 +1,7 @@
 """Shared memory: everything the studio keeps for a project, which the user browses on the canvas and the agent plans with.
 
 The Shared memory tab shows two parts:
-- assets: what the user saved for reuse on purpose (the Assets page), in every project;
+- assets: what the user saved for reuse on purpose (the Assets page), of this module;
 - uploads: every reference file dropped into a job, kept as an asset of the project it was used in.
 The agent also knows what was made in the project (the library, on the canvas).
 
@@ -17,7 +17,7 @@ import re
 import shutil
 import time
 
-from . import kit, media, review, storage
+from . import kit, media, review
 from .references import safe_name
 from .db import offload
 
@@ -102,12 +102,10 @@ def keep_made(db, folder, user_id, item_id, source, kind, keep):
         stored = "made_{}_{}".format(item_id, safe_name(source.name))
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, folder / stored)
-        storage.keep_file(folder / stored)
         db.run("UPDATE assets SET kind = ?, filename = ?, size = ?, made_from = ?, about = '', created = ? WHERE id = ?",
                (kind, stored, (folder / stored).stat().st_size, item_id, time.time(), before["id"]))
         if before["filename"] != stored and not db.one("SELECT 1 FROM assets WHERE user_id = ? AND filename = ?", (user_id, before["filename"])):
             (folder / before["filename"]).unlink(missing_ok=True)
-            storage.forget_file(folder / before["filename"])
         return before["id"]
     return kit.add(db, folder, user_id, project, source.read_bytes(), source.name, kind, keep["name"], keep["tag"], made_from=item_id)
 
@@ -320,7 +318,7 @@ def kit_row(row):
 
 def _path(state, user_id, where):
     table, filename = where
-    return storage.here((state.assets_dir / str(user_id) if table == "asset" else state.outputs.folder(user_id)) / filename)
+    return (state.assets_dir / str(user_id) if table == "asset" else state.outputs.folder(user_id)) / filename
 
 
 async def _picture(path):

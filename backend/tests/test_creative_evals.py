@@ -58,7 +58,7 @@ def test_the_judge_runs_in_live_mode_only_and_the_structure_in_replay():
 def test_the_judge_reads_the_whole_plan_and_needs_every_mark():
     case = {"ask": {"instruction": "an ad for my cafe", "direction": "Brief: locals"}}
     plan = {"reply": "Three shots.", "concept": "Warm refuge.", "steps": [{"name": "Rain", "kind": "video", "settings": {
-        "workflow": "video/h3_all_in_one", "prompt": "A woman runs through rain."}}],
+        "workflow": "video/@seedance_2_5", "prompt": "A woman runs through rain."}}],
             "questions": [{"text": "Tone?", "options": ["Warm", "Funny"], "details": ["cosy", ""]}]}
     text = creative.plan_text(case, plan)
     for words in ("an ad for my cafe", "Brief: locals", "Warm refuge.", "A woman runs through rain.", "Tone? Options: Warm; Funny"):
@@ -183,7 +183,7 @@ def made_in_a_turn(client, user_id, run="abc123"):
     from test_api import JOB
     job = client.post("/api/jobs", data={"settings": json.dumps(dict(JOB, turn={"run": run, "name": "Agent turn"}))}).json()["id"]
     return client.app.state.db.run("INSERT INTO generations (user_id, job_id, workflow, kind, name, filename, settings, context, created) "
-                                   "VALUES (?, ?, 'video/h3_all_in_one', 'video', 'Pour', 'p.mp4', '{}', '{}', ?)", (user_id, job, time.time()))
+                                   "VALUES (?, ?, 'video/@seedance_2_5', 'video', 'Pour', 'p.mp4', '{}', '{}', ?)", (user_id, job, time.time()))
 
 
 def scores_of(sender, name):

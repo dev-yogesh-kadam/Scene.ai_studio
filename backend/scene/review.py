@@ -24,7 +24,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import media, storage
+from . import media
 from .db import offload
 
 CHECKS = ("who", "what", "clean", "coherence", "continuity")
@@ -151,7 +151,7 @@ async def review_item(state, user_id, item, prompt, references=(), previous=None
     empty). references: [(label, path)] of the reference pictures it was made with. previous: (path, kind) of the
     shot it continues, or None. model: the one that reviews; the agent's usual one when not given. Keeps the verdict
     with the item and returns it."""
-    path = await offload(storage.here, await offload(state.outputs.folder, user_id) / item["filename"])
+    path = await offload(state.outputs.folder, user_id) / item["filename"]
     if item["kind"] not in ("image", "video"):
         raise ReviewError("Only pictures and videos can be reviewed.")
     if not path.is_file():
@@ -231,7 +231,7 @@ async def review_sound(state, user_id, item, asked=None):
     """Check a sound the agent made (music, a voice track): its length against what was asked, its loudness and its
     silences, measured with ffmpeg (media.audio_check, the film tool's audio_check), not by a model: nothing is
     charged. Keeps the verdict with the item."""
-    path = await offload(storage.here, await offload(state.outputs.folder, user_id) / item["filename"])
+    path = await offload(state.outputs.folder, user_id) / item["filename"]
     if item["kind"] != "audio":
         raise ReviewError("Only sounds are checked this way.")
     if not path.is_file():

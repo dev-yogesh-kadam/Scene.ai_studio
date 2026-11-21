@@ -9,7 +9,7 @@ POST   /api/kit/sheet             an asset sheet (a CSV: type, name, link, notes
 DELETE /api/kit/{id}
 GET    /api/kit/{id}/file         the entry's file
 
-What the user reads calls it NeuralCore. Each project has its own; its modules share it; there is none outside a project.
+What the user reads calls it NeuralCore. Each module has its own; modules never share it; there is none outside a project.
 In a shared project the kit is the owner's: everyone in it sees it, and a creator or more changes it (sharing.py).
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from .. import kit, memory, sharing, storage
+from .. import kit, memory, sharing
 from ..db import as_everyone, offload
 from ..references import media_kind, read_text_upload, read_upload, text_kind
 from .deps import current_user, json_object, limited, project_ref, uploading
@@ -175,9 +175,6 @@ async def entry_file(asset_id: int, request: Request, user: dict = Depends(curre
     with reading():
         found = await offload(kit.entry, request.app.state.db, keeper["id"], asset_id)
     path = _folder(request, keeper) / found["filename"] if found else None
-    elsewhere = path and storage.signed(request.app.state, "kit", path)
-    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
-        return elsewhere
     if path is None or not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path)

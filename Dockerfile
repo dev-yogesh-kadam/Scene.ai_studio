@@ -1,11 +1,11 @@
 # Scene.ai in one image: the web studio and admin console (apps/web) and the phone site (apps/mobile) built with Node,
 # HyperFrames (motion graphics) with the Chrome it renders in, and Claude Code for the agent, then served by the Python
 # backend from a slim image.
-# Every setting comes from SCENE_* environment variables (docs/azure.md); nothing is read from a config.json inside the
-# image.
+# Every setting comes from SCENE_* environment variables (the names of backend/scene/config.py's settings); nothing is
+# read from a config.json inside the image.
 #
 #   docker build -t scene-ai .
-#   docker compose up            (docker-compose.yml: with PostgreSQL, Azurite and Redis, for local use)
+#   docker compose up            (docker-compose.yml: with PostgreSQL, on this PC)
 
 # ---------------------------------------------------------------- 1. the client apps
 FROM node:24.11-bookworm-slim AS web
@@ -85,7 +85,7 @@ COPY --from=motion /opt/hyperframes /opt/hyperframes
 # The npm package carries Claude Code as one native program (it needs only libc): that alone is kept.
 COPY --from=claude /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude
 
-# The app runs as an account of its own, never root; /data is its only writable place (a volume, or Azure Files), with
+# The app runs as an account of its own, never root; /data is its only writable place (a volume), with
 # the folder HyperFrames keeps the Google Fonts a page names in, and Claude Code's own (CLAUDE_CONFIG_DIR: its sessions,
 # kept across restarts). The build stops here when Node.js, Claude Code or Chrome could not start (a library missing).
 RUN useradd --create-home --uid 10001 scene && mkdir -p /data /app/motion/.fonts && chown scene /data /app/motion/.fonts \

@@ -15,7 +15,7 @@ const BOARD = 2800,
   APPROVE = 500,
   RENDER = 1700,
   SWAP = 650; // ms; the set changes under the sketch at SWAP
-// A real take of each scene from the render PC, to play over the drawn set while its shots run: scene name → its
+// A real take of each scene made by the studio, to play over the drawn set while its shots run: scene name → its
 // address under /assets/landing/. None has been made yet; the drawn and 3D sets stand in.
 const CLIPS: Record<string, string> = {};
 const SET_KEY = 'scene.landingSet'; // '3d' or 'drawn', when the visitor picked one

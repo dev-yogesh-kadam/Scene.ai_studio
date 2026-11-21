@@ -66,7 +66,7 @@ def test_a_long_run_that_only_says_what_it_will_do_is_asked_to_do_it(client, mon
     from test_agent_shots import hosted
     me = register(client)
     db = client.app.state.db
-    runs.keep_skill(db, me["id"], "pm-3", "script-to-video")
+    runs.keep_skill(db, me["id"], "pm-3", 0, "script-to-video")
     runs.write(db, me["id"], "pm-3", "/motion/status", "name the speakers", "agent")   # saved before this message
     ready = {"ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}
     monkeypatch.setattr(client.app.state.agent, "preflight", lambda *a, **k: asyncio.sleep(0, ready))
@@ -93,7 +93,7 @@ def test_an_empty_question_is_no_question(client, monkeypatch):
     from test_agent_shots import hosted
     me = register(client)
     db = client.app.state.db
-    runs.keep_skill(db, me["id"], "pm-4", "script-to-video")
+    runs.keep_skill(db, me["id"], "pm-4", 0, "script-to-video")
     runs.write(db, me["id"], "pm-4", "/motion/status", "plan the units", "agent")
     ready = {"ready": True, "missing": [], "unsupported": [], "adaptation": "", "message": ""}
     monkeypatch.setattr(client.app.state.agent, "preflight", lambda *a, **k: asyncio.sleep(0, ready))

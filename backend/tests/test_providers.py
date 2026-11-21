@@ -29,15 +29,17 @@ def migration(name="0015_providers.py"):
 
 @contextlib.contextmanager
 def bridge_kind_allowed(db):
-    """The test database is at the newest migration, where 0017 took the LUFI bridge's provider kind away: it is allowed
-    again while a test replays 0015's copy (which makes a bridge provider from the old settings), then taken away."""
-    newest = migration("0018_local_tools.py").KINDS   # the kinds the newest migration allows
+    """The test database is at the newest migration, where 0017 took the LUFI bridge's provider kind away and 0019
+    ComfyUI's: they are allowed again while a test replays 0015's copy (which makes them from the old settings and
+    servers), then taken away."""
+    then = migration("0018_local_tools.py").KINDS   # the kinds allowed before ComfyUI went
+    newest = migration("0019_drop_comfyui.py").KINDS   # the kinds the newest migration allows
     db.run("ALTER TABLE providers DROP CONSTRAINT IF EXISTS providers_kind_known")
-    db.run("ALTER TABLE providers ADD CONSTRAINT providers_kind_known CHECK (kind IN {})".format(newest[:-1] + ", 'claude_bridge')"))
+    db.run("ALTER TABLE providers ADD CONSTRAINT providers_kind_known CHECK (kind IN {})".format(then[:-1] + ", 'claude_bridge')"))
     try:
         yield
     finally:
-        db.run("DELETE FROM providers WHERE kind = 'claude_bridge'")
+        db.run("DELETE FROM providers WHERE kind IN ('claude_bridge', 'comfyui')")
         db.run("ALTER TABLE providers DROP CONSTRAINT IF EXISTS providers_kind_known")
         db.run("ALTER TABLE providers ADD CONSTRAINT providers_kind_known CHECK (kind IN {})".format(newest))
 
@@ -205,17 +207,18 @@ def test_an_invalid_key_rests_until_fixed(database):
 
 # ---------------------------------------------------------------- the console
 
+@pytest.mark.no_models
 def test_adding_a_key_checks_it_first_and_never_gives_it_back(client, monkeypatch):
     fake = FakeV1()
     monkeypatch.setattr(router_module, "V1", lambda base_url: __import__("scene.providers.v1", fromlist=["V1"]).V1(base_url, http=fake.client()))
     register(client)
     desk = console(client)
     listed = desk.get("/api/admin/providers").json()
-    assert listed["router"] == "off" and [p["kind"] for p in listed["providers"]] == ["comfyui", "claude_local", "anthropic", "local_tools"]
+    assert "router" not in listed and [p["kind"] for p in listed["providers"]] == ["claude_local", "anthropic", "local_tools"]
     bad = desk.post("/api/admin/providers/keys", json={"kind": "scene_provider_v1", "base_url": "http://fake-v1",
                                                        "secret": "sa_live_wrong0000"}).json()
     assert bad["saved"] is False and "not known" in bad["check"]["error"]
-    assert len(bad["providers"]) == 4   # nothing saved, not even the provider (On this PC is the fourth)
+    assert len(bad["providers"]) == 3   # nothing saved, not even the provider (On this PC is the third)
     good = desk.post("/api/admin/providers/keys", json={"kind": "scene_provider_v1", "base_url": "fake-v1", "name": "Zoro",
                                                         "secret": "sa_live_alpha1234", "label": "studio A"}).json()
     assert good["saved"] and good["check"]["ok"] and good["check"]["models"] == 2 and good["check"]["credits"] == 91296
@@ -236,27 +239,24 @@ def test_adding_a_key_checks_it_first_and_never_gives_it_back(client, monkeypatc
     fake.revoked.add("sa_live_alpha1234")
     tested = desk.post("/api/admin/providers/keys/%d/test" % key["id"]).json()
     assert tested["check"]["ok"] is False and tested["check"]["status"] == "invalid"
-    assert desk.put("/api/admin/providers/router", json={"mode": "sideways"}).status_code == 400
-    assert desk.put("/api/admin/providers/router", json={"mode": "shadow"}).json()["router"] == "shadow"
     desk.delete("/api/admin/providers/keys/%d" % key["id"])
     assert len(next(p for p in desk.get("/api/admin/providers").json()["providers"] if p["id"] == provider["id"])["keys"]) == 1
-    assert [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]][:3] == [
-        "Removed a provider key", "Switched the provider router", "Changed a provider key"]
+    assert [e["action"] for e in desk.get("/api/admin/audit").json()["entries"]][:2] == [
+        "Removed a provider key", "Changed a provider key"]
 
 
-def test_comfyui_servers_stay_in_step_with_the_endpoints_table(client):
+def test_what_makes_what_lists_each_kind_of_work_and_its_models(client):
+    """GET .../capabilities (registry.coverage): each kind of work with the models that make it and their keys. Video to
+    video, outpaint and character animation are made by the video models that edit a reference video (Seedance)."""
     register(client)
-    desk = console(client)
-    desk.post("/api/admin/endpoints", json={"kind": "comfy", "name": "Zoro 2", "url": "http://127.0.0.1:8", "slots": 2})
-    comfy = [p for p in desk.get("/api/admin/providers").json()["providers"] if p["kind"] == "comfyui"]
-    assert [(p["name"], p["base_url"], p["keys"][0]["max_concurrent"]) for p in comfy] == [
-        ("Render server", "http://127.0.0.1:9", 1), ("Zoro 2", "http://127.0.0.1:8", 2)]
-    desk.put("/api/admin/providers/%d" % comfy[1]["id"], json={"active": False, "workflows": "generation_*"})
-    row = client.app.state.db.one("SELECT * FROM endpoints WHERE name = 'Zoro 2'")
-    assert (row["active"], row["models"]) == (0, "generation_*")
-    assert [s["name"] for s in client.app.state.comfy_pool.servers()] == ["Render server"]   # the balancer sees it off
-    desk.delete("/api/admin/providers/%d" % comfy[1]["id"])
-    assert client.app.state.db.one("SELECT 1 FROM endpoints WHERE name = 'Zoro 2'") is None
+    rows = {r["capability"]: r for r in console(client).get("/api/admin/providers/capabilities").json()["capabilities"]}
+    models = lambda capability: [m["id"] for m in rows[capability]["models"]]
+    assert sorted(models("text_to_video")) == ["kling_4_0", "seedance_2_5"] and rows["text_to_video"]["words"] == "Video"
+    assert rows["text_to_video"]["state"] == "provider" and rows["text_to_video"]["live"] is True
+    for edit in ("video_to_video", "outpaint", "animate"):
+        assert models(edit) == ["seedance_2_5"] and rows[edit]["state"] == "provider", edit   # Kling edits no clip
+    assert models("speech") == ["speech"] and models("lip_sync") == ["lip_sync"]
+    assert rows["control_map"]["state"] == "none" and rows["control_map"]["models"] == [] and rows["control_map"]["live"] is False
 
 
 def test_the_agents_provider_is_picked_and_the_personal_subscription_rules_hold(client):

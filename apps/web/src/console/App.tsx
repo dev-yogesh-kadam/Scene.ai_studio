@@ -75,7 +75,7 @@ function ConsoleSignIn({ message, onSignedIn }: { message: string; onSignedIn: (
           <b>console.</b>
         </>
       }
-      sub="The queue, the render server, users, credits and pricing of the studio. For its admins only."
+      sub="The queue, the model providers, users, credits and pricing of the studio. For its admins only."
       points={['Its own address, apart from the studio', 'Its own sign-in', 'Every change goes into the audit log']}
       tag={mode === 'code' ? 'Two-step' : 'Admin sign-in'}
     >

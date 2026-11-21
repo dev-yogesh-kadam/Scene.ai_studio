@@ -1,9 +1,9 @@
-"""A studio for the evals, as the tests make one (tests/conftest.py): an emptied test database, a render server address
-nothing listens on, and Claude either played by the case's recorded answers (replay) or the real Claude Code (live)."""
+"""A studio for the evals, as the tests make one (tests/conftest.py): an emptied test database, the tests' fake Scene
+provider for its models (tests/studio_models.py), and Claude either played by the case's recorded answers (replay) or the
+real Claude Code (live)."""
 
 import contextlib
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -39,13 +39,19 @@ def studio(folder, live=False):
     web = folder / "web"
     if not web.exists():
         support.built(web)
-    settings = Settings(database_url=support.POSTGRES, database_loop_guard=support.LOOP_GUARD, hold_queue_offline=False,
-                        comfy_url="http://127.0.0.1:9", claude_models="sonnet" if live else "off", storage_dir=str(folder / "storage"),
-                        allow_signup=True, signup_credits=500, first_account_local=False, workflows_dir=str(BACKEND.parent / "workflows"),
-                        web_dist_dir=str(web))
+    # As the tests' studio (conftest.client): replay reaches Claude by an API key it never uses; live, Claude Code here.
+    connection = {} if live else {"claude_connection": "api_key"}
+    settings = Settings(database_url=support.POSTGRES, database_loop_guard=support.LOOP_GUARD,
+                        claude_models="sonnet" if live else "off", storage_dir=str(folder / "storage"),
+                        allow_signup=True, signup_credits=500, first_account_local=False, web_dist_dir=str(web),
+                        local_tools_python=str(folder / "no-local-tools" / "python.exe"), **connection)
     real = claude.converse
     with TestClient(create_app(settings)) as client:
-        client.app.state.catalog.saved = json.loads((TESTS / "fixtures" / "node_definitions.json").read_text(encoding="utf-8"))
+        # The models: the tests' fake Scene provider (tests/studio_models.py), as Studio_automation's would be.
+        if str(TESTS) not in sys.path:
+            sys.path.insert(0, str(TESTS))
+        import studio_models
+        client.provider = studio_models.install(client.app.state)
         if not live:
             support.with_claude(client.app.state.agent)
             claude.converse = support.chat_session(client.app.state.agent)

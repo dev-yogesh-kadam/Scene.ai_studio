@@ -3,8 +3,12 @@
 One server listens on two ports: the studio's, and the admin console's (main.Doors sends each request to its site).
 """
 
+import os
+import shutil
 import socket
+import subprocess
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -20,6 +24,26 @@ def listen(host, port):
         sys.exit("Scene.ai can't listen on {}:{} ({}). Is it running already?".format(host, port, e.strerror or e))
 
 
+def stop_langfuse():
+    """Langfuse's containers (scripts\\start.langfuse.bat starts them beside the studio) stop when the studio stops, so
+    nothing of the studio's is left running. "stop", not "down": its traces and settings are kept for the next start.
+    SCENE_NO_LANGFUSE=1 (Langfuse never started by the studio) leaves them alone."""
+    if os.environ.get("SCENE_NO_LANGFUSE") == "1":
+        return
+    folder = Path(os.environ.get("SCENE_LANGFUSE_DIR") or Path(__file__).resolve().parents[3] / "langfuse")
+    if not (folder / "docker-compose.yml").is_file():
+        return
+    docker = shutil.which("docker") or str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/DockerDesktop/resources/bin/docker.exe")
+    if not Path(docker).is_file():
+        return
+    print("Stopping Langfuse...", flush=True)
+    try:
+        subprocess.run([docker, "compose", "stop"], cwd=folder, timeout=120,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError, KeyboardInterrupt):
+        print("Langfuse could not be stopped: stop it with \"docker compose stop\" in {}.".format(folder))
+
+
 settings = load_settings()
 configure_logs(settings.log_format)
 app = create_app(settings)
@@ -31,4 +55,9 @@ if app.state.console is not None:
         sockets.append(listen(host, settings.console_port))
         shown = "localhost" if host in ("127.0.0.1", "::1", "0.0.0.0", "::") else host
         print("The admin console is at http://{}:{}".format(shown, settings.console_port))
-uvicorn.Server(uvicorn.Config(Doors(app), log_level="warning")).run(sockets=sockets)
+try:
+    uvicorn.Server(uvicorn.Config(Doors(app), log_level="warning")).run(sockets=sockets)
+except KeyboardInterrupt:
+    pass   # Ctrl+C is how the studio is stopped: no traceback for it
+finally:
+    stop_langfuse()

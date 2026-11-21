@@ -70,7 +70,7 @@ describe('the studio', () => {
           ],
         },
       },
-      '/api/status': { body: { online: true, page: 5 } },
+      '/api/status': { body: { page: 5 } },
       '/api/announcement': { body: {} },
     });
     open('/home');
@@ -78,7 +78,7 @@ describe('the studio', () => {
     expect(within(sidebar).getByRole('link', { name: 'Home' })).toHaveClass('on');
     expect(within(sidebar).getByRole('link', { name: 'All projects' })).toBeInTheDocument();
     expect(await within(sidebar).findByText('1 job in the queue')).toBeInTheDocument();
-    expect(await within(sidebar).findByText('Render server online')).toBeInTheDocument();
+    expect(within(sidebar).queryByText(/render server/i)).toBeNull(); // there is none: every model is a provider's
     expect(screen.getByTitle(/Credits pay for generations/)).toHaveTextContent('1,250credits');
     expect(screen.getByRole('button', { name: /^Ada ?: your account$/ })).toHaveTextContent('Ada');
     expect(document.title).toBe('Home · Scene.ai');

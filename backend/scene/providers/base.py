@@ -11,13 +11,12 @@ means from its kind alone:
 - RequestProblem: the request itself is refused (invalid, content refused). Never retried: the job fails with the
   provider's own words.
 
-Nothing here knows ComfyUI, the generation server or Claude: each adapter (v1.py, comfyui.py, anthropic_api.py, local.py) maps
+Nothing here knows a provider or Claude: each adapter (v1.py, anthropic_api.py, local.py) maps
 its own answers onto these. Claude on this PC (claude_local) has no adapter: it has no key to check,
 and its status is claude_connection.status's. Keys are passed in, never kept by an adapter, and never logged."""
 
 KINDS = {
     "scene_provider_v1": "Scene provider (v1)",
-    "comfyui": "ComfyUI",
     "claude_local": "Claude on this PC",
     "anthropic": "Anthropic",
     "local_tools": "On this PC",
@@ -28,7 +27,7 @@ MODEL_KINDS = ("scene_provider_v1", "local_tools")
 BUILT_IN = ("local_tools",)   # made by the studio (migration 0018), one only: not added, given keys or removed in the console
 CLAUDE_KINDS = ("claude_local", "anthropic")   # the providers the agent's model can come from
 KEYLESS = ("claude_local",)   # no key and no address: Claude on this PC uses the account Claude Code is signed in with
-SELF_HOSTED = ("scene_provider_v1", "comfyui")   # asked for an address once; Anthropic's is known
+SELF_HOSTED = ("scene_provider_v1",)   # asked for an address once; Anthropic's is known
 
 # The capabilities of the contract (02-provider-api-v1.md) and the folder of workflows/ each one's models are offered
 # in. agent_llm is the agent's model (Claude on this PC, Anthropic): never a workflow. One the studio doesn't know is ignored.

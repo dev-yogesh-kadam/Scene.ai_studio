@@ -21,11 +21,11 @@ def made(client, user_id, name, kind="video", prompt="The girl walks home in the
     folder = client.app.state.outputs.folder(user_id)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / (name + ".mp4")).write_bytes(PNG)
-    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": prompt}, "options": {"engine": "reference"},
+    settings = {"workflow": "video/@seedance_2_5", "values": {"2:value": prompt}, "options": {},
                 "prompt": prompt, "refs": {}, "seed_mode": "fixed"}
     return client.app.state.db.run(
         "INSERT INTO generations (user_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
-        "VALUES (?, 'video/h3_all_in_one', ?, ?, ?, '', ?, '{}', 1, 1, 1)", (user_id, kind, name, name + ".mp4", json.dumps(settings)))
+        "VALUES (?, 'video/@seedance_2_5', ?, ?, ?, '', ?, '{}', 1, 1, 1)", (user_id, kind, name, name + ".mp4", json.dumps(settings)))
 
 
 def model_says(monkeypatch, client, answer, seen=None):
@@ -68,6 +68,8 @@ def test_a_failed_shot_is_kept_with_its_verdict_and_comes_with_a_priced_retake(c
     film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
     meera = client.post("/api/kit", files={"file": ("meera.png", PNG, "image/png")},
                         data={"name": "Meera", "type": "character", "project_id": str(film)}).json()["id"]
+    # the shots are in the film: a review checks against its own module's files only
+    client.app.state.db.run("UPDATE generations SET project_id = ? WHERE id IN (?, ?)", (film, before, shot))
     seen = {}
     model_says(monkeypatch, client, FAILED, seen)
     found = client.post("/api/agent/review", json={"item": shot, "prompt": "The girl walks home in the rain.",
@@ -77,14 +79,28 @@ def test_a_failed_shot_is_kept_with_its_verdict_and_comes_with_a_priced_retake(c
     assert seen["pictures"] == ["still", "last", "f1", "f2"]
     assert found["verdict"]["passed"] is False
     retake = found["retake"]
-    assert retake["settings"]["values"]["100:value"].startswith("The girl from the reference picture")
+    assert retake["settings"]["values"]["2:value"].startswith("The girl from the reference picture")
     assert retake["settings"]["seed_mode"] == "random" and retake["settings"]["parent"] == shot
     assert retake["credits"] > 0 and retake["start"]["id"] == before and retake["why"] == "the reference face first"
     # Nothing was charged: the retake is only queued when the user approves it.
     assert client.get("/api/auth/me").json()["credits"] == 500
     # The verdict is kept with the item: the agent's book says it failed.
-    book = {e["name"]: e for e in memory.book_for_model(memory.book(client.app.state.db, me["id"], 0)) if "item" in e}
+    book = {e["name"]: e for e in memory.book_for_model(memory.book(client.app.state.db, me["id"], film)) if "item" in e}
     assert book["Walk home"]["review"].startswith("Failed the review")
+
+
+def test_a_review_never_checks_against_another_modules_files(client, monkeypatch):
+    me = register(client)
+    before = made(client, me["id"], "Lane")
+    shot = made(client, me["id"], "Walk home")   # in no project
+    film = client.post("/api/projects", json={"name": "Film"}).json()["id"]
+    meera = client.post("/api/kit", files={"file": ("meera.png", PNG, "image/png")},
+                        data={"name": "Meera", "type": "character", "project_id": str(film)}).json()["id"]
+    client.app.state.db.run("UPDATE generations SET project_id = ? WHERE id = ?", (film, before))
+    seen = {}
+    model_says(monkeypatch, client, FAILED, seen)
+    client.post("/api/agent/review", json={"item": shot, "prompt": "The girl walks home.", "uses": [{"asset": meera}], "previous": before})
+    assert seen["labels"] == ["the result at 0.5 s", "the result at 2.0 s"]   # the film's entry and shot were left out
 
 
 def test_a_passed_shot_has_no_retake_and_a_shot_can_be_checked_on_its_own(client, monkeypatch):

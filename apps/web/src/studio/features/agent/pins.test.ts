@@ -1,89 +1,70 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelInfo, WorkflowRow } from '../jobs/jobForm';
-import { aboutOf, bestResolution, clearKind, pinTabs, secondsOf, togglePin } from './pins';
+import type { WorkflowRow } from '../jobs/jobForm';
+import { aboutOf, clearKind, pinTabs, secondsOf, togglePin } from './pins';
 
 const ROWS: WorkflowRow[] = [
   {
-    id: 'video/h3_all_in_one',
+    id: 'video/@seedance_2_5',
     kind: 'video',
-    title: 'H3 All In One',
-    source: 'comfy',
-    description: 'Long shots with a cast.',
-  },
-  { id: 'video/h3_chunk', kind: 'video', title: 'H3 Chunk', source: 'comfy' },
-  {
-    id: 'video/generation_video',
-    kind: 'video',
-    title: 'Generation video',
+    title: 'Seedance 2.5',
     source: 'generation',
-    models: [
-      { id: 'seedance_2_5', label: 'Seedance 2.5' },
-      { id: 'kling_3_0_turbo', label: 'Kling 3.0 Turbo' },
-    ],
+    provider: true,
+    model: 'seedance_2_5',
+    description: 'Strong motion and character consistency, 4 to 15 seconds. 9 credits per second at 480p.',
   },
   {
-    id: 'video/generation_lipsync',
+    id: 'video/@kling_3_0_turbo',
     kind: 'video',
-    title: 'Generation lip sync',
+    title: 'Kling 3.0 Turbo',
     source: 'generation',
-    description: 'Makes the person in a video speak a voice track, made by the generation server.',
+    provider: true,
+    model: 'kling_3_0_turbo',
   },
-  { id: 'image/image_t2i_flux3_klein', kind: 'image', title: 'Text to Image: FLUX 3 Klein', source: 'comfy' },
   {
-    id: 'audio/generation_music',
+    id: 'image/@nano-banana-pro',
+    kind: 'image',
+    title: 'Nano Banana Pro',
+    source: 'generation',
+    provider: true,
+    model: 'nano-banana-pro',
+  },
+  {
+    id: 'audio/@music',
     kind: 'audio',
-    title: 'Generation music',
+    title: 'Music',
     source: 'generation',
-    description: 'A background-music track, 10 to 120 seconds, made by the generation server.',
+    provider: true,
+    model: 'music',
+    description: 'A background-music track, 10 to 120 seconds.',
   },
-  { id: 'video/broken', kind: 'video', title: 'Broken', error: 'unreadable' },
+  { id: 'video/@broken', kind: 'video', title: 'Broken', error: 'unreadable' },
 ];
 
-const SEEDANCE: ModelInfo = {
-  model: 'seedance_2_5',
-  name: 'Seedance 2.5',
-  about:
-    'Strong motion and character consistency in clips up to 15s. 4–15 s, first+last frame. 480p 9/9 credits per second.',
-  resolutions: ['480p', '720p', '1080p', '2160p'],
-  shapes: ['16:9'],
-  sound: 'choice',
-  frames: ['first', 'last'],
-};
-
 describe('the workflows for a chat', () => {
-  it('are tabs by kind: models one by one, then the single-model tools, then ComfyUI by name', () => {
-    const tabs = pinTabs(ROWS, { 'video/generation_video': [SEEDANCE] });
+  it('are tabs by kind, each model on its own in the order listed', () => {
+    const tabs = pinTabs(ROWS);
     expect(tabs.map((t) => t.label)).toEqual(['Image', 'Video', 'Audio']);
     const video = tabs[1];
-    expect(video.models.map((m) => m.value)).toEqual([
-      'video/generation_video#seedance_2_5',
-      'video/generation_video#kling_3_0_turbo',
-      'video/generation_lipsync',
-    ]);
-    expect(video.workflows.map((w) => w.title)).toEqual(['H3 All In One', 'H3 Chunk']); // a broken one is left out
+    expect(video.models.map((m) => m.value)).toEqual(['video/@seedance_2_5', 'video/@kling_3_0_turbo']); // a broken one is left out
     expect(video.models[0]).toMatchObject({
       title: 'Seedance 2.5',
-      about: 'Strong motion and character consistency in clips up to 15s.',
-      meta: ['4K', '4–15 s'],
-      sound: true,
+      about: 'Strong motion and character consistency, 4 to 15 seconds.',
+      meta: ['4–15 s'],
     });
-    expect(video.models[1]).toMatchObject({ title: 'Kling 3.0 Turbo', meta: [], sound: false }); // no list: its name alone
-    expect(tabs[2].models[0]).toMatchObject({ value: 'audio/generation_music', meta: ['10–120 s'] });
+    expect(video.models[1]).toMatchObject({ title: 'Kling 3.0 Turbo', about: '', meta: [] }); // no description: its name alone
+    expect(tabs[2].models[0]).toMatchObject({ value: 'audio/@music', meta: ['10–120 s'] });
   });
 
-  it('say no prices and read lengths and resolutions as people do', () => {
+  it('say no prices and read lengths as people do', () => {
     expect(aboutOf('2K 18, 4K 36 credits per image.')).toBe('');
-    expect(secondsOf({ seconds: { min: 3, max: 15 } }, '')).toBe('3–15 s');
-    expect(secondsOf(null, 'Up to 22 s')).toBe('');
-    expect(bestResolution(['1K', '2K', '4K'])).toBe('4K');
-    expect(bestResolution(['480p', '1080p', '720p'])).toBe('1080p');
-    expect(bestResolution(['2K', '1080p'])).toBe('2K');
+    expect(secondsOf('Clips of 3-15 s')).toBe('3–15 s');
+    expect(secondsOf('Up to 22 s')).toBe('');
   });
 
   it('are ticked one by one, and "Agent selects" clears a kind', () => {
-    let pins = togglePin([], 'video/generation_video#seedance_2_5');
-    pins = togglePin(pins, 'image/image_t2i_flux3_klein');
-    expect(clearKind(pins, 'video')).toEqual(['image/image_t2i_flux3_klein']);
-    expect(togglePin(pins, 'video/generation_video#seedance_2_5')).toEqual(['image/image_t2i_flux3_klein']);
+    let pins = togglePin([], 'video/@seedance_2_5');
+    pins = togglePin(pins, 'image/@nano-banana-pro');
+    expect(clearKind(pins, 'video')).toEqual(['image/@nano-banana-pro']);
+    expect(togglePin(pins, 'video/@seedance_2_5')).toEqual(['image/@nano-banana-pro']);
   });
 });

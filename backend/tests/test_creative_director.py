@@ -282,7 +282,7 @@ def test_the_console_checks_show_the_content_check_and_the_gates(client):
 # ---------------------------------------------------------------- the quality gates
 
 def shot(name, prompt="A dog runs.", **more):
-    return dict({"tool": "generate", "workflow": "video/h3_all_in_one", "name": name, "prompt": prompt}, **more)
+    return dict({"tool": "generate", "workflow": "video/@seedance_2_5", "name": name, "prompt": prompt}, **more)
 
 
 def test_the_continuity_gate_finds_a_place_or_a_person_written_two_ways():
@@ -322,7 +322,7 @@ def test_the_video_text_gate_finds_words_asked_of_a_video_model():
     assert "garbled" in guardrails.video_text_gate([shot("Title", 'The words "SUMMER SALE" in big neon letters.')])
     assert guardrails.video_text_gate([shot("Talk", 'Maya says: "We are late."')]) is None             # spoken, not drawn
     assert "garbled" in guardrails.video_text_gate([shot("Shop", 'A shop sign that says "OPEN" flickers.')])
-    assert guardrails.video_text_gate([dict(shot("Poster", 'A sign that reads "CHAI 10".'), workflow="image/flux2")]) is None
+    assert guardrails.video_text_gate([dict(shot("Poster", 'A sign that reads "CHAI 10".'), workflow="image/@nano_banana_pro")]) is None
 
 
 def test_the_quality_gates_are_one_hint_once_and_never_a_block(client, monkeypatch):
@@ -370,7 +370,7 @@ def test_a_run_with_no_brief_folds_the_brief_into_its_setup_card(client, monkeyp
     plan = ask_run(client, project)
     assert any(t.startswith("This run has no brief yet (/brief is empty).") and "audience" in t and "one card" in t for t in told(seen))
     assert len(seen) == 2 and [q["text"] for q in plan["questions"]] == [q["text"] for q in SETUP]   # one card, four at most
-    assert runs.marked(client.app.state.db, me["id"], "s2v-1", "brief_asked") is True
+    assert runs.marked(client.app.state.db, me["id"], "s2v-1", project, "brief_asked") is True
     # the user answers the card; a turn that does not save the brief is told to, once
     seen = hosted(monkeypatch, client, {"tool": "finish", "reply": "On to the story."})
     ask_run(client, project, "Idea, festival 16:9, quiet and warm, the beam")
@@ -399,7 +399,7 @@ def test_a_runs_concept_comes_before_its_shot_plan_once(client, monkeypatch):
     ask_run(client, project)
     results = [t for t in told(seen) if t.startswith("Result of state_write:")]
     assert "write the concept to /concept" in results[0] and results[1].endswith("Written: /director/episode")   # once
-    assert runs.marked(client.app.state.db, me["id"], "s2v-1", "shot_plan") == "/director"
+    assert runs.marked(client.app.state.db, me["id"], "s2v-1", project, "shot_plan") == "/director"
 
 
 def test_a_runs_shot_plan_is_reviewed_once_a_run(client, monkeypatch):

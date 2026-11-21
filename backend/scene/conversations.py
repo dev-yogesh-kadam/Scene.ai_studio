@@ -12,8 +12,8 @@ WHERE = "user_id = ? AND project_id IS NOT DISTINCT FROM NULLIF(?, 0) AND tab = 
 
 # One write of a conversation at a time in this process. write() is one statement, and its DELETE sees the turns as
 # they were when it began: a second save of the same tab that waited for the first (two windows, the phone and the
-# studio) would not see the first one's turns and keep both, the conversation twice over. Several processes (Azure's
-# replicas) would need it in the database too: the conversation's row locked first, in a transaction of its own.
+# studio) would not see the first one's turns and keep both, the conversation twice over. More than one process
+# would need it in the database too: the conversation's row locked first, in a transaction of its own.
 _writing, _locks = {}, threading.Lock()
 
 

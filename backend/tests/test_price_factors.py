@@ -20,30 +20,31 @@ def test_the_price_follows_the_resolution_and_quality_chosen(client):
     assert credits.cost("video/x", 5, {"resolution": 1080, "quality": "final"}) == 200
     assert credits.cost("image/x", None, {"resolution": 1080, "quality": "draft"}) == 20   # a picture: its quality only
     assert credits.cost("video/x", 5, {"resolution": 1080, "quality": "medium"}) == 160
-    low = quote(client, options={"quality": "low"}, values={"100:value": "She waves.", "501:value": 480})   # H3 All In One: its own RESOLUTION
-    high = quote(client, options={"quality": "high"}, values={"100:value": "She waves.", "501:value": 1080})
+    low = quote(client, options={"resolution": "480p"})    # Seedance 2.5: its own Resolution
+    high = quote(client, options={"resolution": "1080p"})
     assert low["credits"] < high["credits"]
     assert low["choices"]["resolution"]["1080"] > low["choices"]["resolution"]["480"] == low["credits"]
-    assert set(low["choices"]["quality"]) >= {"low", "high"}
+    assert "quality" not in low["choices"]   # it has no quality to choose
 
 
 def test_admins_set_the_factors_for_the_studio_and_for_one_workflow(client):
     register(client)
     desk = console(client)
+    desk.get("/api/admin/pricing")   # the Pricing section opens (it reads the models offered: catalog.known needs them read)
     found = desk.get("/api/admin/pricing/factors").json()
     assert found["factors"]["resolution"]["1080"] == 2.0 and found["defaults"]["quality"]["draft"] == 0.5
     assert desk.put("/api/admin/pricing/factors", json={"resolution": {"1080": 30}}).status_code == 400
     changed = desk.put("/api/admin/pricing/factors", json={"resolution": {"1080": 3}, "quality": {"draft": 0.4}}).json()
     assert changed["factors"]["resolution"]["1080"] == 3 and changed["factors"]["resolution"]["480"] == 0.6
     assert client.app.state.credits.cost("video/x", 5, {"resolution": 1080}) == 300
-    own = desk.put("/api/admin/pricing/workflow/factors", json={"workflow": "video/h3_all_in_one", "resolution": {"1080": 1.5}}).json()
+    own = desk.put("/api/admin/pricing/workflow/factors", json={"workflow": "video/@seedance_2_5", "resolution": {"1080": 1.5}}).json()
     assert own["factors"]["resolution"]["1080"] == 1.5 and own["factors"]["quality"]["draft"] == 0.4
-    assert client.app.state.credits.cost("video/h3_all_in_one", 5, {"resolution": 1080}) == 150
+    assert client.app.state.credits.cost("video/@seedance_2_5", 5, {"resolution": 1080}) == 150
     assert client.app.state.credits.cost("video/other", 5, {"resolution": 1080}) == 300
-    listed = next(w for w in desk.get("/api/admin/pricing").json()["workflows"] if w["id"] == "video/h3_all_in_one")
+    listed = next(w for w in desk.get("/api/admin/pricing").json()["workflows"] if w["id"] == "video/@seedance_2_5")
     assert listed["own_factors"]["resolution"] == {"1080": 1.5}
-    desk.put("/api/admin/pricing/workflow/factors", json={"workflow": "video/h3_all_in_one"})
-    assert client.app.state.credits.cost("video/h3_all_in_one", 5, {"resolution": 1080}) == 300
+    desk.put("/api/admin/pricing/workflow/factors", json={"workflow": "video/@seedance_2_5"})
+    assert client.app.state.credits.cost("video/@seedance_2_5", 5, {"resolution": 1080}) == 300
     assert "Changed the price factors" in [a["action"] for a in desk.get("/api/admin/audit").json()["entries"]]
 
 
@@ -52,13 +53,13 @@ def test_a_job_is_charged_at_its_chosen_price_and_factors_are_suggested_from_ren
     desk = console(client)
     desk.put("/api/admin/queue", json={"paused": True})
     before = client.get("/api/auth/me").json()["credits"]
-    job = post_job(client, options={"mode": "fast", "quality": "low"}, resolution=480).json()
-    assert job["credits"] == quote(client, options={"mode": "fast", "quality": "low"}, resolution=480)["credits"]
+    job = post_job(client, options={"resolution": "480p"}).json()
+    assert job["credits"] == quote(client, options={"resolution": "480p"})["credits"] == 60   # 20/s x 5 s x 0.6
     assert client.get("/api/auth/me").json()["credits"] == before - job["credits"]
     db, now = client.app.state.db, time.time()
     for resolution, quality, took in ((720, "high", 100), (720, "high", 140), (1080, "high", 360), (720, "low", 72)):
         db.run("INSERT INTO jobs (id, user_id, name, workflow, kind, settings, summary, status, created, started, finished, seconds_requested) "
-               "VALUES (?, 1, 'x', 'video/h3_all_in_one', 'video', ?, '', 'done', ?, ?, ?, 5)",
+               "VALUES (?, 1, 'x', 'video/@seedance_2_5', 'video', ?, '', 'done', ?, ?, ?, 5)",
                ("t{}{}{}".format(resolution, quality, took), json.dumps({"resolution": resolution, "options": {"quality": quality}}), now, now - took, now))
     found = desk.get("/api/admin/pricing/factors").json()
     assert found["suggested"]["resolution"]["1080"] == round(360 / ((100 + 140 + 72) / 3), 2)
@@ -84,7 +85,7 @@ def test_an_estimate_prices_every_choice_with_its_rates_read_once(client, monkey
     assert len(asked) < 25
     post_job(client)   # something new is made (or queued): the runs are read again for the next estimate
     a_run = client.app.state.db.run("INSERT INTO generations (user_id, workflow, kind, name, filename, settings, context, seconds, created) "
-                                    "VALUES ((SELECT MIN(id) FROM users), 'video/h3_all_in_one', 'video', 'r', 'r.mp4', '{}', '{}', 30, ?)", (time.time(),))
+                                    "VALUES ((SELECT MIN(id) FROM users), 'video/@seedance_2_5', 'video', 'r', 'r.mp4', '{}', '{}', 30, ?)", (time.time(),))
     asked.clear()
     quote(client)
     assert a_run and any("FROM generations ORDER BY created DESC LIMIT 500" in q for q in asked)

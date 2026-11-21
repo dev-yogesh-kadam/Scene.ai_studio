@@ -1,7 +1,8 @@
-// Servers & APIs → Providers: every provider with its keys under it, the provider router's switch, which provider the
-// agent uses (Claude on this PC, which has no key and gets one small card of its own: ClaudeOnThisPC), and Add key (checked with the provider before it is saved: "Works · 22 models · 91,296 credits" or the
-// exact error; a key that fails is saved only on "Save anyway"). Keys are never sent back: a key shows its label and
-// last 4. See backend/scene/api/providers.py, providers/registry.py and providers/router.py.
+// Servers & APIs → Providers: every provider with its keys under it, which provider the agent uses (Claude on this PC,
+// which has no key and gets one small card of its own: ClaudeOnThisPC), Add key (checked with the provider before it is
+// saved: "Works · 22 models · 91,296 credits" or the exact error; a key that fails is saved only on "Save anyway"), and
+// What makes what. Keys are never sent back: a key shows its label and last 4. See backend/scene/api/providers.py,
+// providers/registry.py and providers/router.py.
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../../common/api';
@@ -17,8 +18,6 @@ import css4 from '../../../studio/pages/create/CreatePage.module.css';
 import { claudeWords, type ClaudeStatus } from './claude';
 import { ClaudeOnThisPC } from './ClaudeConnection';
 import {
-  ROUTER_WORDS,
-  STATE_WORDS,
   checkWords,
   keyDot,
   keyWords,
@@ -38,11 +37,9 @@ const css = classesOf(css0, css1, css2, css3, css4);
 const PATH = '/api/admin/providers';
 const PLACEHOLDER: Record<string, string> = {
   scene_provider_v1: 'http://100.71.159.106:8189',
-  comfyui: 'http://100.123.221.34:8188',
 };
 const KEY_HINT: Record<string, string> = {
   scene_provider_v1: 'sa_live_… or sa_test_…',
-  comfyui: 'Empty unless a proxy in front of it wants one',
   anthropic: 'sk-ant-…',
 };
 const NEW = 'new:'; // a choice of the Add key form's provider list: a new provider of this kind
@@ -408,7 +405,6 @@ function ProviderCard({ p, done }: { p: Provider; done: (d: ProvidersData) => vo
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(p.name);
   const [url, setUrl] = useState(p.base_url);
-  const [workflows, setWorkflows] = useState('');
   const put = (json: Record<string, unknown>) =>
     api<ProvidersData>(`${PATH}/${p.id}`, { method: 'PUT', json }).then(done, failed);
   const healthy = p.keys.some((k) => k.active && k.status === 'ok');
@@ -461,25 +457,10 @@ function ProviderCard({ p, done }: { p: Provider; done: (d: ProvidersData) => vo
               <input type="text" autoComplete="off" value={url} onChange={(e) => setUrl(e.target.value)} />
             </Field>
           )}
-          {p.kind === 'comfyui' && (
-            <Field label="Workflows">
-              <input
-                type="text"
-                autoComplete="off"
-                placeholder="Kept unless you type new ones (generation_*, video/x)"
-                value={workflows}
-                onChange={(e) => setWorkflows(e.target.value)}
-              />
-            </Field>
-          )}
           <div className="row" style={{ alignItems: 'end' }}>
             <button
               className="btn small primary"
-              onClick={() =>
-                void put({ name, base_url: url, ...(workflows.trim() ? { workflows } : {}) }).then(() =>
-                  setEditing(false),
-                )
-              }
+              onClick={() => void put({ name, base_url: url }).then(() => setEditing(false))}
             >
               Save
             </button>
@@ -490,51 +471,35 @@ function ProviderCard({ p, done }: { p: Provider; done: (d: ProvidersData) => vo
   );
 }
 
-/** One capability's line of What makes what: who makes it now, and the switch that stops ComfyUI making it. */
-function CapabilityLine({ c, set }: { c: Capability; set: (capability: string, comfyui: boolean) => void }) {
-  const models = c.models.map((m) => `${m.name}${m.keys.every((k) => k.mode === 'test') ? ' (test key)' : ''}`);
+/** One capability's line of What makes what: the models that make it, each with its keys. */
+function CapabilityLine({ c }: { c: Capability }) {
   return (
     <tr data-testid={`capability-${c.capability}`}>
       <td>
         <strong>{c.words}</strong>
       </td>
-      <td className="small">{models.length ? models.join(', ') : <span className="muted">No key</span>}</td>
       <td className="small">
-        {c.comfy.length ? (
-          <span title={c.comfy.map((w) => w.title).join('\n')}>
-            {c.comfy.length} workflow{c.comfy.length === 1 ? '' : 's'}
-            {c.comfyui_on ? '' : ' · off'}
-          </span>
+        {c.state === 'none' || !c.models.length ? (
+          <span className="muted">Nothing makes this yet: add a provider key</span>
         ) : (
-          <span className="muted">None</span>
+          c.models.map((m) => (
+            <div key={m.id}>
+              {m.name}
+              {m.keys.length ? (
+                <span className="muted">
+                  {' · ' + m.keys.map((k) => k.label + (k.mode === 'test' ? ' (test key)' : '')).join(', ')}
+                </span>
+              ) : null}
+            </div>
+          ))
         )}
-      </td>
-      <td className="small">
-        <span className={css('pill')}>{STATE_WORDS[c.state]}</span>
-      </td>
-      <td className="small">
-        {!c.comfy.length ? null : c.comfyui_on ? (
-          <button
-            className="btn small"
-            disabled={!c.can_switch_off}
-            title={c.why_not || 'ComfyUI stops making it: only the providers do'}
-            onClick={() => set(c.capability, false)}
-          >
-            Stop using ComfyUI
-          </button>
-        ) : (
-          <button className="btn small" onClick={() => set(c.capability, true)}>
-            Use ComfyUI again
-          </button>
-        )}
-        {c.comfy.length && c.comfyui_on && c.why_not ? <div className="muted small">{c.why_not}</div> : null}
       </td>
     </tr>
   );
 }
 
-/** What makes what: per capability, the providers' models and ComfyUI's workflows, and ComfyUI switched off one
- * capability at a time (only while the router is on and a live key makes it), the way off ComfyUI. */
+/** What makes what: each kind of work and the providers' models (and their keys) that make it. Read only: a key added
+ * or switched off above changes it. */
 function WhatMakesWhat({ version }: { version: unknown }) {
   const [data, setData] = useState<CoverageData | null>(null);
   const [problem, setProblem] = useState('');
@@ -548,44 +513,32 @@ function WhatMakesWhat({ version }: { version: unknown }) {
       live = false;
     };
   }, [version]);
-  const set = (capability: string, comfyui: boolean) =>
-    void api<CoverageData>(`${PATH}/capabilities/${capability}`, { method: 'PUT', json: { comfyui } }).then(
-      setData,
-      failed,
-    );
   if (problem) return <p className="small error">What makes what could not be read: {problem}</p>;
   if (!data) return null;
-  const shown = data.capabilities.filter((c) => c.models.length || c.comfy.length);
-  const comfyLeft = data.capabilities.filter((c) => c.comfy.length && c.comfyui_on).length;
+  const none = data.capabilities.filter((c) => c.state === 'none').length;
   return (
     <div className={css('card')} data-testid="what-makes-what" style={{ marginTop: 18 }}>
       <div className={css('card-head')}>
         <h2>What makes what</h2>
         <span className="muted small">
-          {comfyLeft
-            ? `ComfyUI still makes ${comfyLeft} kind${comfyLeft === 1 ? '' : 's'} of work`
-            : 'ComfyUI makes nothing now'}
+          {none ? `Nothing makes ${none} kind${none === 1 ? '' : 's'} of work yet` : 'Every kind of work has a model'}
         </span>
       </div>
       <p className="muted small">
-        Each kind of work, the providers' models that make it (from the keys above) and ComfyUI's workflows. Once a live
-        key makes something and the router is on, stop using ComfyUI for it: its workflows are no longer offered in
-        Create or to the agent. Switch it back on at any time.
+        Each kind of work and the providers&apos; models that make it, from the keys above. A model with only test keys
+        makes test results.
       </p>
       <div className={css('table-wrap')}>
         <table style={{ width: '100%' }}>
           <thead>
             <tr>
               <th>Work</th>
-              <th>Providers' models</th>
-              <th>ComfyUI</th>
-              <th>Made by now</th>
-              <th />
+              <th>Models and their keys</th>
             </tr>
           </thead>
           <tbody>
-            {shown.map((c) => (
-              <CapabilityLine key={c.capability} c={c} set={set} />
+            {data.capabilities.map((c) => (
+              <CapabilityLine key={c.capability} c={c} />
             ))}
           </tbody>
         </table>
@@ -616,22 +569,9 @@ export function ProvidersPart({ data, claude, refresh }: Props) {
         </button>
       </div>
       <p className="muted small">
-        Every model service is a provider with one or more keys. Add a key and its models appear by themselves; the
-        router spreads jobs over healthy keys and moves on from a key that is refused.
+        Every model service is a provider with one or more keys. Add a key and its models appear by themselves; jobs are
+        spread over healthy keys, moving on from a key that is refused.
       </p>
-      <div className="field">
-        <div className="label">Provider router</div>
-        <Segmented
-          choices={shown.modes.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }))}
-          current={shown.router}
-          onPick={(mode) =>
-            void api<ProvidersData>(PATH + '/router', { method: 'PUT', json: { mode } }).then(done, failed)
-          }
-        />
-        <div className="hint" data-testid="router-words">
-          {ROUTER_WORDS[shown.router]}
-        </div>
-      </div>
       {llm.length > 0 && (
         <div className="field">
           <div className="label">The agent uses</div>

@@ -46,12 +46,11 @@ export type Warning = {
   alt?: { label: string; set: Record<string, unknown> };
 };
 
-/** A workflow as GET /api/workflows/{kind}/{name} describes it (comfy/workflows.describe). */
+/** A workflow as GET /api/workflows/{kind}/{name} describes it: one provider model and its settings. */
 export type Workflow = {
   id: string;
   title: string;
   description: string;
-  approximate?: boolean;
   controls: Control[];
   options: Option[];
   refs: Slot[];
@@ -64,27 +63,9 @@ export type Workflow = {
   hints: string[];
   replaces?: string[];
   ref_naming?: RefNaming | null;
-  /** "generation": the generation server's (its Model option picks one of `models`); "comfy": a ComfyUI workflow. */
-  source?: 'comfy' | 'generation';
-  models?: ModelInfo[];
 };
 
-/** One model of the generation server (backend generation_models.catalog): from its presets file, and from the
- *  server's own list when it answered (seconds, references, frames, prices). */
-export type ModelInfo = {
-  model: string;
-  name: string;
-  about: string;
-  resolutions: string[];
-  shapes: string[];
-  sound: string;
-  frames: ('first' | 'last')[];
-  seconds?: { min?: number; max?: number };
-  references?: number;
-  best_for?: string;
-};
-
-/** One row of GET /api/workflows. A generation workflow lists its models: each is offered on its own. */
+/** One row of GET /api/workflows: one provider model, a workflow of its own ("video/@seedance_2_5"). */
 export type WorkflowRow = {
   id: string;
   kind: string;
@@ -92,15 +73,17 @@ export type WorkflowRow = {
   description?: string;
   error?: string;
   replaces?: string[];
-  source?: 'comfy' | 'generation';
-  models?: { id: string; label: string }[];
+  source?: 'generation';
+  provider?: boolean;
+  model?: string; // the provider's id of the model
+  picture_refs?: number; // how many reference pictures it takes (0: it makes pictures from words only)
 };
 export type Catalog = { workflows: WorkflowRow[]; kinds: string[]; default: string };
 
-/** A reference in a slot: a file from this computer, one already on the render server, or a NeuralCore entry. */
+/** A reference in a slot: a file from this computer, one the studio already keeps, or a NeuralCore entry. */
 export type RefValue = {
   file?: File;
-  existing?: string; // its name on the render server
+  existing?: string; // the name the studio keeps it under (comfy_name)
   assetId?: number;
   name: string;
   url?: string;
@@ -155,83 +138,22 @@ export function newForm(
   return form;
 }
 
-/** Whether the workflow reads this box with the choices made: some belong to one mode only, and a generation model
- *  takes only its own frames and as many references as it says (`wf` given). A file left in a box that is out of use
- *  stays there for when the choice is switched back, and is not sent. */
-export const inUse = (slot: Slot, options: Record<string, string>, wf?: Workflow | null) => {
-  if (!matches(slot.when || {}, options)) return false;
-  const model = wf ? chosenModel(wf, options) : undefined;
-  if (!model || !wf) return true;
-  if (slot.order && model.references != null && slot.order > model.references) return false;
-  if (slot.id === wf.slots?.first_frame) return model.frames.includes('first');
-  if (slot.id === wf.slots?.last_frame) return model.frames.includes('last');
-  return true;
-};
+/** Whether the workflow reads this box with the choices made: some belong to one mode only. A file left in a box
+ *  that is out of use stays there for when the choice is switched back, and is not sent. */
+export const inUse = (slot: Slot, options: Record<string, string>) => matches(slot.when || {}, options);
 
-// ---------------------------------------------------------------- the generation server's models
+/** A picker's entries: every model, each a workflow of its own. */
+export const pickerEntries = (rows: WorkflowRow[], label: (w: WorkflowRow) => string = (w) => w.title) =>
+  rows.map((w) => ({ value: w.id, label: label(w) }));
 
-/** The model chosen in a generation workflow's options, or undefined. */
-export const chosenModel = (wf: Workflow, options: Record<string, string>) =>
-  wf.source === 'generation' ? wf.models?.find((m) => m.model === options.model) : undefined;
-
-/** A model's place in a picker: "<workflow id>#<model>". A ComfyUI workflow is its id alone. */
-export const pickValue = (wf: Pick<Workflow, 'id' | 'source'>, options: Record<string, string>) =>
-  wf.source === 'generation' && options.model ? `${wf.id}#${options.model}` : wf.id;
-
-/** [workflow id, model or null] of a picker's value. */
-export const splitPick = (value: string): [string, string | null] => {
-  const at = value.indexOf('#');
-  return at < 0 ? [value, null] : [value.slice(0, at), value.slice(at + 1)];
-};
-
-/** A picker's two groups, never mixed: ComfyUI's workflows, and the generation server's models one by one. */
-export function pickerGroups(rows: WorkflowRow[], label: (w: WorkflowRow) => string = (w) => w.title) {
-  const comfy = rows.filter((w) => w.source !== 'generation').map((w) => ({ value: w.id, label: label(w) }));
-  const models = rows
-    .filter((w) => w.source === 'generation')
-    // a workflow with a Model setting is offered model by model; one without (speech, music, lip sync …) is one model
-    .flatMap((w) =>
-      w.models?.length
-        ? w.models.map((m) => ({ value: `${w.id}#${m.id}`, label: m.label }))
-        : [{ value: w.id, label: label(w) }],
-    );
-  return [
-    { label: 'Workflows (ComfyUI)', entries: comfy },
-    { label: 'Models (generation server)', entries: models },
-  ].filter((g) => g.entries.length);
-}
-
-/** The lengths to offer: a generation model's own range when it is known, else 5, 10 and 15 seconds. */
-export function lengthChoices(wf: Workflow, options: Record<string, string>, current: number) {
-  const span = chosenModel(wf, options)?.seconds;
-  const low = span?.min ?? 1;
-  const high = span?.max ?? Infinity;
-  const steps = span ? [low, 5, 10, 15, 20, 25, 30, high] : [5, 10, 15];
-  return [...new Set([...steps, current])]
-    .filter((d) => Number.isFinite(d) && d >= low && d <= high)
-    .sort((a, b) => a - b);
-}
-
-/** The options and values with another model chosen: its length kept within the model's range. */
-export function withModel(
-  wf: Workflow,
-  options: Record<string, string>,
-  values: Record<string, unknown>,
-  model: string,
-): { options: Record<string, string>; values: Record<string, unknown> } {
-  const next = { ...options, model };
-  const dur = byRole(wf, 'duration');
-  const span = chosenModel(wf, next)?.seconds;
-  if (!dur || !span) return { options: next, values };
-  const now = Number(values[dur.id] ?? dur.default ?? 5);
-  const kept = Math.min(span.max ?? now, Math.max(span.min ?? now, now));
-  return { options: next, values: { ...values, [dur.id]: kept } };
-}
+/** The lengths to offer: 5, 10 and 15 seconds, and the one set now. The server says when a model can't make one. */
+export const lengthChoices = (current: number) =>
+  [...new Set([5, 10, 15, current])].filter((d) => Number.isFinite(d) && d > 0).sort((a, b) => a - b);
 
 const matches = (when: When, options: Record<string, string>) =>
   Object.entries(when).every(([k, v]) => ([] as string[]).concat(v).includes(options[k]));
 
-/** Whether an option is offered with the choices made (comfy/workflows.shown). */
+/** Whether an option is offered with the choices made (the server's workflows.shown). */
 export const offered = (option: Option, options: Record<string, string>) =>
   !option.when || ([] as When[]).concat(option.when).some((when) => matches(when, options));
 
@@ -239,10 +161,9 @@ export const offered = (option: Option, options: Record<string, string>) =>
 export const optionsShown = (form: Pick<JobForm, 'wf' | 'options'>) =>
   form.wf.options.filter((o) => offered(o, form.options));
 
-const usedSlots = (form: JobForm) =>
-  new Set(form.wf.refs.filter((s) => inUse(s, form.options, form.wf)).map((s) => s.id));
+const usedSlots = (form: JobForm) => new Set(form.wf.refs.filter((s) => inUse(s, form.options)).map((s) => s.id));
 
-/** A reference already on the render server, as a slot holds it. */
+/** A reference the studio already keeps, as a slot holds it. */
 export const existingRef = (ref: { comfy_name: string; name: string }): RefValue => ({
   existing: ref.comfy_name,
   name: ref.name,
@@ -306,6 +227,3 @@ export function submitJob(form: JobForm) {
 
 export const loadCatalog = () => api<Catalog>('/api/workflows');
 export const loadWorkflow = (id: string) => api<Workflow>('/api/workflows/' + id);
-
-/** The generation server's models with what each takes ({workflow id: [model]}); the server's own list when it answers. */
-export const loadModelCatalog = () => api<{ models: Record<string, ModelInfo[]> }>('/api/generation/models');

@@ -126,33 +126,49 @@ def test_without_a_claude_or_a_key_the_model_says_what_to_do(client):
     assert shown["online"] is False and "not installed on this PC" in shown["detail"] and shown["mode"] == "api_key"
 
 
+# ---------------------------------------------------------------- health: models offered
+
+@pytest.mark.no_models
+def test_a_studio_that_offers_no_models_has_a_critical_problem_until_a_provider_key_offers_some(client):
+    """The render server's check is gone with it: what matters now is that some provider key offers models."""
+    import studio_models
+    register(client)
+    state = client.app.state
+    claude = {"online": True, "detail": ""}
+    found = {p["key"]: p for p in asyncio.run(health.problems(state, model=claude))}
+    assert found["models"]["level"] == "critical" and found["models"]["tab"] == "servers"
+    assert "No models are offered" in found["models"]["text"] and "Providers" in found["models"]["text"]
+    assert "render" not in found and health.RESOLVED["models"] == "Models are offered again"
+    studio_models.install(state)
+    assert "models" not in [p["key"] for p in asyncio.run(health.problems(state, model=claude))]
+
+
 # ---------------------------------------------------------------- health: FFmpeg and HyperFrames
 
 def test_ffmpeg_or_hyperframes_missing_is_a_problem(client, monkeypatch):
     register(client)
     state = client.app.state
-    online = {"online": True, "url": "", "since": 0}
 
     def no_ffmpeg():
         raise media.MediaError("ffmpeg is not installed.")
     monkeypatch.setattr(media, "ffmpeg_path", no_ffmpeg)
     monkeypatch.setattr(motion, "status", lambda node="": {"ready": False, "detail": "HyperFrames is not installed."})
-    found = {p["key"]: p for p in asyncio.run(health.problems(state, render=online, model={"online": True, "detail": ""}))}
+    found = {p["key"]: p for p in asyncio.run(health.problems(state, model={"online": True, "detail": ""}))}
     assert found["ffmpeg"]["level"] == "serious" and "ffmpeg is not installed" in found["ffmpeg"]["text"]
     assert found["motion"]["level"] == "warning" and "HyperFrames is not installed" in found["motion"]["text"]
     assert "ffmpeg" in health.RESOLVED and "motion" in health.RESOLVED
 
     monkeypatch.setattr(media, "ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(motion, "status", lambda node="": {"ready": True, "detail": ""})
-    keys = [p["key"] for p in asyncio.run(health.problems(state, render=online, model={"online": True, "detail": ""}))]
+    keys = [p["key"] for p in asyncio.run(health.problems(state, model={"online": True, "detail": ""}))]
     assert "ffmpeg" not in keys and "motion" not in keys
 
 
 def test_every_check_in_one_answer(client):
     register(client)
     found = asyncio.run(health.checks(client.app.state))
-    assert set(found) == {"database", "render", "model", "programs", "disk", "backup", "langfuse", "creative"}
-    assert found["database"]["online"] is True and found["render"]["online"] is False
+    assert set(found) == {"database", "model", "programs", "disk", "backup", "langfuse", "creative"}   # no render server any more
+    assert found["database"]["online"] is True
     assert set(found["programs"]) == {"ffmpeg", "motion"} and found["langfuse"]["in_use"] is False
     assert found["disk"]["free"] > 0 and "last" in found["backup"]
 
@@ -243,7 +259,7 @@ def test_the_consoles_system_section_carries_every_check(client):
     from test_api import console, register
     register(client)
     checks = console(client).get("/api/admin/system").json()["checks"]
-    assert {"database", "render", "model", "programs", "disk", "backup", "langfuse"} <= set(checks)
+    assert {"database", "model", "programs", "disk", "backup", "langfuse"} <= set(checks) and "render" not in checks
 
 
 # ---------------------------------------------------------------- Docker

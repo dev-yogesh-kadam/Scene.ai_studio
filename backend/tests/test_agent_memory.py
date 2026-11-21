@@ -99,16 +99,16 @@ def test_the_agent_puts_a_saved_asset_it_knows_by_name_into_a_slot(client, monke
     async def fake_ask(system, message, workflow_ids, history=(), model=None):
         asked.update(system=system, message=message)
         return {"reply": "One shot.", "steps": [{
-            "tool": "generate", "workflow": "video/h3_all_in_one", "name": "Rain", "prompt": "The girl walks home in the rain.",
-            "uses": [{"item": 0, "asset": meera, "slot": "201:image"}, {"item": 0, "asset": meera, "slot": "203:image"},   # once is enough
-                     {"item": 0, "asset": 999, "slot": "204:image"},                                                       # not in the book
-                     {"item": harbour, "asset": 0, "slot": "205:image"}]}]}   # a picture of the project, not attached
+            "tool": "generate", "workflow": "video/@seedance_2_5", "name": "Rain", "prompt": "The girl walks home in the rain.",
+            "uses": [{"item": 0, "asset": meera, "slot": "ref_1"}, {"item": 0, "asset": meera, "slot": "ref_2"},   # once is enough
+                     {"item": 0, "asset": 999, "slot": "ref_3"},                                                   # not in the book
+                     {"item": harbour, "asset": 0, "slot": "ref_4"}]}]}   # a picture of the project, not attached
 
     monkeypatch.setattr(client.app.state.agent, "ask", fake_ask)
     plan = client.post("/api/agent/plan", json={"instruction": "/short-film a short film: Meera walks home in the rain", "project_id": film(client)}).json()
     step = plan["steps"][0]
     assert [(u.get("asset"), u["id"], u["name"], u["slot"]) for u in step["uses"]] == [
-        (meera, 0, "Meera", "201:image"), (None, harbour, "Harbour", "205:image")]
+        (meera, 0, "Meera", "ref_1"), (None, harbour, "Harbour", "ref_4")]
     # The model was given the book, with the user's note, and the skill for a film.
     assert '"name": "Meera"' in asked["message"] and "Use her for every shot of the girl." in asked["message"]
     assert '"asset": %d' % cafe in asked["message"] and "A harbour at dawn." in asked["message"]
@@ -116,7 +116,7 @@ def test_the_agent_puts_a_saved_asset_it_knows_by_name_into_a_slot(client, monke
     assert "NeuralCore (the project's memory)" in asked["system"]
 
     # On Approve the browser sends the saved asset by its id, which the job takes as it is.
-    assert client.post("/api/jobs", data={"settings": '{"workflow": "video/h3_all_in_one", "refs": {"201:image": {"asset_id": 999}}}'}).status_code == 400
+    assert client.post("/api/jobs", data={"settings": '{"workflow": "video/@seedance_2_5", "refs": {"ref_1": {"asset_id": 999}}}'}).status_code == 400
 
 
 def test_an_asset_saved_from_the_library_keeps_what_the_model_saw_and_notes_can_be_changed(client):
@@ -180,25 +180,22 @@ def test_only_the_user_picks_a_skill_and_a_video_gets_the_default(tmp_path):
 
 def test_a_file_dropped_into_a_job_is_kept_once_as_an_upload_of_its_project(client, monkeypatch):
     me = register(client)
-
-    async def upload(name, data, content_type=None):
-        return name
-    monkeypatch.setattr(client.app.state.comfy, "upload", upload)
     project = client.post("/api/projects", json={"name": "Rain"}).json()["id"]
-    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "She waves."}, "options": {"engine": "reference"}, "project_id": project}
+    settings = {"workflow": "video/@seedance_2_5", "values": {"2:value": "She waves."}, "project_id": project}
     for _ in range(2):   # the same file twice is kept once
-        made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("meera_face.png", PNG, "image/png")})
+        made = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:ref_1": ("meera_face.png", PNG, "image/png")})
         assert made.status_code == 200
     shown = client.get("/api/kit?project=%d" % project).json()["entries"]
-    assert [(u["name"], u["type"], u["origin"]) for u in shown] == [("meera face", "character", "upload")]   # typed by its slot
+    # typed by its slot: a model's numbered reference picture says nothing of what it holds
+    assert [(u["name"], u["type"], u["origin"]) for u in shown] == [("meera face", "other", "upload")]
     assert client.get("/api/kit").json()["entries"] == []   # only in its own project
     upload_id = shown[0]["id"]
     assert client.get("/api/kit/%d/file" % upload_id).content == PNG
     # The agent knows it by name in that project.
     book = memory.book_for_model(memory.book(client.app.state.db, me["id"], project))
-    assert book[0]["asset"] == upload_id and book[0]["type"] == "character"
+    assert book[0]["asset"] == upload_id and book[0]["type"] == "other"
     # A deleted project takes its NeuralCore with it: nothing is left outside a project.
-    second = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:201:image": ("cafe.png", PNG + b"cafe", "image/png")})
+    second = client.post("/api/jobs", data={"settings": json.dumps(settings)}, files={"ref:ref_1": ("cafe.png", PNG + b"cafe", "image/png")})
     assert second.status_code == 200
     client.delete("/api/projects/%d" % project)
     assert client.get("/api/kit").json()["entries"] == [] and not client.app.state.db.one("SELECT 1 FROM assets")
@@ -266,3 +263,18 @@ def test_what_a_step_makes_for_reuse_is_kept_in_shared_memory_under_its_name(cli
     assert len(db.all("SELECT id FROM assets WHERE name = 'Liam'")) == 2 and db.one("SELECT 1 FROM assets WHERE id = ?", (saved,))
     book = memory.book_for_model(memory.book(db, me["id"], film(client)))
     assert {e["name"] for e in book if e.get("type") == "character"} == {"Maya", "Liam"}
+
+
+def test_the_always_on_cast_fills_a_models_numbered_reference_pictures_in_order(client):
+    """A provider's model names its reference pictures "REFERENCE 1", "REFERENCE 2" ...: the cast goes into them in
+    order, characters first, and never into its first frame, last frame or reference video."""
+    import asyncio
+    from scene import kit
+    from scene.comfy import workflows
+    schema = workflows.describe(asyncio.run(client.app.state.catalog.load("video/@seedance_2_5")))
+    on = [{"id": 3, "name": "Cafe", "tag": "background", "kind": "image"}, {"id": 1, "name": "Maya", "tag": "character", "kind": "image"},
+          {"id": 2, "name": "Liam", "tag": "character", "kind": "image"}]
+    filled = kit.fills(schema, on)
+    assert [(f["slot"], f["name"]) for f in filled] == [("ref_1", "Maya"), ("ref_2", "Liam"), ("ref_3", "Cafe")]
+    # a slot already given a file is left as it is, and the rest follow without a gap
+    assert [(f["slot"], f["name"]) for f in kit.fills(schema, on, taken={"ref_1"})] == [("ref_2", "Maya"), ("ref_3", "Liam"), ("ref_4", "Cafe")]

@@ -27,6 +27,7 @@ export default tseslint.config(
       'scripts/**',
       'storage/**',
       '.venv/**',
+      '.venv-audio/**', // the tools on this PC: PyTorch ships JavaScript of its own
     ],
   },
   js.configs.recommended,

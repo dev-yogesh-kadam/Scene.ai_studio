@@ -75,9 +75,10 @@ def main():
         state["database"] = subprocess.run([sys.executable, str(ROOT / "scripts" / "testdb.py"), "create"],
                                            capture_output=True, text=True, check=True).stdout.strip()
         store()
-    settings = Settings(database_url=state["database"], comfy_url=config["comfy_url"], storage_dir=str(HERE / "storage"),
-                        signup_credits=1_000_000, first_account_local=False,
-                        workflows_dir=str(ROOT / "workflows"))
+    # Its models are the providers' (Servers & APIs → Providers): a run makes nothing until a provider key is added to
+    # this studio (ComfyUI, which it once rendered on, is gone).
+    settings = Settings(database_url=state["database"], storage_dir=str(HERE / "storage"),
+                        signup_credits=1_000_000, first_account_local=False)
     with TestClient(create_app(settings)) as c:
         if not state.get("project"):
             c.post("/api/auth/register", json=ME)

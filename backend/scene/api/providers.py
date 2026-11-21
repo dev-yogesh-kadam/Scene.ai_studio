@@ -1,6 +1,6 @@
 """The console's Servers & APIs → Providers (providers/registry.py, providers/router.py): every provider with its keys,
-adding a key (checked with the provider before it is saved), changing, testing and removing keys and providers, the
-provider router's switch, and which provider the agent uses. Admins only (staff.ADMIN_ONLY). A key is never sent back:
+adding a key (checked with the provider before it is saved), changing, testing and removing keys and providers, what
+makes what, and which provider the agent uses. Admins only (staff.ADMIN_ONLY). A key is never sent back:
 only its label and last 4 characters."""
 
 import asyncio
@@ -11,7 +11,6 @@ from .. import audit, claude_connection, health
 from ..db import offload
 from ..providers import registry
 from ..providers.base import BUILT_IN, CLAUDE_KINDS, KEYLESS, KINDS, SELF_HOSTED, KeyProblem, ProviderProblem, RequestProblem
-from ..providers.comfyui import capability_of
 from .deps import admin_user, current_user
 
 router = APIRouter(prefix="/api/admin/providers", tags=["admin"])
@@ -20,21 +19,17 @@ router = APIRouter(prefix="/api/admin/providers", tags=["admin"])
 async def _listing(state):
     found = await offload(registry.listing, state.db, state.settings)
     return {"kinds": KINDS, "self_hosted": list(SELF_HOSTED), "keyless": list(KEYLESS), "built_in": list(BUILT_IN), "providers": found,
-            "router": await offload(registry.router_mode, state.db), "modes": list(registry.ROUTER_MODES),
             "agent_provider": await offload(registry.agent_provider_id, state.db),
             "testing": claude_connection.TESTING if claude_connection.testing() else ""}
 
 
 async def _changed(state, kind=None):
-    """After a change: the router looks again, the offered models are read again, ComfyUI's servers (the load
-    balancer) and the Claude connection (claude.CONNECTION, in every process) are read again."""
+    """After a change: the router looks again, the offered models are read again, the queue looks again (a job may wait
+    for a key), and the Claude connection (claude.CONNECTION, in every process) is read again."""
     state.router.forget()
     if state.catalog.providers is not None:
         await state.catalog.providers.refresh(force=True)
-    if kind in (None, "comfyui"):
-        await offload(state.comfy_pool.reload)
-        health.forget(state, "endpoints")
-        state.jobs._wake()
+    state.jobs._wake()
     if kind is None or kind in CLAUDE_KINDS:
         await offload(claude_connection.apply, state.db, state.settings)
         if getattr(state.db, "shared", None) is not None:
@@ -50,7 +45,7 @@ async def list_providers(request: Request, user: dict = Depends(admin_user)):
 async def _check(state, row, secret):
     """Ask a provider about a key before it is saved: whoami and models. {"ok", "models", "credits", "alerts", "error",
     "status", "info", "found"} (found: the models, to save with the key)."""
-    adapter = await offload(state.router.adapter, row)   # a ComfyUI one reads its endpoints row
+    adapter = await offload(state.router.adapter, row)
     try:
         said = await adapter.whoami(secret)
         found = await adapter.models(secret)
@@ -91,7 +86,7 @@ async def add_key(body: dict, request: Request, user: dict = Depends(admin_user)
         raise HTTPException(400, "{} has no key: it uses the account Claude Code is signed in with on this PC.".format(KINDS[row["kind"]]))
     if row["kind"] in BUILT_IN:
         raise HTTPException(400, "{} needs no key: its tools run on this PC.".format(KINDS[row["kind"]]))
-    if not secret and row["kind"] != "comfyui":
+    if not secret:
         raise HTTPException(400, "Paste the key.")
     check = await _check(state, row, secret)
     if not check["ok"] and not body.get("save_anyway"):
@@ -118,7 +113,7 @@ MANY_AT_ONCE = 4   # keys of one paste checked with the provider at the same tim
 
 @router.post("/keys/many")
 async def add_keys(body: dict, request: Request, user: dict = Depends(admin_user)):
-    """Several keys of one provider pasted at once (`text`, one a line: "label<TAB>key" as the generation server's
+    """Several keys of one provider pasted at once (`text`, one a line: "label<TAB>key" as Studio_automation's
     "Copy all" gives them, or the key alone), to an existing provider (`provider_id`) or a new one (`kind`, `name`,
     `base_url`). Each is checked with the provider and saved when it works (or with `save_anyway`); a key with no label
     takes the label the provider gives it. A key the provider has already is left out. Answers {"results": [{"line",
@@ -143,8 +138,8 @@ async def add_keys(body: dict, request: Request, user: dict = Depends(admin_user
         row = {"id": None, "kind": kind, "name": str(body.get("name") or KINDS[kind]), "base_url": base_url, "legacy": "", "active": 1}
     if row["kind"] in BUILT_IN:
         raise HTTPException(400, "{} needs no key: its tools run on this PC.".format(KINDS[row["kind"]]))
-    if row["kind"] in KEYLESS or row["kind"] == "comfyui":
-        raise HTTPException(400, "{} keys are added one at a time.".format(KINDS[row["kind"]]))
+    if row["kind"] in KEYLESS:
+        raise HTTPException(400, "{} has no key: it uses the account Claude Code is signed in with on this PC.".format(KINDS[row["kind"]]))
     try:   # checked before any key is: one wrong number stops the paste, not half of it
         most = registry._int(body.get("max_concurrent"), None, 1, registry.MOST_CONCURRENT)
         cap = registry._int(body.get("daily_cap"), None, 0)
@@ -190,46 +185,10 @@ async def add_keys(body: dict, request: Request, user: dict = Depends(admin_user
 
 # ---------------------------------------------------------------- what makes what
 
-async def _comfy_workflows(state):
-    """The studio's ComfyUI workflow files (not the generation server's, nor the providers' models), with their capability."""
-    found = []
-    for item in await state.catalog.listing():
-        if item.get("provider") or item["id"].rsplit("/", 1)[-1].startswith("generation_"):
-            continue
-        found.append({"id": item["id"], "title": item.get("title") or item["id"], "capability": capability_of(item["id"])})
-    return found
-
-
-async def _coverage(state):
-    rows = await offload(registry.coverage, state.db, await _comfy_workflows(state))
-    return {"router": await offload(registry.router_mode, state.db), "capabilities": rows}
-
-
 @router.get("/capabilities")
 async def capabilities(request: Request, user: dict = Depends(admin_user)):
-    """What makes what: per capability, the providers' models (with the keys that have them) and the ComfyUI
-    workflows, and whether ComfyUI is still offered for it."""
-    return await _coverage(request.app.state)
-
-
-@router.put("/capabilities/{capability}")
-async def set_capability(capability: str, body: dict, request: Request, user: dict = Depends(admin_user)):
-    """ComfyUI switched off (`{"comfyui": false}`) or back on for one capability. Off only while the router is on and a
-    live provider key offers it, so something always makes it; back on at any time."""
-    state = request.app.state
-    on = body.get("comfyui")
-    if not isinstance(on, bool):
-        raise HTTPException(400, 'Say {"comfyui": true} or false.')
-    rows = (await _coverage(state))["capabilities"]
-    row = next((r for r in rows if r["capability"] == capability), None)
-    if row is None:
-        raise HTTPException(404, "There is no capability '{}'.".format(capability))
-    if not on and row["comfyui_on"] and not row["can_switch_off"]:
-        raise HTTPException(400, "ComfyUI still makes {}: {}".format(row["words"].lower(), row["why_not"]))
-    await offload(registry.set_comfyui, state.db, capability, on)
-    if on != row["comfyui_on"]:
-        await offload(audit.record, request, user, "Switched ComfyUI {} for a capability".format("on" if on else "off"), row["words"], "")
-    return await _coverage(state)
+    """What makes what: per capability, the providers' models with the keys that have them (registry.coverage)."""
+    return {"capabilities": await offload(registry.coverage, request.app.state.db)}
 
 
 # ---------------------------------------------------------------- the voices of the voiceover model (any signed-in user)
@@ -301,22 +260,6 @@ async def remove_key(key_id: int, request: Request, user: dict = Depends(admin_u
     return await _listing(state)
 
 
-@router.put("/router")
-async def set_router(body: dict, request: Request, user: dict = Depends(admin_user)):
-    """The provider router's switch: off (today's paths), shadow (today's paths, the router's pick logged beside),
-    on (the generation models through the providers)."""
-    state = request.app.state
-    mode = str(body.get("mode") or "")
-    if mode not in registry.ROUTER_MODES:
-        raise HTTPException(400, "The router is off, shadow or on.")
-    before = await offload(registry.router_mode, state.db)
-    await offload(state.db.set_setting, registry.ROUTER, mode)
-    if before != mode:
-        await offload(audit.record, request, user, "Switched the provider router", "", "{} to {}".format(before, mode))
-    await _changed(state)
-    return await _listing(state)
-
-
 @router.put("/agent")
 async def set_agent(body: dict, request: Request, user: dict = Depends(admin_user)):
     """Which provider the agent uses: Claude on this PC or Anthropic. On Claude on this PC, a personal subscription,
@@ -338,7 +281,7 @@ async def set_agent(body: dict, request: Request, user: dict = Depends(admin_use
 
 @router.put("/{provider_id}")
 async def change_provider(provider_id: int, body: dict, request: Request, user: dict = Depends(admin_user)):
-    """A provider's name, address, on/off, order; a ComfyUI server's Workflows (`workflows`)."""
+    """A provider's name, address, on/off, order."""
     state = request.app.state
     try:
         row = await offload(registry.change_provider, state.db, provider_id, body)
@@ -359,8 +302,7 @@ async def remove_provider(provider_id: int, request: Request, user: dict = Depen
     if row is None:
         raise HTTPException(404, "There is no such provider.")
     held = [k for k in await offload(registry.keys, state.db, provider_id) if state.router.busy(k["id"])]
-    endpoint = await offload(registry.endpoint_of, state.db, row)
-    if held or (endpoint and state.comfy_pool.running(endpoint["url"])):
+    if held:
         raise HTTPException(400, "A job is running there. Switch it off, and remove it once the job is done.")
     try:
         await offload(registry.remove_provider, state.db, provider_id)

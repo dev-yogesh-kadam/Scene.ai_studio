@@ -49,12 +49,12 @@ def test_settings_and_secrets_come_from_the_environment_and_config_json_ones_are
 
 def test_backups_can_be_switched_off_part_by_part(tmp_path):
     from fastapi.testclient import TestClient
-    from conftest import ROOT, built
+    from conftest import built
     from scene.config import Settings
     from scene.main import create_app
     empty_postgres()
-    settings = Settings(database_url=POSTGRES, hold_queue_offline=False, comfy_url="http://127.0.0.1:9", claude_models="off",
-                        storage_dir=str(tmp_path / "storage"), first_account_local=False, workflows_dir=str(ROOT / "workflows"),
+    settings = Settings(database_url=POSTGRES, claude_models="off",
+                        storage_dir=str(tmp_path / "storage"), first_account_local=False,
                         web_dist_dir=str(built(tmp_path / "web")), backup_database=False, backup_files=False)
     with TestClient(create_app(settings)) as client:
         time.sleep(0.3)

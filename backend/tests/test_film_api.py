@@ -74,9 +74,8 @@ def test_film_operations_are_checked_before_anything_is_queued(client):
     assert post(op="slice", audio=master, f_in=0, f_out=24).status_code == 404           # another user's sound
 
 
-def test_a_comfyui_transcript_is_collected_as_text():
-    entry = {"outputs": {"9": {"text": [{"filename": "episode.json", "subfolder": "", "type": "output"},
-                                        {"filename": "episode.srt", "subfolder": "", "type": "output"}],
-                               "audio": [{"filename": "voice.wav", "subfolder": "", "type": "output"}]}}}
-    assert [(i["filename"], kind) for i, kind, _ in jobs._outputs(entry)] == [
-        ("episode.json", "text"), ("episode.srt", "text"), ("voice.wav", "audio")]
+def test_a_providers_transcript_is_filed_as_text():
+    """A transcript On this PC makes (transcript.json and its subtitles) is filed as text, its voice as audio: by the
+    output's type when the provider says, else by its file's ending."""
+    outputs = [{"name": "transcript.json"}, {"name": "transcript.srt"}, {"name": "voice.wav"}, {"type": "audio", "name": "voice.bin"}]
+    assert [jobs._kind_of_output(o, "." + o["name"].rsplit(".", 1)[-1]) for o in outputs] == ["text", "text", "audio", "audio"]

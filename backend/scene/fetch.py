@@ -1,7 +1,7 @@
 """Bringing a picture, clip or sound in from a link on another site, for the library (a link in the chat, a row of a
 shot tracker).
 
-The server fetches it, so a link must never reach the studio's own network or the render PC: only http and https, only
+The server fetches it, so a link must never reach the studio's own network: only http and https, only
 public addresses — every address the name resolves to is checked before connecting, again at every redirect, and the
 connection itself is made to an address checked in the same breath (public_client: the HTTP library does not look the
 name up again, so a name that changes its answer between the check and the connection, DNS rebinding, reaches

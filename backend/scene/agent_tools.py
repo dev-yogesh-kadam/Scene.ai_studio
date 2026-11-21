@@ -25,7 +25,7 @@ FILM_OPS = tuple(op for op in edits.FILM if op not in ("html", "ffmpeg"))
 BOOK_TYPES = ("character", "location", "prop", "outfit", "voice", "style", "script")
 MEMORY_OPS = ("remember", "recall", "forget")
 
-ITEM = _field(I, "A library id: an item of this project (a picture, clip, sound or text).")
+ITEM = _field(I, "A library id: an item of this module (a picture, clip, sound or text).")
 REF = _field({"type": ["integer", "string"]}, "A library id, or \"$state:/path\" for the id kept at that path.")
 ASSET = _field(I, "A NeuralCore entry's id (its \"asset\").")
 OFFSET = _field(I, "Where to start reading, in characters, for the next page of a long result (0 for the start).")
@@ -33,15 +33,10 @@ OFFSET = _field(I, "Where to start reading, in characters, for the next page of 
 # Every tool, in the order the model is shown them: name -> (what it does, its input schema).
 TOOLS = {
     "find_assets": (
-        "Finds NeuralCore's entries that match some words. Use it before you say NeuralCore has nothing. With \"op\" \"all\" "
-        "it looks in the user's other projects instead: each found entry names its project. Another project is read only; "
-        "book_save with that entry's \"asset\" copies it into this project. When several entries of other projects fit what "
-        "the user described, show them ([[asset:<id>]], the name, its project, one detail that tells them apart) and ask "
-        "which one with \"question\"; with one, use it.",
+        "Finds this module's NeuralCore entries that match some words. Use it before you say NeuralCore has nothing. Only "
+        "this module's entries are there: another module's or project's cannot be read or used.",
         {"type": "object", "required": ["query"], "properties": {
-            "query": _field(S, "The words to look for."),
-            "op": _field(S, "\"all\" to look in the user's other projects instead of this one; \"\" for this project.",
-                         enum=["", "all"])}}),
+            "query": _field(S, "The words to look for.")}}),
     "look": (
         "Tells you what is in a picture or clip. With \"op\" \"deep\" you get a close study of it: subject, faces and "
         "bodies, clothes and pose, background, composition, shape, light, scene, room, atmosphere, props, motion, the story, "
@@ -78,7 +73,7 @@ TOOLS = {
             "text": _field(S, "The entry's name (\"Violet\")."),
             "op": _field(S, "Its type.", enum=list(BOOK_TYPES)),
             "item": _field(I, "A library id to add: a sheet you made, a file the user attached."),
-            "asset": _field(I, "The entry to change, or an entry of another project to copy here."),
+            "asset": _field(I, "The entry of this module's NeuralCore to change."),
             "value": _field(S, "What it shows, when you know better than NeuralCore; for a script, its text or "
                                "\"$state:/path\" of the text."),
             "settings": {"description": "\"always\" to attach it to every shot of this module, or an object of the entry's "
@@ -170,8 +165,9 @@ TOOLS = {
         "bottom|middle|top, \"margin\", \"box\", \"highlight\", \"karaoke\": word|fill}, \"words_from\"?: the transcription "
         "with its words' times, for karaoke} · film {\"clips\": [ids], \"audio\"} · speech {\"audio\", \"lines\": [{\"n\", "
         "\"start\", \"end\", \"speaker\"}], \"narrator\"?: the narrator's speaker label, \"save_to\"?: a folder for the spans} "
-        "or {\"audio\", \"windows\": [[a, b]]} · reframe {\"video\", \"shape\", \"x\"?, \"y\"?} · outpaint_prep {\"video\", "
-        "\"shape\"} · outpaint_join {\"video\", \"parts\": [ids], \"shape\"}. shape is portrait, landscape, square or 4:5.\n"
+        "or {\"audio\", \"windows\": [[a, b]]} · reframe {\"video\", \"shape\", \"x\"?, \"y\"?}. "
+        "shape is portrait, landscape, square or 4:5 (to extend a video into a new shape, use a video model that edits "
+        "a clip: see the agent's rules).\n"
         "Finding and cutting, no model: shots {\"video\", \"threshold\"?: 0.3, \"min_shot\"?: 0.5} (the cut times and each "
         "shot's span) · keyframes {\"video\", \"from\"?, \"to\"?, and one of \"count\", \"every\" (seconds), \"times\" [s] or "
         "\"shots\" ([{\"n\", \"start\", \"end\"}], one frame each, \"pick\" first|middle|last), \"labels\"?, \"key\"?} "
@@ -332,7 +328,7 @@ TOOLS = {
             "query": _field(S, "Words to look for in the voices' names (\"warm\", \"narrator\", a name), or \"\" for all."),
             "language": _field(S, "A language and region (\"en-US\", \"hi-IN\"), or \"\" for any.")}}),
     "memory": (
-        "The user's memory across all their projects (see Memory).",
+        "What you remember of the user in this module, and in no other (see Memory). There is none outside a project.",
         {"type": "object", "required": ["op"], "properties": {
             "op": _field(S, "What to do.", enum=list(MEMORY_OPS)),
             "path": _field(S, "The key."),

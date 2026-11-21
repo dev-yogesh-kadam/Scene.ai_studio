@@ -144,7 +144,7 @@ def test_a_video_with_no_skill_picked_runs_script_to_video_and_nothing_else_load
     assert any(e["text"].startswith("No skill picked: “Script to Video") for e in plan["activity"])
     results = [t for t in told(seen) if t.startswith("Result of read_skill")]
     assert "Craft Director (skill director" in results[0] and "is in use" in results[1]
-    assert runs.kept_skill(client.app.state.db, 1, "s2v-1") == "script-to-video"
+    assert runs.kept_skill(client.app.state.db, 1, "s2v-1", 0) == "script-to-video"
     # a skill the user picked is not replaced by the default
     hosted(monkeypatch, client, {"tool": "finish", "reply": "ok"})
     plan = client.post("/api/agent/plan", json={"instruction": "/product-ad make a video for our shoes"}).json()
@@ -228,12 +228,12 @@ def shot(client, user_id, job_id, kind="video", take=1):
     folder = client.app.state.outputs.folder(user_id)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / (job_id + ".mp4")).write_bytes(b"0" * 64)
-    settings = {"workflow": "video/h3_all_in_one", "values": {"100:value": "A dog runs."}, "prompt": "A dog runs.",
+    settings = {"workflow": "video/@seedance_2_5", "values": {"2:value": "A dog runs."}, "prompt": "A dog runs.",
                 "refs": {}, "seed_mode": "random", "shot": {"id": "s1", "take": take}, "shot_number": 4, "name": "Dog"}
-    a_job(client.app.state.db, job_id, user_id, "video/h3_all_in_one")
+    a_job(client.app.state.db, job_id, user_id, "video/@seedance_2_5")
     item = client.app.state.db.run(
         "INSERT INTO generations (user_id, job_id, workflow, kind, name, filename, summary, settings, context, seconds, size, created) "
-        "VALUES (?, ?, 'video/h3_all_in_one', ?, 'Dog', ?, '', ?, '{}', 1, 1, 1)", (user_id, job_id, kind, job_id + ".mp4", json.dumps(settings)))
+        "VALUES (?, ?, 'video/@seedance_2_5', ?, 'Dog', ?, '', ?, '{}', 1, 1, 1)", (user_id, job_id, kind, job_id + ".mp4", json.dumps(settings)))
     return item, {"id": job_id, "user_id": user_id, "settings": settings, "project_id": None, "seconds_requested": None}
 
 
@@ -291,7 +291,7 @@ def test_a_shot_is_checked_as_soon_as_it_is_made_against_the_shot_before(client,
     before, _ = shot(client, me["id"], "job0")
     item, job = shot(client, me["id"], "job1")
     job["settings"]["parent"] = before
-    add = "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created) VALUES (?, ?, 'Next', 'video/h3_all_in_one', 'video', ?, 'running', 1)"
+    add = "INSERT INTO jobs (id, user_id, name, workflow, kind, settings, status, created) VALUES (?, ?, 'Next', 'video/@seedance_2_5', 'video', ?, 'running', 1)"
     state.db.run(add, ("job2", me["id"], json.dumps(job["settings"])))   # the next shot of the plan, still being made
     assert client.portal.call(aftercare.after, state, job, 0)["passed"] is True
     assert review.load(state.db.one("SELECT review FROM generations WHERE id = ?", (item,)))["by"] == "auto"
@@ -347,12 +347,15 @@ def test_hindi_lines_are_respelled_for_the_video_model_and_english_ones_left_alo
 
 def test_a_switched_off_resolution_steps_down_and_the_reply_says_so(client, monkeypatch):
     register(client)
-    client.app.state.credits.set_resolutions_off("video/h3_all_in_one", ["1080"])
-    model(monkeypatch, client, {"thought": "", "reply": "One shot.", "steps": [dict(STEP, resolution=1080)]})
+    client.app.state.credits.set_resolutions_off("video/@seedance_2_5", ["1080"])
+    # a provider model's resolution is its "resolution" setting (480p, 720p, 1080p)
+    model(monkeypatch, client, {"thought": "", "reply": "One shot.", "steps": [
+        dict(STEP, choices=[{"setting": "resolution", "value": "1080p"}])]})
     plan = client.post("/api/agent/plan", json={"instruction": "a dog, in 1080"}).json()
     step = plan["steps"][0]
     assert "1080" not in [str(r) for r in step["menu"]["resolutions"]]
-    assert step["current"]["resolution"] != 1080 and "switched off" in plan["reply"] and "switched off" in step["why"]
+    assert step["settings"]["options"]["resolution"] == "720p"
+    assert "switched off" in plan["reply"] and "switched off" in step["why"]
 
 
 # ---------------------------------------------------------------- 14: several questions at once
@@ -383,23 +386,22 @@ def test_several_questions_come_together_with_their_defaults(client, monkeypatch
 def test_a_chat_pinned_to_a_workflow_plans_on_it(client, monkeypatch):
     register(client)
     hosted(monkeypatch, client, {"tool": "finish", "reply": "One.", "steps": [dict(STEP, workflow="video/somewhere_else")]})
-    plan = client.post("/api/agent/plan", json={"instruction": "a dog", "workflows": ["video/h3_all_in_one"]}).json()
+    plan = client.post("/api/agent/plan", json={"instruction": "a dog", "workflows": ["video/@seedance_2_5"]}).json()
     said = [e.get("text", "") for e in plan["activity"]]
     assert any(t.startswith("Uses the workflows chosen for this chat: ") for t in said)
     assert any("which this chat does not use: it is made on" in t for t in said)
-    assert plan["steps"][0]["settings"]["workflow"] == "video/h3_all_in_one"
+    assert plan["steps"][0]["settings"]["workflow"] == "video/@seedance_2_5"
 
 
-def test_a_chat_pinned_to_a_model_plans_on_that_model_only(client, monkeypatch):
+def test_a_chat_pin_of_a_generation_server_model_is_left_out(client, monkeypatch):
+    """A tab kept from before pins "<workflow>#<model>" (the generation server's models): that names no model now, so the
+    chat is planned as if nothing were pinned."""
     register(client)
-    step = dict(STEP, workflow="video/h3_all_in_one", choices=[{"setting": "model", "value": "minimax_h3_max"}])
-    hosted(monkeypatch, client, {"tool": "finish", "reply": "One.", "steps": [step]})
+    hosted(monkeypatch, client, {"tool": "finish", "reply": "One.", "steps": [STEP]})
     plan = client.post("/api/agent/plan", json={"instruction": "a dog", "workflows": ["video/generation_video#kling_4_0"]}).json()
     said = [e.get("text", "") for e in plan["activity"]]
-    assert "Uses the workflows chosen for this chat: Kling 4.0" in said or any(
-        t.startswith("Uses the workflows chosen for this chat: Kling") for t in said), said
-    settings = plan["steps"][0]["settings"]
-    assert settings["workflow"] == "video/generation_video" and settings["options"]["model"] == "kling_4_0"   # never another model
+    assert not any(t.startswith("Uses the workflows chosen for this chat") for t in said), said
+    assert plan["steps"][0]["settings"]["workflow"] == "video/@seedance_2_5"
 
 
 # ---------------------------------------------------------------- 17: an entry's fields through book_save
@@ -433,7 +435,7 @@ def test_a_video_with_no_resolution_picked_is_made_at_480(client, monkeypatch):
     unpicked = {k: v for k, v in STEP.items() if k != "resolution"}
     model(monkeypatch, client, {"thought": "", "reply": "One shot.", "steps": [unpicked]})
     step = client.post("/api/agent/plan", json={"instruction": "a dog"}).json()["steps"][0]
-    assert step["current"]["resolution"] == 480
+    assert step["current"]["resolution"] == 480 and step["settings"]["options"]["resolution"] == "480p"   # the model's lowest
     model(monkeypatch, client, {"thought": "", "reply": "One shot.", "steps": [dict(unpicked, resolution=720)]})
     step = client.post("/api/agent/plan", json={"instruction": "a dog, sharper"}).json()["steps"][0]
-    assert step["current"]["resolution"] == 720
+    assert step["current"]["resolution"] == 720 and step["settings"]["options"]["resolution"] == "720p"   # its 720p option

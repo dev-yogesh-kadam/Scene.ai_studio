@@ -14,8 +14,18 @@ def _offer(wid, guide=None, **more):
             "settings": [{"setting": "quality", "choices": ["low", "high"]}] * 5, **({"prompt_guide": guide} if guide else {}), **more}
 
 
-OFFERS = [_offer("video/h3_all_in_one", "minimax-h3", pick_when="Long shots with a cast."), _offer("image/flux"),
-          _offer("image/krea", pick_when="Fast drafts."), _offer("audio/song")]
+OFFERS = [_offer("video/@seedance_2_5", "seedance", pick_when="Long shots with a cast."), _offer("image/@nano_banana_pro"),
+          _offer("image/@seedream_5", pick_when="Fast drafts."), _offer("audio/@music")]
+
+
+def guides(monkeypatch, tmp_path):
+    """A prompt guide for the test studio's video model (the shipped guides are for workflows it does not have), long
+    as a real guide is."""
+    head = ["id: seedance", "title: Seedance", "workflows: ^video/@seedance_", "length: 60 to 200 words", "---"]
+    (tmp_path / "seedance.md").write_text("\n".join(head + ["Say the shot in beats, the camera in each. " + "Keep it plain. " * 200]),
+                                          encoding="utf-8")
+    shipped = prompters.load
+    monkeypatch.setattr(prompters, "load", lambda folder=None: shipped(tmp_path))
 
 
 def _workflows(parts):
@@ -32,31 +42,33 @@ def test_the_kinds_a_message_is_about():
     assert agent.likely_kinds(["make it brighter", "Make a picture of a kite"]) == {"image"}   # the turn before counts
 
 
-def test_every_workflow_is_listed_and_only_the_kinds_asked_for_in_full():
-    parts = agent.question_parts("Make a picture of a red kite", OFFERS, [], "video/h3_all_in_one", detailed={"image"})
+def test_every_workflow_is_listed_and_only_the_kinds_asked_for_in_full(monkeypatch, tmp_path):
+    guides(monkeypatch, tmp_path)
+    parts = agent.question_parts("Make a picture of a red kite", OFFERS, [], "video/@seedance_2_5", detailed={"image"})
     lines = [json.loads(line) for line in _workflows(parts)]
     assert [line["id"] for line in lines] == [o["id"] for o in OFFERS]   # every workflow the agent may use is still there
     full = {line["id"] for line in lines if "settings" in line}
-    assert full == {"image/flux", "image/krea"}
+    assert full == {"image/@nano_banana_pro", "image/@seedream_5"}
     video = lines[0]
-    assert video == {"id": "video/h3_all_in_one", "title": "H3_All_In_One", "makes": "video", "about": OFFERS[0]["about"][:120],
+    assert video == {"id": "video/@seedance_2_5", "title": OFFERS[0]["title"], "makes": "video", "about": OFFERS[0]["about"][:120],
                      "pick_when": "Long shots with a cast.", "default": True}
     assert "workflow_info" in dict(parts)["workflows"].splitlines()[0]
     assert "prompting" not in dict(parts)   # the video model's prompt guide goes with its workflow only when it is shown
-    everything = agent.question_parts("Make a picture of a red kite", OFFERS, [], "video/h3_all_in_one")
+    everything = agent.question_parts("Make a picture of a red kite", OFFERS, [], "video/@seedance_2_5")
     assert all("settings" in json.loads(line) for line in _workflows(everything))   # detailed=None: as before, all in full
-    assert dict(everything)["workflows"].startswith("Workflows (ComfyUI") and "minimax-h3" in dict(everything)["prompting"]
+    assert dict(everything)["workflows"].startswith("Workflows (the studio's models") and "seedance" in dict(everything)["prompting"]
     assert len(dict(parts)["workflows"]) < len(dict(everything)["workflows"])
 
 
-def test_workflow_info_gives_one_in_full_with_its_prompt_guide():
-    found = agent.workflow_info(OFFERS, " video/h3_all_in_one ")
+def test_workflow_info_gives_one_in_full_with_its_prompt_guide(monkeypatch, tmp_path):
+    guides(monkeypatch, tmp_path)
+    found = agent.workflow_info(OFFERS, " video/@seedance_2_5 ")
     offer, guide = found.split("\n\n", 1)
     assert json.loads(offer) == OFFERS[0] and guide.startswith(agent.PROMPT_GUIDES)
-    assert prompters.part(["video/h3_all_in_one"]) in guide
-    assert agent.workflow_info(OFFERS, "image/flux") == json.dumps(OFFERS[1])   # no guide: the workflow alone
+    assert prompters.part(["video/@seedance_2_5"]) in guide
+    assert agent.workflow_info(OFFERS, "image/@nano_banana_pro") == json.dumps(OFFERS[1])   # no guide: the workflow alone
     missing = agent.workflow_info(OFFERS, "video/nope")
-    assert missing.startswith("There is no workflow \"video/nope\"") and "image/krea" in missing
+    assert missing.startswith("There is no workflow \"video/nope\"") and "image/@seedream_5" in missing
     assert "workflow_info" in agent.native_tools(agent.TOOLS)
 
 
@@ -64,7 +76,7 @@ def _turn(client, monkeypatch, body):
     seen = {}
 
     async def fake_tools(system, message, workflow_ids, tools, finishing=None, model=None, rounds=0, thread=None, web=False, reply_chars=0):
-        seen.update(message=message, ids=workflow_ids, info=await tools["workflow_info"]({"op": "video/h3_all_in_one"}))
+        seen.update(message=message, ids=workflow_ids, info=await tools["workflow_info"]({"op": "video/@seedance_2_5"}))
         return {"thought": "", "reply": "Fine.", "steps": [], "tokens": {}}
 
     async def fake_ask(system, message, workflow_ids, history=(), model=None, thread=None):
@@ -82,25 +94,27 @@ def _turn(client, monkeypatch, body):
     return seen, {json.loads(line)["id"]: json.loads(line) for line in workflows}, plan.json()
 
 
-def test_a_message_about_a_picture_gets_the_picture_workflows_in_full_and_the_rest_on_demand(client, monkeypatch):
+def test_a_message_about_a_picture_gets_the_picture_workflows_in_full_and_the_rest_on_demand(client, monkeypatch, tmp_path):
     register(client)
+    guides(monkeypatch, tmp_path)
     seen, listed, plan = _turn(client, monkeypatch, {"instruction": "Make a picture of a red kite over green hills"})
-    assert set(listed) <= set(seen["ids"]) and "video/h3_all_in_one" in listed   # the agent still knows every workflow
+    assert set(listed) <= set(seen["ids"]) and "video/@seedance_2_5" in listed   # the agent still knows every workflow
     assert all("settings" in o or "references" in o or "prompt_tips" in o for wid, o in listed.items() if wid.startswith("image/"))
-    assert set(listed["video/h3_all_in_one"]) <= {"id", "title", "makes", "about", "pick_when", "default"}
-    assert "(prompt_guide minimax-h3;" not in seen["message"]   # the video model's long prompt guide stays out
+    assert set(listed["video/@seedance_2_5"]) <= {"id", "title", "makes", "about", "pick_when", "default"}
+    assert "(prompt_guide seedance;" not in seen["message"]   # the video model's long prompt guide stays out
     # ...and is there in full, guide and all, when the agent asks for it
     whole = json.loads(seen["info"].split("\n\n", 1)[0])
-    assert whole["id"] == "video/h3_all_in_one" and "references" in whole and "(prompt_guide minimax-h3;" in seen["info"]
-    assert ("activity", "plan", "Read the workflow video/h3_all_in_one") in [(e["type"], e.get("icon"), e.get("text")) for e in plan["activity"]]
+    assert whole["id"] == "video/@seedance_2_5" and "references" in whole and "(prompt_guide seedance;" in seen["info"]
+    assert ("activity", "plan", "Read the workflow video/@seedance_2_5") in [(e["type"], e.get("icon"), e.get("text")) for e in plan["activity"]]
 
 
-def test_a_message_that_does_not_say_or_has_no_tools_gets_every_workflow_in_full(client, monkeypatch):
+def test_a_message_that_does_not_say_or_has_no_tools_gets_every_workflow_in_full(client, monkeypatch, tmp_path):
     register(client)
+    guides(monkeypatch, tmp_path)
     for body in ({"instruction": "go ahead"}, {"instruction": "Make a picture of a kite", "tools": False}):
         seen, listed, _ = _turn(client, monkeypatch, body)
         assert set(listed) <= set(seen["ids"])
-        assert "settings" in listed["video/h3_all_in_one"] and "(prompt_guide minimax-h3;" in seen["message"]
+        assert "settings" in listed["video/@seedance_2_5"] and "(prompt_guide seedance;" in seen["message"]
 
 
 def test_the_answers_shape_names_the_same_workflows_whatever_this_message_is_offered(client, monkeypatch):

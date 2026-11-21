@@ -1,4 +1,4 @@
-"""What the studio's processes share, when there is more than one (on Azure, two or more replicas): Redis (`redis_url`,
+"""What the studio's processes share, when there is more than one process: Redis (`redis_url`,
 off by default). With it off, everything here is what it always was, in this process alone.
 
 - a cache with invalidation: settings (db.setting), pricing (credits.pricing), and any named list that changes rarely
@@ -9,8 +9,8 @@ off by default). With it off, everything here is what it always was, in this pro
 - rate limits and sign-in throttles counted across processes (sorted sets, a sliding window).
 
 Redis is a network call: the code calls it from the database's threads (db.offload), never on the event loop, but for
-the subscriber, which is asyncio's own client. Azure Cache for Redis: `rediss://:<access key>@<name>.redis.cache.
-windows.net:6380/0` (TLS on 6380); Memurai or Redis on this machine: `redis://localhost:6379/0`.
+the subscriber, which is asyncio's own client. Memurai or Redis on this machine: `redis://127.0.0.1:6379/0`; a
+`rediss://` URL is the same over TLS.
 """
 
 import asyncio
@@ -63,7 +63,7 @@ class RedisShared(Shared):
         import redis
         import redis.asyncio
         self.url = url
-        # rediss:// is TLS: Azure Cache for Redis checks its certificate, as redis-py does by default.
+        # rediss:// is TLS: the server's certificate is checked, as redis-py does by default.
         self.redis = client or redis.Redis.from_url(url, decode_responses=True, health_check_interval=30)
         self.async_redis = async_client or redis.asyncio.Redis.from_url(url, decode_responses=True)
         self.me = uuid.uuid4().hex[:8]   # this process, so it knows its own news

@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from .. import audit, fetch, kit, media, placement, refs, semantic, sharing, showcase, storage
+from .. import audit, fetch, kit, media, placement, refs, semantic, sharing, showcase
 from ..db import as_everyone, offload
 from ..catalog import KINDS
 from ..outputs import MAIN_CANVAS
@@ -25,9 +25,8 @@ router = APIRouter(prefix="/api", tags=["library"])
 
 
 def _path(request, row):
-    """The item's file here (downloaded into its folder first when the media are kept elsewhere: storage.py)."""
-    outputs = request.app.state.outputs
-    return outputs.fetch(outputs.folder(row["user_id"]) / row["filename"])
+    """The item's file."""
+    return request.app.state.outputs.folder(row["user_id"]) / row["filename"]
 
 
 def _own(request, user, item_id, need=None):
@@ -250,8 +249,6 @@ async def _file_in(request, user, data, filename, kind, project_id, summary, wor
             context["duration"] = round(found["seconds"], 2)
     db = request.app.state.db
     filed = await offload(request.app.state.outputs.settle, user["id"], project_id, target)   # into its project's folder
-    outputs = request.app.state.outputs
-    await offload(lambda: outputs.keep(outputs.folder(user["id"]) / filed))   # and kept for good (storage.py)
     await db.arun("INSERT INTO generations (user_id, job_id, project_id, workflow, kind, name, filename, summary, settings, "
            "context, seconds, size, created) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
            (user["id"], project_id, workflow, kind, name, filed, summary,
@@ -276,9 +273,6 @@ async def get_file(item_id: int, request: Request, download: bool = False, user:
     row = await offload(_own, request, user, item_id, "viewer")
     outputs = request.app.state.outputs
     path = outputs.folder(row["user_id"]) / row["filename"]
-    elsewhere = storage.signed(request.app.state, "outputs", path, path.name if download else None)
-    if elsewhere:   # kept in Blob Storage: the browser fetches it from there (storage.py)
-        return elsewhere
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     return FileResponse(path, filename=path.name if download else None)
@@ -323,16 +317,6 @@ async def _made_poster(path):
 
 async def poster_response(request, path):
     """A video's poster. The browser keeps it and only asks whether it has changed, which costs no download."""
-    state = request.app.state
-    if state.storage.name != "local":   # kept in Blob Storage: made once and kept there, then signed
-        poster = media.poster_path(path)
-        if not await offload(storage.kept, state, poster):
-            path = await offload(storage.here, path)
-            if not path.is_file():
-                raise HTTPException(404, "The file is missing from storage.")
-            poster = await _made_poster(path)
-            await offload(storage.keep_path, state, poster)
-        return storage.signed(state, None, poster)
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
     poster = await _made_poster(path)
@@ -375,10 +359,6 @@ async def get_frame(item_id: int, request: Request, at: float = 0.0, user: dict 
                     raise HTTPException(503, "The frame is being made. Ask again in a moment.", headers=NOT_READY)
                 if not made:
                     raise HTTPException(404, "The video has no frame there.")
-                await offload(request.app.state.outputs.keep, target)
-    elsewhere = storage.signed(request.app.state, "posters", target)
-    if elsewhere:
-        return elsewhere
     return FileResponse(target, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
@@ -419,7 +399,7 @@ async def as_reference(item_id: int, request: Request, kind: str = "image", user
     path = await offload(_path, request, row)
     if not path.is_file():
         raise HTTPException(404, "The file is missing from storage.")
-    store = request.app.state.storage   # kept by the studio, sent to the render server when the job runs
+    store = request.app.state.storage   # kept by the studio, sent to the provider when the job runs
     if kind == "image" and row["kind"] == "video":
         with tempfile.TemporaryDirectory() as tmp:
             frame = await media.last_frame(path, Path(tmp) / (path.stem + "_last.png"))
@@ -773,7 +753,7 @@ async def remove_member(project_id: int, member_id: int, request: Request, user:
 
 def _showcase_file(request, key):
     item = showcase.find(request.app.state.db, key)
-    path = item and storage.fetch_path(request.app.state, showcase.path_of(request.app.state.showcase_dir, item))
+    path = item and showcase.path_of(request.app.state.showcase_dir, item)
     if not path or not path.is_file():
         raise HTTPException(404, "No such item on the Home page.")
     return item, path
@@ -789,8 +769,7 @@ async def get_showcase(request: Request, user: dict = Depends(current_user)):
 @router.get("/showcase/{key}/file")
 async def showcase_file(key: str, request: Request, download: bool = False, user: dict = Depends(current_user)):
     item, path = await offload(_showcase_file, request, key)
-    return (storage.signed(request.app.state, "showcase", path, safe_name(item["name"]) + path.suffix if download else None)
-            or FileResponse(path, filename=safe_name(item["name"]) + path.suffix if download else None))
+    return FileResponse(path, filename=safe_name(item["name"]) + path.suffix if download else None)
 
 
 @router.get("/showcase/{key}/poster")

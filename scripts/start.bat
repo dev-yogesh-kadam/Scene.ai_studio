@@ -1,6 +1,9 @@
 @echo off
 rem Start Scene.ai on Windows. The first run creates a Python environment in .venv.
 cd /d "%~dp0.."
+rem Langfuse (C:\Scene\langfuse) starts beside the studio, in a small window of its own, so the studio does not wait for
+rem Docker. SCENE_NO_LANGFUSE=1 leaves it off (scripts\start.langfuse.bat).
+if not "%SCENE_NO_LANGFUSE%"=="1" start "Langfuse" /min cmd /c scripts\start.langfuse.bat
 if not exist .venv\Scripts\python.exe (
     py -3 -m venv .venv 2>nul || python -m venv .venv || goto :fail
 )

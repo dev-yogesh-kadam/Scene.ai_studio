@@ -91,8 +91,7 @@ def test_a_langfuse_that_is_down_is_a_problem_after_five_minutes_and_says_how_ma
 
 
 async def _problems(state):
-    online = {"online": True, "url": "x", "since": 0}
-    return await health.problems(state, render=online, model={"online": True, "detail": ""})
+    return await health.problems(state, model={"online": True, "detail": ""})
 
 
 def test_with_words_off_no_word_of_the_user_goes_anywhere(client):
@@ -102,7 +101,7 @@ def test_with_words_off_no_word_of_the_user_goes_anywhere(client):
     secret = "zebra-marmalade-plan"
     sender.add("plan", "claude/sonnet", None, 1.0, 2.0, [{"role": "user", "content": "make " + secret}], {"reply": secret},
                {"prompt": 10, "answer": 5}, error="Claude choked on " + secret, run="r1", call=12, answer_format={"x": secret})
-    sender.span("render video/x", 1.0, 2.0, "r1", metadata={"workflow": "video/x"}, error="ComfyUI: " + secret)
+    sender.span("render video/x", 1.0, 2.0, "r1", metadata={"workflow": "video/x"}, error="The provider: " + secret)
     sender.score("r1", "claude-grade", 0.5, "it said " + secret)
     sent = json.dumps([sender.waiting, sender.scores])
     assert secret not in sent

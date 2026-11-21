@@ -78,9 +78,9 @@ export function MaintenanceCard({ m }: { m: Maintenance }) {
         <span className={css('pill ' + (m.on ? 'running' : 'done'))}>{m.on ? 'On' : 'Off'}</span>
       </div>
       <p className="muted small">
-        For a restart, an update or work on the render PC. While it is on, nobody can start a new job: they are told
-        your message, which also shows at the top of the studio, and get their credits back. Jobs already waiting or
-        running still finish.
+        For a restart, an update or work on the studio. While it is on, nobody can start a new job: they are told your
+        message, which also shows at the top of the studio, and get their credits back. Jobs already waiting or running
+        still finish.
       </p>
       {m.on && (
         <Facts
@@ -201,7 +201,7 @@ export function PhoneCard({ phone }: { phone: Phone }) {
         <span className={css('pill ' + (phone.on ? 'done' : 'failed'))}>{phone.on ? 'On' : 'Off'}</span>
       </div>
       <p className="muted small">
-        When the render server or the model server stops answering, the disk fills, backups stop, jobs fail one after
+        When the agent's model server or a provider stops answering, the disk fills, backups stop, jobs fail one after
         another or wait too long, your phone hears of it, and again when it is over. Use either or both.
       </p>
       <h3>Telegram</h3>

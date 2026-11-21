@@ -1,4 +1,4 @@
-"""The studio's output as JSON lines (`log_format: "json"`), for Azure Monitor and other log stores: each line the
+"""The studio's output as JSON lines (`log_format: "json"`), for a log store: each line the
 app prints becomes {"time", "level", "message", "process"}. Off by default: the console's plain lines, as always.
 
 A log store keeps what it is given for months and shows it to whoever may read the logs, so each line is cleaned first:
@@ -6,8 +6,7 @@ whatever looks like a key, a token or a password is replaced by [redacted] (the 
 Langfuse), and a line longer than LONGEST characters (an error that quotes a whole prompt or answer) is cut. The app
 prints no user's words on purpose; this is for an error's text that carries them by accident.
 
-Rotation is the log store's: docker-compose.yml caps Docker's own log files (json-file, max-size and max-file); on
-Azure, Log Analytics keeps them for its workspace's retention."""
+Rotation is the log store's: docker-compose.yml caps Docker's own log files (json-file, max-size and max-file)."""
 
 import json
 import os

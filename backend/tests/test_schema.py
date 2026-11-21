@@ -98,15 +98,48 @@ def test_the_tests_database_is_at_the_newest_migration():
 
 def test_servers_of_kinds_no_longer_used_are_taken_out_before_their_check(scratch):
     """A database that still has a model API of before (the agent is Claude's only since 31 Oct 2026) migrates: 0008
-    takes it out, as the app's start did, then checks that only known kinds come in."""
+    takes it out, as the app's start did, then checks that only known kinds come in. 0019 takes the ComfyUI servers
+    out, and the ComfyUI providers with their keys and models, and the settings that switched to them."""
     schema.upgrade(scratch, "0007")
     with psycopg.connect(scratch, autocommit=True) as conn:
         conn.execute("SELECT set_config('app.user_id', 'all', false)")
         conn.execute("INSERT INTO endpoints (kind, name, url, created) VALUES ('openai', 'Kimi', 'https://x', now()), "
-                     "('comfy', 'Zoro', 'http://zoro:8188', now())")
+                     "('comfy', 'Zoro', 'http://zoro:8188', now()), ('langfuse', 'Langfuse', 'http://x', now())")
+    schema.upgrade(scratch, "0018")
+    with psycopg.connect(scratch, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.user_id', 'all', false)")
+        assert [r[0] for r in conn.execute("SELECT kind FROM endpoints ORDER BY id")] == ["comfy", "langfuse"]
+        conn.execute("INSERT INTO providers (kind, name) VALUES ('comfyui', 'ComfyUI'), ('scene_provider_v1', 'Generation server')")
+        conn.execute("INSERT INTO settings (key, value) VALUES ('provider_router', 'on'), ('comfy_url', 'http://zoro:8188'), "
+                     "('allow_signup', '1')")
     schema.upgrade(scratch)
-    with psycopg.connect(scratch) as conn:
-        assert [r[0] for r in conn.execute("SELECT kind FROM endpoints ORDER BY id")] == ["comfy"]
+    with psycopg.connect(scratch, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.user_id', 'all', false)")
+        assert [r[0] for r in conn.execute("SELECT kind FROM endpoints ORDER BY id")] == ["langfuse"]
+        kinds = {r[1]: r[0] for r in conn.execute("SELECT kind, name FROM providers")}
+        assert "comfyui" not in kinds.values() and kinds["Generation server"] == "scene_provider_v1"
+        assert [r[0] for r in conn.execute("SELECT key FROM settings ORDER BY key")] == ["allow_signup"]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("INSERT INTO providers (kind, name) VALUES ('comfyui', 'ComfyUI')")
+
+
+def test_0020_deletes_the_old_memory_and_keys_it_by_module(scratch):
+    """The agent's memory of a user was one for all their projects; 0020 deletes it and keys what comes after by module."""
+    schema.upgrade(scratch, "0019")
+    with psycopg.connect(scratch, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.user_id', 'all', false)")
+        user = conn.execute("INSERT INTO users (email, name, password_hash, created) VALUES ('a@x', 'A', 'x', now()) RETURNING id").fetchone()[0]
+        conn.execute("INSERT INTO user_memory (user_id, key, value, updated) VALUES (%s, 'pref.shape', 'portrait', now())", (user,))
+    schema.upgrade(scratch)
+    with psycopg.connect(scratch, autocommit=True) as conn:
+        conn.execute("SELECT set_config('app.user_id', 'all', false)")
+        assert conn.execute("SELECT COUNT(*) FROM user_memory").fetchone()[0] == 0
+        key = [r[0] for r in conn.execute(
+            "SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+            "WHERE i.indrelid = 'user_memory'::regclass AND i.indisprimary")]
+        assert sorted(key) == ["key", "project_id", "user_id"]
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            conn.execute("INSERT INTO user_memory (user_id, key, value, updated) VALUES (%s, 'pref.x', 'y', now())", (user,))
 
 
 # Tables with a user_id that have no row rule, on purpose for now (docs/database.md lists the ruled ones): read only by

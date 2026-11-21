@@ -2,7 +2,7 @@
 
 from test_api import register
 
-SHOT = {"tool": "generate", "workflow": "video/h3_all_in_one", "uses": [], "clips": 1, "start_from": 0, "after": 0}
+SHOT = {"tool": "generate", "workflow": "video/@seedance_2_5", "uses": [], "clips": 1, "start_from": 0, "after": 0}
 
 
 def plan(client, monkeypatch, *steps, instruction="an ad for Reels"):
@@ -13,53 +13,54 @@ def plan(client, monkeypatch, *steps, instruction="an ad for Reels"):
     return client.post("/api/agent/plan", json={"instruction": instruction}).json()["steps"]
 
 
-MUSIC = {"tool": "generate", "workflow": "audio/audio_minimax_music_3", "name": "Music", "prompt": "Upbeat pop.", "uses": [], "clips": 1,
-         "start_from": 0, "after": 0, "duration": 300, "choices": [{"setting": "37:13:max_duration", "value": "300"}]}
+MUSIC = {"tool": "generate", "workflow": "audio/@music", "name": "Music", "prompt": "Upbeat pop.", "uses": [], "clips": 1,
+         "start_from": 0, "after": 0, "duration": 300}
+LENGTH = "4:value"   # the music model's Duration, 10 to 120 seconds
 
 
 def test_music_lasts_what_was_asked_or_what_the_shots_add_up_to_not_what_the_model_wants(client, monkeypatch):
     register(client)
-    # The model asks for the longest song; the user named 25 seconds, so it is 30, the shortest length that covers it.
+    # The model asks for the longest song; the user named 25 seconds, so it is 25 (the model takes any length it allows).
     song = plan(client, monkeypatch, MUSIC, instruction="Make upbeat music for a 25 second ad.")[0]
-    assert song["settings"]["values"]["37:13:max_duration"] == 30 and song["credits"] == 150    # 30 s at 5 cr a second
-    # Music for the shots of the same plan: 7 + 8 seconds of video, so 30 seconds of music.
+    per_second = client.app.state.credits.rate_for("audio/@music")[1]   # the studio's own rate for a second of sound
+    assert song["settings"]["values"][LENGTH] == 25 and song["credits"] == 25 * per_second > 0
+    # Music for the shots of the same plan: 7 + 8 seconds of video, so 15 seconds of music.
     steps = plan(client, monkeypatch, dict(SHOT, name="One", prompt="A pour.", duration=7), dict(SHOT, name="Two", prompt="A smile.", duration=8),
                  MUSIC, instruction="two shots and music for them")
-    assert steps[2]["settings"]["values"]["37:13:max_duration"] == 30
-    # Nothing to go by: the model's choice stands.
-    assert plan(client, monkeypatch, MUSIC, instruction="a long ambient piece")[0]["settings"]["values"]["37:13:max_duration"] == 300
+    assert steps[2]["settings"]["values"][LENGTH] == 15
+    # Nothing to go by: the model's choice stands, within the music model's own lengths.
+    assert plan(client, monkeypatch, MUSIC, instruction="a long ambient piece")[0]["settings"]["values"][LENGTH] == 120
+    assert '"duration_seconds": "10 to 120' in plan.asked
 
 
 def test_the_agent_sets_length_shape_resolution_and_the_workflows_own_settings(client, monkeypatch):
     register(client)
     step = plan(client, monkeypatch, dict(SHOT, name="Pour", prompt="Coffee pours into a cup.", duration=7, orientation="portrait",
-                                          resolution=480, why="7 s for the pour; portrait for Reels; a draft",
-                                          choices=[{"setting": "quality", "value": "high"}, {"setting": "sound", "value": "off"},
-                                                   {"setting": "engine", "value": "first_frame"}, {"setting": "quality", "value": "ultra"},
-                                                   {"setting": "made_up", "value": "x"}, "junk"]))[0]
+                                          why="7 s for the pour; portrait for Reels; a draft",
+                                          choices=[{"setting": "resolution", "value": "720p"}, {"setting": "sound", "value": "on"},
+                                                   {"setting": "resolution", "value": "8K"}, {"setting": "made_up", "value": "x"}, "junk"]))[0]
     settings = step["settings"]
-    assert settings["values"]["102:value"] == 7 and settings["options"]["shape"] == "portrait" and settings["values"]["501:value"] == 480
-    # "ultra" and the made-up setting are ignored, and first-frame mode needs a picture to start on, which this shot has not
-    assert settings["options"] == {"engine": "reference", "quality": "high", "shape": "portrait", "sound": "off", "keyframes": "off", "upscale": "off",
-                                   "sharpen": "off", "best_upscale": "7b", "smooth": "off"}
+    # the length is the model's "Duration", portrait its 9:16; "8K" (not one of its resolutions) and the made-up setting are ignored
+    assert settings["values"]["3:value"] == 7
+    assert settings["options"] == {"resolution": "720p", "aspect_ratio": "9:16", "sound": "on"}
     assert step["why"] == "7 s for the pour; portrait for Reels; a draft"
-    assert "7 s" in step["facts"]
-    # What the model was told: the length it may choose and the settings it may set, with what each value means.
-    assert '"duration_seconds": "4 to 15' in plan.asked and '"setting": "quality"' in plan.asked and '"setting": "shape"' in plan.asked
+    assert "7 s" in step["facts"] and "720p" in step["facts"]
+    # What the model was told: the length it may choose (the model's own) and the settings it may set, with their values.
+    assert '"duration_seconds": "4 to 30' in plan.asked and '"setting": "resolution"' in plan.asked and '"setting": "aspect_ratio"' in plan.asked
 
 
-def test_a_shot_is_long_enough_for_its_dialogue_and_stays_within_4_to_15_seconds(client, monkeypatch):
+def test_a_shot_is_long_enough_for_its_dialogue_and_stays_within_its_models_lengths(client, monkeypatch):
     register(client)
     words = "Every morning I open this shop before the town wakes up, and the first cup is always mine to enjoy"   # 20 words
-    steps = plan(client, monkeypatch,
-                 dict(SHOT, name="Talk", prompt='She smiles. Audio: "{}"'.format(words), duration=4),
-                 dict(SHOT, name="Blink", prompt="A quick glance.", duration=2),
-                 dict(SHOT, name="Epic", prompt="A long crane move.", duration=99, resolution=1080),
-                 dict(SHOT, name="Hero", prompt="The cup on the counter.", duration=8, resolution=1080))
-    lengths = {s["name"]: s["settings"]["values"]["102:value"] for s in steps}
-    assert lengths == {"Talk": 10, "Blink": 4, "Epic": 15, "Hero": 8}   # 20 words need 10 s; 2 s is raised to 4; 99 is cut to 15
-    sizes = {s["name"]: s["settings"]["values"]["501:value"] for s in steps}
-    assert sizes["Epic"] == 720 and sizes["Hero"] == 1080    # a shot over 10 s is not made larger than the workflow's own size
+    shots = [dict(SHOT, name="Talk", prompt='She smiles. Audio: "{}"'.format(words), duration=4),
+             dict(SHOT, name="Blink", prompt="A quick glance.", duration=2),
+             dict(SHOT, name="Epic", prompt="A long crane move.", duration=99),
+             dict(SHOT, name="Hero", prompt="The cup on the counter.", duration=8)]
+    lengths = {s["name"]: s["settings"]["values"]["3:value"] for s in plan(client, monkeypatch, *shots)}
+    assert lengths == {"Talk": 10, "Blink": 4, "Epic": 30, "Hero": 8}   # 20 words need 10 s; Seedance 2.5 takes 4 to 30
+    kling = [dict(shot, workflow="video/@kling_4_0") for shot in shots]
+    lengths = {s["name"]: s["settings"]["values"]["3:value"] for s in plan(client, monkeypatch, *kling)}
+    assert lengths == {"Talk": 10, "Blink": 3, "Epic": 15, "Hero": 8}   # Kling 4.0 takes 3 to 15
 
 
 def test_the_settings_offered_include_choice_lists_and_unknown_values_are_ignored():

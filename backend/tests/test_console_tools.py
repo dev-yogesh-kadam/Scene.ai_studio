@@ -49,7 +49,7 @@ def test_projects_and_their_kits_and_search(client):
     found = desk.get("/api/admin/search", params={"q": "pocket"}).json()
     assert [p["name"] for p in found["projects"]] == ["Pocket Film"] and found["users"] == []
     assert [u["id"] for u in desk.get("/api/admin/search", params={"q": "ada@"}).json()["users"]] == [me["id"]]
-    assert desk.get("/api/admin/search", params={"q": "h3"}).json()["workflows"]
+    assert [w["id"] for w in desk.get("/api/admin/search", params={"q": "seedance"}).json()["workflows"]] == ["video/@seedance_2_5"]
     assert desk.get("/api/admin/search", params={"q": "a"}).json() == {"users": [], "jobs": [], "projects": [], "workflows": []}
 
 
@@ -95,8 +95,8 @@ def test_the_overview_has_a_health_summary_and_the_console_hears_the_queue(clien
     desk.put("/api/admin/queue", json={"paused": True})
     post_job(client)
     health = desk.get("/api/admin/overview").json()["health"]
-    assert health["render"] is False and health["model"] is True and health["alerts"] == 0 and health["disk_free"] > 0
-    assert health["maintenance"] is False and "node_list" in health
+    assert health["model"] is True and health["alerts"] == 0 and health["disk_free"] > 0
+    assert health["maintenance"] is False and "render" not in health and "node_list" not in health   # no render server any more
     assert client.app.state.hub.queue() == {"running": 0, "waiting": 1}
     with desk.websocket_connect("/api/console/events") as ws:
         first, second = json.loads(ws.receive_text()), json.loads(ws.receive_text())

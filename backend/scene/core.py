@@ -263,48 +263,6 @@ class Core:
             return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
         return IN_TEXT.sub(words, str(text or ""))
 
-    # -- other projects' NeuralCore entries (copied in by book_save; their memory is never read) ---------------------------
-
-    def projects(self):
-        """[(id, name, ref)] of every project the user owns or is in, but this one."""
-        own = self.db.all("SELECT id, name, ref FROM projects WHERE user_id = ? AND parent_id IS NULL ORDER BY id", (self.user_id,))
-        shared = sharing.shared_ids(self.db, self.user_id)
-        with as_everyone():
-            others = self.db.all("SELECT id, name, ref FROM projects WHERE parent_id IS NULL AND id IN ({}) ORDER BY id".format(
-                ", ".join("?" * len(shared))), shared) if shared else []
-        here = self.top["id"] if self.top else None
-        return [(r["id"], r["name"], r["ref"]) for r in own + others if r["id"] != here]
-
-    def search_projects(self, query, limit=12):
-        """NeuralCore entries of the user's other projects whose name, type, description, note or facts hold every word
-        of `query`: [{"asset", "name", "type", "kind", "shows", "facts"?, "project", "project_id"}]."""
-        from . import kit   # kit imports this module's neighbours; imported here to keep the import order plain
-        words = str(query or "").lower().split()
-        found = []
-        for project_id, name, ref in self.projects():
-            for row in kit.entries(self.db, self.user_id, project_id):
-                text = json.dumps([row["name"], row["type"], row["about"], row["use_note"], row.get("facts") or ""], ensure_ascii=False).lower()
-                if all(w in text for w in words):
-                    found.append({"asset": row["id"], "name": row["name"], "type": row["type"], "kind": row["kind"],
-                                  "shows": row["about"][:200], **({"facts": _facts(row)} if _facts(row) else {}),
-                                  "project": "{} ({})".format(name, ref), "project_id": project_id})
-                    if len(found) >= limit:
-                        return found
-        return found
-
-    def entry_elsewhere(self, asset_id):
-        """A NeuralCore entry of another project the user is in (a row of assets), or None."""
-        with as_everyone():
-            row = self.db.one("SELECT * FROM assets WHERE id = ?", (asset_id,))
-        if row is None or not row["project_id"] or (self.top and self._root_of(row["project_id"]) == self.top["id"]):
-            return None
-        return row if sharing.role_in(self.db, self.user_id, row["project_id"])[0] else None
-
-    def _root_of(self, project_id):
-        with as_everyone():
-            row = self.db.one("SELECT id, parent_id FROM projects WHERE id = ?", (project_id,))
-        return (row["parent_id"] or row["id"]) if row else None
-
     # -- the cast: this module's NeuralCore entries ----------------------------------------------------------------------
 
     def cast_entries(self):
@@ -411,7 +369,7 @@ class Core:
         return {"path": "/assets/{}/facts".format(parts[0]), "characters": len(text), "scope": "catalogue"}
 
     def _record(self, name):
-        """(row, "item" or "asset") for /assets/<name>, when this user may see it, else (None, None). <name> is a record's
+        """(row, "item" or "asset") for /assets/<name>, when it is this module's, else (None, None). <name> is a record's
         twelve-hex id; a library id (42) or an entry's (a42), as the agent's other tools name them, is taken too."""
         name = str(name or "")
         found = None
@@ -433,12 +391,12 @@ class Core:
         row, key = found
         if not row["public_id"]:
             row = dict(row, public_id=public_ids(self.db, "generations" if key == "item" else "assets", [row["id"]])[row["id"]])
-        if row["user_id"] == self.user_id:
-            return row, key
-        place = row["project_id"] if "project_id" in row.keys() else None
-        if place and sharing.role_in(self.db, self.user_id, place)[0]:
-            return row, key
-        return None, None
+        # Only this module's: in a project, any row of the module (a shared project's owner's and members' too, as the
+        # catalogue lists them; the role was checked when the Core was made). Outside one, the user's own rows of no
+        # project. Another module's or project's record is not there, to read, to point at or to write facts on.
+        if self.project:
+            return (row, key) if row["project_id"] == self.project else (None, None)
+        return (row, key) if row["user_id"] == self.user_id and row["project_id"] is None else (None, None)
 
 
 def _under(path, folder):
