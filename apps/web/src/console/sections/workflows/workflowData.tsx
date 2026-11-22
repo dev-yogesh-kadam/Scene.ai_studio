@@ -21,6 +21,8 @@ export type Workflow = {
   avg_seconds?: number | null;
   last_used?: number | null;
   resolutions_off?: string[];
+  featured?: boolean; // first in the agent's model picker
+  new?: boolean; // a NEW badge there
 };
 export type Report = {
   workflows: Workflow[];

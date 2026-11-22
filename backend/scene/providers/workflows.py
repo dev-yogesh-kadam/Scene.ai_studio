@@ -20,6 +20,7 @@ the last frame of the one before."""
 
 import copy
 import json
+import re
 import time
 
 from ..db import as_everyone, offload
@@ -174,6 +175,64 @@ def build(model):
     if said:
         profile["hints"].append("The provider's price: " + said + ".")
     return {"id": wid, "nodes": nodes, "info": {}, "profile": profile, "approximate": False}
+
+
+MARKS = "model_marks"   # {workflow id: {"featured": bool, "new": bool}}: what the console set (marks(), set_mark())
+
+
+def _resolution_rank(value):
+    """How large a resolution is, to find a model's best: "4K" > "2K" > "1080p" > "720" (0: not one read)."""
+    text = str(value).strip().lower()
+    digits = re.match(r"(\d+(?:\.\d+)?)", text)
+    if not digits:
+        return 0
+    n = float(digits.group(1))
+    return n * 1000 if text.endswith("k") else n
+
+
+def _resolution_shown(value):
+    text = str(value).strip()
+    return text.upper() if text.lower().endswith("k") else (text if text.lower().endswith("p") else text + "p")
+
+
+def facts(profile):
+    """What the model picker shows on a model's row: its best resolution ("1080p", "4K"; '' when it takes none), the
+    seconds it makes ({"min", "max"}, or None) and whether it can make sound."""
+    provider = profile.get("provider") or {}
+    limits = provider.get("limits") or {}
+    options = {o["id"]: o for o in profile.get("options") or []}
+    sizes = limits.get("resolutions") if isinstance(limits.get("resolutions"), list) else \
+        [c["id"] for c in (options.get("resolution") or {}).get("choices") or []]
+    best = max(sizes, key=_resolution_rank, default="")
+    seconds = limits.get("seconds") if isinstance(limits.get("seconds"), dict) else None
+    if seconds and not all(isinstance(seconds.get(k), (int, float)) for k in ("min", "max")):
+        seconds = None
+    sound = limits.get("sound")
+    return {"resolution": _resolution_shown(best) if best and _resolution_rank(best) else "",
+            "seconds": {"min": seconds["min"], "max": seconds["max"]} if seconds else None,
+            "sound": bool(sound and sound not in ("none", "no")) or "sound" in options or "generate_audio" in options}
+
+
+def marks(db):
+    """The console's marks on the models: {workflow id: {"featured", "new"}}."""
+    try:
+        with as_everyone():
+            said = json.loads(db.setting(MARKS, "") or "{}")
+    except ValueError:
+        return {}
+    return {k: {"featured": bool(v.get("featured")), "new": bool(v.get("new"))}
+            for k, v in said.items() if isinstance(v, dict)} if isinstance(said, dict) else {}
+
+
+def set_mark(db, workflow, featured, new):
+    """Mark a model Featured (first in the picker) and/or NEW (a badge on it); neither: the mark is removed."""
+    kept = marks(db)
+    if featured or new:
+        kept[workflow] = {"featured": bool(featured), "new": bool(new)}
+    else:
+        kept.pop(workflow, None)
+    db.set_setting(MARKS, json.dumps(kept, sort_keys=True))
+    return kept.get(workflow, {"featured": False, "new": False})
 
 
 def price_words(pricing):

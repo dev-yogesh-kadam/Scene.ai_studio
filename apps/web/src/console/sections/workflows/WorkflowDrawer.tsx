@@ -22,7 +22,16 @@ export function WorkflowDrawer({
   const [audience, setAudience] = useState(w.audience);
   const [notice, setNotice] = useState({ text: '', ok: false });
   const [testing, setTesting] = useState(false);
+  const [mark, setMark] = useState({ featured: !!w.featured, new: !!w.new });
   const fail = (e: Error) => setNotice({ text: e.message, ok: false });
+  const marked = (next: { featured: boolean; new: boolean }) =>
+    api<{ featured: boolean; new: boolean }>('/api/admin/workflows/marks', {
+      method: 'PUT',
+      json: { workflow: w.id, ...next },
+    }).then((kept) => {
+      setMark({ featured: kept.featured, new: kept.new });
+      return refresh();
+    }, fail);
   const offer = (value: string) =>
     api('/api/admin/workflows/audience', { method: 'PUT', json: { workflow: w.id, audience: value } }).then(() => {
       setAudience(value);
@@ -55,6 +64,25 @@ export function WorkflowDrawer({
               Admins only: you and the other admins see it on Create and the agent can use it for you; users don&apos;t,
               until you offer it to everyone.
             </p>
+          </Section>
+          <Section title="In the model picker">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={mark.featured}
+                onChange={(e) => void marked({ ...mark, featured: e.target.checked })}
+              />{' '}
+              Featured: listed first, under Featured
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={mark.new}
+                onChange={(e) => void marked({ ...mark, new: e.target.checked })}
+              />{' '}
+              New: shows a NEW badge
+            </label>
+            <p className="muted small">Shown to everyone in the agent&apos;s model picker, on this model&apos;s tab.</p>
           </Section>
           {w.kind !== 'audio' && (
             <Section title="Resolutions">

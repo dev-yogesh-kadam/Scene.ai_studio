@@ -55,6 +55,23 @@ describe('the workflows for a chat', () => {
     expect(tabs[2].models[0]).toMatchObject({ value: 'audio/@music', meta: ['10–120 s'] });
   });
 
+  it('show the studio’s facts and the console’s marks when the listing has them', () => {
+    const [video] = pinTabs([
+      {
+        id: 'video/@seedance_2_5',
+        kind: 'video',
+        title: 'Seedance 2.5',
+        description: 'Strong motion, 4 to 15 seconds.',
+        resolution: '1080p',
+        seconds: { min: 4, max: 12 },
+        sound: true,
+        featured: true,
+        new: true,
+      },
+    ]);
+    expect(video.models[0]).toMatchObject({ meta: ['1080p', '4–12 s'], sound: true, featured: true, isNew: true });
+  });
+
   it('say no prices and read lengths as people do', () => {
     expect(aboutOf('2K 18, 4K 36 credits per image.')).toBe('');
     expect(secondsOf('Clips of 3-15 s')).toBe('3–15 s');

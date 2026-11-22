@@ -752,6 +752,20 @@ async def workflow_settings(body: dict, request: Request, user: dict = Depends(a
     return {"new_admins_only": hold}
 
 
+@router.put("/workflows/marks")
+async def workflow_marks(body: dict, request: Request, user: dict = Depends(admin_user)):
+    """{workflow, featured, new}: Featured puts a model first in the agent's model picker; NEW gives it a badge there."""
+    from ..providers.workflows import set_mark
+    state = request.app.state
+    workflow = str(body.get("workflow") or "")
+    if not await state.catalog.known(workflow):
+        raise HTTPException(404, "There is no workflow named '{}'.".format(workflow))
+    mark = await offload(set_mark, state.db, workflow, body.get("featured") is True, body.get("new") is True)
+    said = [w for w, on in (("Featured", mark["featured"]), ("New", mark["new"])) if on]
+    await offload(audit.record, request, user, "Marked a model in the picker", workflow, ", ".join(said) or "no marks")
+    return {"workflow": workflow, **mark}
+
+
 @router.get("/workflows/resolutions")
 async def workflow_resolutions(request: Request, user: dict = Depends(admin_user)):
     """The resolutions switched off, for each kind and each workflow: {"tiers", "kinds", "off": {kind or id: [tier]}}."""

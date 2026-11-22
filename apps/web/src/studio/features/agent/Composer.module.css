@@ -475,3 +475,103 @@ filtered by the message). It floats over the conversation, just above the input.
 .pin-radio {
   font-style: normal;
 }
+
+/* The model picker (ModelPicker): the tabs of "Workflows for this chat" with a Chat tab first. The menu itself lets
+things out (overflow visible) so a model's effort levels can open beside it on its left; its list scrolls inside. */
+.pin-pop.model-pop {
+  width: 360px;
+  overflow: visible;
+}
+.model-pop .pin-tabs {
+  gap: 0;
+  margin: 0 0 6px;
+}
+.model-pop .pin-tab {
+  flex: 1;
+  justify-content: center;
+  padding: 10px 6px;
+}
+.model-pop .pin-list {
+  max-height: min(440px, calc(100vh - 140px));
+  overflow-y: auto;
+}
+.model-pop .pin-row:hover {
+  background: var(--hover);
+}
+/* each model's tile: its kind's icon in a soft square */
+.model-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--hover);
+  color: var(--muted);
+}
+.model-tile :global(.icon) {
+  width: 18px;
+  height: 18px;
+}
+.pin-text b {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+}
+.badge-new {
+  letter-spacing: 0.04em;
+}
+/* the Chat tab: the model in use outlined, a › on each row for its effort levels */
+.chat-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+.chat-row.current {
+  border-color: var(--agent);
+}
+.chat-row > .pin-row {
+  flex: 1;
+  min-width: 0;
+}
+.chat-more {
+  align-self: center;
+  flex: none;
+  margin-right: 4px;
+  color: var(--muted);
+}
+.chat-more[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text);
+}
+/* the effort levels: beside the menu on its left when there is room, else under the row */
+.effort-fly {
+  padding: 4px 0 6px 12px;
+}
+.effort-fly.side {
+  position: absolute;
+  right: calc(100% + 8px);
+  z-index: 1;
+  width: 300px;
+  padding: 6px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  animation: fly-in 0.12s var(--ease);
+}
+@keyframes fly-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+}
+.effort-fly .model-tile {
+  width: 32px;
+  height: 32px;
+}
+.agent-model-btn .pin-count {
+  flex: none;
+}

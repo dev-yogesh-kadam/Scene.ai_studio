@@ -77,6 +77,11 @@ export type WorkflowRow = {
   provider?: boolean;
   model?: string; // the provider's id of the model
   picture_refs?: number; // how many reference pictures it takes (0: it makes pictures from words only)
+  resolution?: string; // its best resolution ("1080p", "4K"); '' when it takes none
+  seconds?: { min: number; max: number } | null; // the lengths it makes
+  sound?: boolean; // it can make sound
+  featured?: boolean; // the console put it first in the model picker
+  new?: boolean; // the console gave it a NEW badge
 };
 export type Catalog = { workflows: WorkflowRow[]; kinds: string[]; default: string };
 

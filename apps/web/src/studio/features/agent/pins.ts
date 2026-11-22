@@ -15,7 +15,10 @@ export type PinEntry = {
   value: string; // the pin: a workflow id
   title: string;
   about: string; // one sentence: what it is for
-  meta: string[]; // its lengths: "4–15 s"
+  meta: string[]; // its best resolution and its lengths: "1080p", "4–15 s"
+  sound: boolean; // it can make sound (a speaker first on its meta line)
+  featured: boolean;
+  isNew: boolean;
 };
 
 export type PinTab = { kind: string; label: string; icon: string; models: PinEntry[] };
@@ -34,11 +37,15 @@ export function secondsOf(text: string) {
 
 function entryOf(row: WorkflowRow): PinEntry {
   const text = row.description || '';
+  const lengths = row.seconds ? `${row.seconds.min}–${row.seconds.max} s` : secondsOf(text);
   return {
     value: row.id,
     title: row.title,
     about: aboutOf(text),
-    meta: [secondsOf(text)].filter(Boolean),
+    meta: [row.resolution || '', lengths].filter(Boolean),
+    sound: !!row.sound,
+    featured: !!row.featured,
+    isNew: !!row.new,
   };
 }
 

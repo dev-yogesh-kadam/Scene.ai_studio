@@ -47,13 +47,18 @@ class Catalog:
         if self.providers is None:
             return []
         await self.providers.refresh()
+        from .db import offload
+        from .providers.workflows import facts, marks
+        marked = await offload(marks, self.providers.db)
         items = []
         for workflow_id, wf in self.providers.workflows().items():
             profile = wf["profile"]
             listed = profile.get("refs") if isinstance(profile.get("refs"), dict) else {}
+            mark = marked.get(workflow_id) or {}
             items.append({"id": workflow_id, "kind": workflow_id.split("/", 1)[0], "title": profile["title"],
                           "description": profile.get("description", ""), "source": "generation", "provider": True,
                           "model": profile["provider"]["model"],
                           "picture_refs": int(listed.get("max", 0)) + len([r for r in profile.get("optional_refs", [])
-                                                                           + profile.get("required_refs", []) if r.endswith(":image")])})
+                                                                           + profile.get("required_refs", []) if r.endswith(":image")]),
+                          **facts(profile), "featured": bool(mark.get("featured")), "new": bool(mark.get("new"))})
         return items

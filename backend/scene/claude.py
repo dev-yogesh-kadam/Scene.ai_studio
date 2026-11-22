@@ -301,7 +301,7 @@ def read(stdout, stderr=""):
     """What one run of Claude Code printed (stream-json, one event a line): {"answer" (JSON text), "tokens" (of the
     whole run), "limits", "session" (its id), "size" (the tokens its last call to the model read: how long the
     session has grown)}."""
-    result, limits = None, None
+    result, limits, last_call = None, None, None
     for raw in str(stdout or "").splitlines():
         try:
             event = json.loads(raw)
@@ -312,9 +312,22 @@ def read(stdout, stderr=""):
         if event.get("type") == "rate_limit_event" and isinstance(event.get("rate_limit_info"), dict):
             limits = event["rate_limit_info"]
             note_limits(limits)
+        elif event.get("type") == "assistant" and not event.get("parent_tool_use_id")                 and isinstance((event.get("message") or {}).get("usage"), dict):
+            last_call = event["message"]["usage"]
         elif event.get("type") == "result":
-            result = event
+            result = dict(event, last_call=last_call)
     return judged(result, limits, " ".join([str(stderr or "")] + [line for line in str(stdout or "").splitlines() if not line.startswith("{")]))
+
+
+def call_size(result, usage, number):
+    """How long the session has grown: the tokens its latest call to the model read. From that call's own usage as it
+    streamed (result["last_call"]), else the result's last iteration. Never the result's usage itself: that adds up
+    every call of the turn (a turn of ten tool steps on a 150k context reads 1.5M), which is no context's size."""
+    last = result.get("last_call") if isinstance(result.get("last_call"), dict) else None
+    if last is None:
+        calls = [c for c in usage.get("iterations") or [] if isinstance(c, dict)]
+        last = calls[-1] if calls else {}
+    return sum(number(last.get(k)) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
 
 
 def judged(result, limits, printed="", kind=None):
@@ -329,9 +342,7 @@ def judged(result, limits, printed="", kind=None):
     cached, written = number(usage.get("cache_read_input_tokens")), number(usage.get("cache_creation_input_tokens"))
     tokens = {"prompt": number(usage.get("input_tokens")) + written + cached,
               "cached": cached, "written": written, "answer": number(usage.get("output_tokens"))}
-    calls = [c for c in usage.get("iterations") or [] if isinstance(c, dict)]
-    last = calls[-1] if calls else usage
-    size = sum(number(last.get(k)) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    size = call_size(result, usage, number)
     return {"answer": json.dumps(answer, ensure_ascii=False) if isinstance(answer, dict) else str(result.get("result") or ""),
             "tokens": tokens, "limits": limits, "session": result.get("session_id"), "size": size}
 
@@ -834,7 +845,7 @@ async def _next(entry, stream, quiet):
 async def _turn(entry, text, quiet=0):
     """One message to the live session; returns (its result as a result event, the last rate limit event). quiet: see
     _next."""
-    result, limits = None, None
+    result, limits, last_call = None, None, None
     async with answering():
         entry.heard, entry.error_kind = time.monotonic(), None
         await entry.client.query(text)
@@ -850,10 +861,12 @@ async def _turn(entry, text, quiet=0):
                 info = message.rate_limit_info
                 limits = dict(info.raw or {"status": info.status, "resetsAt": info.resets_at})
                 note_limits(limits)
+            elif isinstance(message, sdk.AssistantMessage) and not message.parent_tool_use_id and isinstance(message.usage, dict):
+                last_call = message.usage   # the context the session's latest call to the model read (call_size)
             elif isinstance(message, sdk.ResultMessage):
                 result = {"type": "result", "subtype": message.subtype, "is_error": message.is_error, "session_id": message.session_id,
                           "result": message.result or " ".join(message.errors or []), "structured_output": message.structured_output,
-                          "usage": message.usage or {}, "api_error_status": message.api_error_status}
+                          "usage": message.usage or {}, "api_error_status": message.api_error_status, "last_call": last_call}
     return result, limits
 
 

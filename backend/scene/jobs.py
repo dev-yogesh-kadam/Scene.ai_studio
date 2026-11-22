@@ -35,6 +35,7 @@ IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
 AUDIO_TYPES = {".mp3", ".flac", ".wav", ".opus", ".ogg", ".m4a"}
 TEXT_TYPES = {".json", ".srt", ".txt"}   # a transcript, a list of times: filed as "text"
 STYLED_ENGINE = "gemini"   # the speech model's only voices that take style_instructions
+STYLE_REFUSED = "style_instructions_not_supported"   # the provider's code when a voice takes none
 CLIP_BREAK = re.compile(r"^\s*-{3,}\s*$", re.M)  # a line of dashes separates per-clip prompts
 JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever came after it (the canvas waits for its result)
 PROVIDER = "The provider"
@@ -615,22 +616,31 @@ class JobManager:
     async def _provider_clip(self, job, live, wf, settings, clip=None):
         """One call to the provider for this job (one clip of a chain when `clip` is its number): started on the key the
         router picks (the job's own while it holds one), followed until it ended well. Returns ((adapter, Choice,
-        started, last answer), context). The job's provider note says what ran it; a chain's lists every clip."""
+        started, last answer), context). The job's provider note says what ran it; a chain's lists every clip.
+        Only Gemini voices take style instructions: a voice the provider refuses them for is asked once more without
+        them (the [bracketed] cues in the text still direct the delivery)."""
+        try:
+            return await self._provider_clip_once(job, live, wf, settings, clip)
+        except (provider_base.ProviderError, provider_base.RequestProblem) as error:
+            if STYLE_REFUSED not in str(error) and getattr(error, "code", "") != STYLE_REFUSED:
+                raise
+            print("Job {}: the voice takes no style instructions; asked again without them.".format(job["id"]))
+            return await self._provider_clip_once(job, live, wf, settings, clip, plain=True)
+
+    async def _provider_clip_once(self, job, live, wf, settings, clip=None, plain=False):
         provider = wf["profile"]["provider"]
         graph, ctx = workflows.build_prompt(wf, dict(settings, clips=1))
         inputs = provider_workflows.provider_input(wf, graph)
-        if str(inputs.get("style_instructions") or "").strip() and inputs.get("voice_id"):
-            # Only Gemini voices take style instructions: another voice's job would be refused, so they are left out
-            # (the [bracketed] cues in the text still direct the delivery).
-            engine = await self.router.voice_engine(inputs["voice_id"])
-            if engine and engine != STYLED_ENGINE:
+        if str(inputs.get("style_instructions") or "").strip() and (plain or inputs.get("voice_id")):
+            engine = "" if plain else await self.router.voice_engine(inputs["voice_id"])
+            if plain or (engine and engine != STYLED_ENGINE):
                 inputs.pop("style_instructions")
         metadata = await offload(self._who, job)   # {"scene": {"user", "project", "module", "job"}}
         live["node"] = "Sending it to the provider"
         self.notify(job["user_id"])
 
         tries = int((job.get("settings") or {}).get("not_ready_tries") or 0) if isinstance(job.get("settings"), dict) else 0
-        key = provider_v1.idempotency_key(job["id"], clip, tries)   # a re-try after "not ready" is a new request
+        key = provider_v1.idempotency_key(job["id"], clip, tries + (1000 if plain else 0))   # a re-try is a new request
 
         async def attempt(choice):
             adapter = await offload(self.router.adapter, choice["provider"])

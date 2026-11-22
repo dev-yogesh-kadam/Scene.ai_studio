@@ -12,7 +12,7 @@ import { stopGeneration } from './actions';
 import { MessageBox, Suggest, type BoxHandle, type Slash } from './Attachments';
 import type { AgentChat } from './chat';
 import { pickLibraryItem } from './LibraryPick';
-import { ModelPicker, PermissionPicker, PinsPicker } from './Pickers';
+import { ModelPicker, PermissionPicker } from './Pickers';
 import { SkillMenu, pushRecent, type SkillKey } from './SkillMenu';
 import { useAgentStream } from './useAgentStream';
 import s from './Composer.module.css';
@@ -170,7 +170,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
         >
           {chat.status.text}
         </span>
-        <PinsPicker chat={chat} />
         <button
           ref={skillsButton}
           type="button"

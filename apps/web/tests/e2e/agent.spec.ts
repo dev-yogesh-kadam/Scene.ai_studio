@@ -167,7 +167,7 @@ test('a message goes to the agent, its work and reply show, and the box empties'
     .toEqual([['Hello agent', 'Done **thinking**.', 'answered', 0]]);
 });
 
-test('the bulb and the workflows (sliders): each is kept, and goes with the message; no retry switch', async ({
+test('the model picker: workflows ticked on a kind tab are kept and go with the message; no retry switch', async ({
   page,
 }) => {
   const problems = watch(page);
@@ -183,22 +183,25 @@ test('the bulb and the workflows (sliders): each is kept, and goes with the mess
   });
   await openWith(page, 'Agent knobs', []);
 
-  // the sliders: the workflows this chat uses
-  await page.getByRole('button', { name: 'Workflows for this chat: the agent chooses' }).click();
-  const menu = page.getByRole('menu');
-  await expect(menu.getByText('Workflows for this chat')).toBeVisible();
+  // the model picker: the Chat tab first, then a tab for each kind with the workflows this chat uses
+  await page.getByRole('button', { name: /^Models: .*the agent chooses the rest$/ }).click();
+  const menu = page.getByRole('menu').first();
+  await expect(menu.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
+  await menu.getByRole('tab', { name: /Video/ }).click();
   const first = menu.getByRole('menuitemcheckbox').first();
   await expect(first).toHaveAttribute('aria-checked', 'false');
   await first.click();
-  await expect(page.getByRole('menu').getByRole('menuitemcheckbox').first()).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('menu').first().getByRole('menuitemcheckbox').first()).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: 'Workflows for this chat: 1 chosen' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Models: .*1 chosen for this chat$/ })).toBeVisible();
 
   await box(page).click();
-  await page.keyboard.type('Make it teach');
+  await page.keyboard.type('Make it');
   await page.keyboard.press('Enter');
   await expect(page.getByText('Ok.', { exact: true })).toBeVisible({ timeout: 15_000 });
-  expect(sent.at(-1)).toMatchObject({ explain: true });
   expect(sent.at(-1)!.workflows).toHaveLength(1);
 
   // no retry switch under the permission while the agent checks no results (shots.ts CHECK_RESULTS): a failed shot is
