@@ -10,9 +10,7 @@ vault.py), config.json. A change takes
 effect on the next call to Claude, with no restart: apply() sets it in claude.CONNECTION, here and, through
 shared.on_changed("settings"), in every other process of the app (main.py). The keys never go back to a page.
 
-A Claude subscription is for its owner's own use. So while Claude on this PC is in use, the studio runs on its owner's
-personal subscription: only admins may use the agent (guard). Picking the API key lifts that. Sign-up follows the
-admin's choice whichever is in use (api/auth.signup_open).
+Every user may use the agent and sign up (as the admin chose, api/auth.signup_open) whichever is in use.
 
 The console signs Claude Code here in and out (login_start, login_code, login_cancel, logout): `claude auth login`
 runs here and gives a link to claude.com; the admin signs in there, in their own browser on any machine, and pastes
@@ -30,14 +28,13 @@ import time
 import httpx
 
 from . import claude, vault
-from .db import ACTING, EVERYONE, as_everyone, offload
+from .db import offload
 
 MODES = {claude.LOCAL_SIGNIN: "Claude on this PC", claude.API_KEY: "Anthropic API key"}
 PERSONAL = (claude.LOCAL_SIGNIN,)   # the modes that run on a personal Claude subscription
 FIELDS = ("claude_connection", "anthropic_api_key")
 KEYS = ("anthropic_api_key",)
 TESTING = "Personal Claude subscription"
-ADMINS_ONLY = "While the agent runs on a personal Claude subscription, only admins can use it."
 ANTHROPIC = "https://api.anthropic.com"   # where an API key is checked (key_works)
 CHECK_WAIT = 10   # seconds a check of the connection may take
 VERSION_EVERY = 600   # seconds the version of the `claude` here is known for before `claude -v` is run again
@@ -165,25 +162,6 @@ def load_limits(db):
     for window, seen in saved_limits(db).items():
         if (seen.get("seen") or 0) > (claude.LIMITS.get(window) or {}).get("seen", 0):
             claude.LIMITS[window] = seen
-
-
-def _role(db, user_id):
-    with as_everyone():
-        row = db.one("SELECT role FROM users WHERE id = ?", (int(user_id),))
-    return (row or {}).get("role")
-
-
-def guard_for(db):
-    """claude.GUARD for this database: on a personal subscription, a request of a user who is not an admin may not
-    reach Claude. The console's requests and the studio's own work (the queue: no one request's) act for everyone, and
-    pass."""
-    async def guard():
-        acting = ACTING.get()
-        if not testing() or acting == EVERYONE:
-            return
-        if await offload(_role, db, acting) != "admin":
-            raise claude.Failed(ADMINS_ONLY)
-    return guard
 
 
 async def status(run_claude=False, db=None):

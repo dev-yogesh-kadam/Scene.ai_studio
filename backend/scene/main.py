@@ -234,7 +234,6 @@ def create_app(settings=None):
         claude.service(settings.claude_models, settings.claude_timeout, settings.claude_fast_model, storage / "claude-home",
                        settings.claude_context)])))
     claude_connection.apply(db, settings)   # how the studio reaches Claude Code, as an admin picked it in the console
-    claude.GUARD = claude_connection.guard_for(db)
     claude_connection.load_limits(db)   # the plan's limits as last reported, for the console's card
     claude.ON_LIMITS = claude_connection.keep_limits(db)
     hub = Hub()

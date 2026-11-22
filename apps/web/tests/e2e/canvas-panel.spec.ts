@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
   await signIn(page);
   await page.addInitScript(() => {
     if (!sessionStorage.getItem('tab-set')) {
-      localStorage.setItem('scene.panel.tab', 'quick');
+      localStorage.setItem('scene.panel.last-tab', 'quick');
       sessionStorage.setItem('tab-set', '1');
     }
   });

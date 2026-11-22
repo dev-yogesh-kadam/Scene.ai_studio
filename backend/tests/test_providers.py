@@ -273,7 +273,7 @@ def test_the_agents_provider_is_picked_and_the_personal_subscription_rules_hold(
     assert picked["agent_provider"] == local["id"] and picked["testing"] == claude_connection.TESTING
     assert claude.CONNECTION == {"mode": claude.LOCAL_SIGNIN, "api_key": ""}   # no key, ever
     assert db.setting("claude_connection") == "this_pc"   # the old card's setting, kept beside it
-    assert claude_connection.testing()   # sign-up closed and the agent for admins only (claude_connection.guard_for)
+    assert claude_connection.testing()   # a personal subscription
     assert desk.delete("/api/admin/providers/%d" % local["id"]).status_code == 400   # the agent uses it
     desk.put("/api/admin/providers/agent", json={"provider_id": anthropic["id"]})
     assert claude.CONNECTION["mode"] == claude.API_KEY and not claude_connection.testing()

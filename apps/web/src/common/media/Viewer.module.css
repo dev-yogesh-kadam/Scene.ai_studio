@@ -57,12 +57,19 @@ dialog.viewer[data-flying] .viewer-panel {
     0 0 0 1px rgba(255, 255, 255, 0.06);
   will-change: transform, width, height;
 }
+/* The picture as light behind it. Blurred small and then scaled up: a 120px blur on a layer the size of the window is
+   dropped by some GPUs, and the picture then showed sharp, enlarged, behind itself. A tenth of the box blurred 9px and
+   scaled 13x is the same glow (130% of the box, about 120px of blur) and always renders. */
 .viewer-glow {
   position: absolute;
-  inset: -15%;
+  left: 50%;
+  top: 50%;
+  width: 10%;
+  height: 10%;
   pointer-events: none;
   background: var(--spill-image) center / cover no-repeat;
-  filter: blur(120px) saturate(1.4);
+  filter: blur(9px) saturate(1.4);
+  transform: translate(-50%, -50%) scale(13);
   opacity: 0.5;
 }
 .viewer-grid {

@@ -97,7 +97,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.beforeEach(async ({ page }) => {
   await signIn(page);
-  await page.addInitScript(() => localStorage.setItem('scene.panel.tab', 'agent'));
+  await page.addInitScript(() => localStorage.setItem('scene.panel.last-tab', 'agent'));
 });
 
 test('a saved conversation opens: its message, work, reply with bold, a list, a table and a named picture', async ({

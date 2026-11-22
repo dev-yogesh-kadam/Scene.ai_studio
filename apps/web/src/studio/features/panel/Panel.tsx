@@ -27,13 +27,18 @@ export const PANEL = 380; // the width the panel starts with
 const PANEL_MIN = 320;
 const PANEL_MAX = 960;
 
-/** The tab the panel opens on: Quick actions unless the agent or the memory was chosen (Bulk: an admin's). */
+/**
+ * The tab the panel opens on: the Agent, unless another tab was showing last time (Bulk: an admin's). Kept under its
+ * own key since the Agent became the first tab: the old key holds "quick" for everyone who opened the panel when Quick
+ * actions was the first, and would keep them there.
+ */
+const TAB_KEY = 'scene.panel.last-tab';
 function savedTab(admin: boolean): Tab {
-  const saved = prefs.get('scene.panel.tab');
-  if (saved === 'agent') return 'agent';
+  const saved = prefs.get(TAB_KEY);
+  if (saved === 'quick') return 'quick';
   if (saved === 'kit' || saved === 'memory') return 'kit';
   if (saved === 'bulk' && admin) return 'bulk';
-  return 'quick';
+  return 'agent';
 }
 
 /** The panel's state: open, which tab, how wide (clamped to the room the page has). */
@@ -52,7 +57,7 @@ export function usePanel(admin: boolean, room: () => number) {
     if (which) setTab(which);
     if (next) setFocus((n) => n + 1);
   }, []);
-  useEffect(() => prefs.set('scene.panel.tab', tab), [tab]); // remembered as it is shown
+  useEffect(() => prefs.set(TAB_KEY, tab), [tab]); // remembered as it is shown
   return {
     open,
     tab,

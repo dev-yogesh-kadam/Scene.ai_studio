@@ -303,25 +303,18 @@ def test_the_limits_are_kept_in_the_database_for_a_restart_and_other_processes(h
 
 # ---------------------------------------------------------------- the personal-use guard
 
-def test_on_this_pcs_sign_in_only_admins_reach_claude_and_sign_up_is_closed(here, tmp_path):
-    from scene.api.auth import signup_chosen, signup_open
-    db = Settings_table(roles={1: "admin", 2: "user"})
-    guard = claude_connection.guard_for(db)
-    claude.GUARD = guard
+def test_on_this_pcs_sign_in_every_user_reaches_claude_and_sign_up_is_as_chosen(here, tmp_path):
+    from scene.api.auth import signup_open
 
     async def asks(who):
         ACTING.set(who)
         return await claude.ask(service(tmp_path), "sonnet", MESSAGES, SCHEMA)
     asyncio.run(asks("1"))
-    asyncio.run(asks(EVERYONE))   # the console, and the studio's own work
-    with pytest.raises(claude.Failed, match="only admins can use it"):
-        asyncio.run(asks("2"))
-    assert len(runs(here)) == 2   # refused before anything ran
+    asyncio.run(asks("2"))   # not an admin: no limit
+    asyncio.run(asks(EVERYONE))
+    assert len(runs(here)) == 3
     state = SimpleNamespace(db=Settings_table(), settings=Settings(allow_signup=True))
-    assert claude_connection.testing() and signup_open(state) is True and signup_chosen(state) is True
-    claude.CONNECTION = {"mode": "api_key", "api_key": "sk-ant-picked-0003"}
-    asyncio.run(asks("2"))   # an API key lifts the guard
-    assert not claude_connection.testing() and signup_open(state) is True
+    assert claude_connection.testing() and signup_open(state) is True
 
 
 # ---------------------------------------------------------------- the registry and the migration (the test database)
