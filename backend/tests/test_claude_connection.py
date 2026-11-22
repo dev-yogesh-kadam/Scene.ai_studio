@@ -243,10 +243,10 @@ def test_the_console_card_switches_the_connection_and_never_shows_a_key(client, 
     assert audit["action"] == "Changed the Claude connection" and API_KEY not in json.dumps(audit)
     assert desk.put("/api/admin/claude-connection", json={"mode": "nothing"}).status_code == 400
     desk.put("/api/admin/claude-connection", json={"mode": "this_pc"})
-    assert claude.CONNECTION["mode"] == "this_pc" and client.get("/api/auth/state").json()["signup_open"] is False
-    assert desk.get("/api/admin/settings").json()["signup_testing"] is True
+    assert claude.CONNECTION["mode"] == "this_pc" and client.get("/api/auth/state").json()["signup_open"] is True
+    assert "signup_testing" not in desk.get("/api/admin/settings").json()
     desk.put("/api/admin/claude-connection", json={"mode": "api_key"})
-    assert client.get("/api/auth/state").json()["signup_open"] is True   # lifted; the key was kept
+    assert client.get("/api/auth/state").json()["signup_open"] is True   # the key was kept
 
 
 def test_only_admins_see_the_claude_connection(client):

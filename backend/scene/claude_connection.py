@@ -11,8 +11,8 @@ effect on the next call to Claude, with no restart: apply() sets it in claude.CO
 shared.on_changed("settings"), in every other process of the app (main.py). The keys never go back to a page.
 
 A Claude subscription is for its owner's own use. So while Claude on this PC is in use, the studio runs on its owner's
-personal subscription, and they are its one user: sign-up is closed (api/auth.signup_open) and only admins
-may use the agent (guard). Picking the API key lifts both.
+personal subscription: only admins may use the agent (guard). Picking the API key lifts that. Sign-up follows the
+admin's choice whichever is in use (api/auth.signup_open).
 
 The console signs Claude Code here in and out (login_start, login_code, login_cancel, logout): `claude auth login`
 runs here and gives a link to claude.com; the admin signs in there, in their own browser on any machine, and pastes

@@ -318,9 +318,9 @@ def test_on_this_pcs_sign_in_only_admins_reach_claude_and_sign_up_is_closed(here
         asyncio.run(asks("2"))
     assert len(runs(here)) == 2   # refused before anything ran
     state = SimpleNamespace(db=Settings_table(), settings=Settings(allow_signup=True))
-    assert claude_connection.testing() and signup_open(state) is False and signup_chosen(state) is True
+    assert claude_connection.testing() and signup_open(state) is True and signup_chosen(state) is True
     claude.CONNECTION = {"mode": "api_key", "api_key": "sk-ant-picked-0003"}
-    asyncio.run(asks("2"))   # an API key lifts both
+    asyncio.run(asks("2"))   # an API key lifts the guard
     assert not claude_connection.testing() and signup_open(state) is True
 
 
@@ -458,7 +458,7 @@ def test_the_console_picks_it_and_its_card_says_how_it_is(client, here):
     assert client.get("/api/auth/state").json()["signup_open"] is True
     picked = desk.put("/api/admin/providers/agent", json={"provider_id": local["id"]}).json()
     assert picked["testing"] == "Personal Claude subscription" and claude.CONNECTION["mode"] == "this_pc"
-    assert client.get("/api/auth/state").json()["signup_open"] is False   # a personal subscription
+    assert client.get("/api/auth/state").json()["signup_open"] is True   # the admin's choice, on a personal subscription too
     shown = desk.get("/api/admin/claude-connection?fresh=1").json()["status"]
     assert shown["online"] is True and shown["account"] == "owner@example.com" and shown["plan"] == "pro"
     tested = desk.post("/api/admin/claude-connection/test").json()["test"]

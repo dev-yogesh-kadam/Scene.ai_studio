@@ -10,7 +10,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from .. import audit, claude_connection, staff, vault
+from .. import audit, staff, vault
 from ..security import (ACCOUNT_FAILURES, ACCOUNT_SECONDS, DUMMY_HASH, MAX_PASSWORD, check_totp, client_address, hash_password,
                         is_https, needs_rehash, new_recovery_codes, new_token, new_totp_secret, recovery_hash, token_hash,
                         totp_uri, verify_password)
@@ -53,9 +53,8 @@ def signup_chosen(state):
 
 
 def signup_open(state):
-    """Whether strangers may make accounts now: as chosen (signup_chosen), but never while the agent runs on a personal
-    Claude subscription, Claude on this PC (claude_connection.py). The choice is kept for when that ends."""
-    return signup_chosen(state) and not claude_connection.testing()
+    """Whether strangers may make accounts now: as an admin chose (signup_chosen), whichever Claude connection is in use."""
+    return signup_chosen(state)
 
 
 def invite_fits(state, body):

@@ -39,8 +39,7 @@ DONE_FAILED = COUNT_IF.format("status = 'done'") + " AS done, " + COUNT_IF.forma
 
 
 def _settings(state):
-    # allow_signup: the admin's choice, kept while a personal Claude subscription closes sign-up anyway (signup_testing)
-    return {"allow_signup": signup_chosen(state), "signup_testing": claude_connection.testing(),
+    return {"allow_signup": signup_chosen(state),
             "signup_credits": state.credits.signup, "daily_cap": state.credits.daily_cap,
             "admin_mfa": state.db.setting("admin_mfa", "0") == "1",
             # Langfuse (docs/langfuse.md): whether the words are sent with the numbers, and the share of the agent's turns
