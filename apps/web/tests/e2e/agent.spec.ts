@@ -183,12 +183,6 @@ test('the bulb and the workflows (sliders): each is kept, and goes with the mess
   });
   await openWith(page, 'Agent knobs', []);
 
-  // the bulb: explain more, per tab
-  const bulb = page.getByRole('button', { name: /^Explain more: off/ });
-  await expect(bulb).toHaveAttribute('aria-pressed', 'false');
-  await bulb.click();
-  await expect(page.getByRole('button', { name: /^Explain more: on/ })).toHaveAttribute('aria-pressed', 'true');
-
   // the sliders: the workflows this chat uses
   await page.getByRole('button', { name: 'Workflows for this chat: the agent chooses' }).click();
   const menu = page.getByRole('menu');

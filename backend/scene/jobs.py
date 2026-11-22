@@ -34,6 +34,7 @@ VIDEO_TYPES = {".mp4", ".webm", ".mov", ".mkv", ".gif"}
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
 AUDIO_TYPES = {".mp3", ".flac", ".wav", ".opus", ".ogg", ".m4a"}
 TEXT_TYPES = {".json", ".srt", ".txt"}   # a transcript, a list of times: filed as "text"
+STYLED_ENGINE = "gemini"   # the speech model's only voices that take style_instructions
 CLIP_BREAK = re.compile(r"^\s*-{3,}\s*$", re.M)  # a line of dashes separates per-clip prompts
 JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever came after it (the canvas waits for its result)
 PROVIDER = "The provider"
@@ -618,6 +619,12 @@ class JobManager:
         provider = wf["profile"]["provider"]
         graph, ctx = workflows.build_prompt(wf, dict(settings, clips=1))
         inputs = provider_workflows.provider_input(wf, graph)
+        if str(inputs.get("style_instructions") or "").strip() and inputs.get("voice_id"):
+            # Only Gemini voices take style instructions: another voice's job would be refused, so they are left out
+            # (the [bracketed] cues in the text still direct the delivery).
+            engine = await self.router.voice_engine(inputs["voice_id"])
+            if engine and engine != STYLED_ENGINE:
+                inputs.pop("style_instructions")
         metadata = await offload(self._who, job)   # {"scene": {"user", "project", "module", "job"}}
         live["node"] = "Sending it to the provider"
         self.notify(job["user_id"])

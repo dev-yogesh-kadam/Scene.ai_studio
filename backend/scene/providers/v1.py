@@ -217,7 +217,7 @@ class V1(Adapter):
 
     async def voices(self, key, q="", language=""):
         """GET /v1/voices: the provider's voice library for its speech model, [{"id", "name", "language", "gender",
-        "preview_url"}]. None when the provider has no such list (404: a provider from before it), so the caller can
+        "engine" (gemini, elevenlabs ...: only gemini takes style_instructions), "preview_url"}]. None when the provider has no such list (404: a provider from before it), so the caller can
         say so; a key without speech in its scope is a KeyProblem like any other."""
         params = {k: v for k, v in (("q", q), ("language", language)) if v}
         response = await self._call("GET", "/v1/voices", key, allow=(404,), params=params)
@@ -234,6 +234,7 @@ class V1(Adapter):
             if isinstance(v, dict) and v.get("id"):
                 found.append({"id": str(v["id"])[:200], "name": str(v.get("name") or v["id"])[:120],
                               "language": str(v.get("language") or "")[:40], "gender": str(v.get("gender") or "")[:20],
+                              "engine": str(v.get("engine") or "").lower()[:40],
                               "preview_url": str(v.get("preview_url") or "")[:2000]})
         return found
 

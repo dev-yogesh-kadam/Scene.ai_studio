@@ -303,6 +303,24 @@ class Router:
             self._voices[wanted] = (time.time(), found, words)
         return found, words
 
+    async def voice_engine(self, voice_id):
+        """The engine of a voice of the speech model ("gemini", "elevenlabs" ...), or "" when it is not known: from a
+        voice list read lately, else the whole list (kept VOICES_FRESH seconds like any other)."""
+        voice_id = str(voice_id or "").strip()
+        if not voice_id:
+            return ""
+        lists = [kept[1] for kept in self._voices.values()]
+        for voices in lists:
+            hit = next((v for v in voices if v.get("id") == voice_id), None)
+            if hit is not None:
+                return hit.get("engine") or ""
+        try:
+            voices, _ = await self.voices()
+        except Exception:   # an unknown engine leaves the job as it is: the provider says what it can't take
+            return ""
+        hit = next((v for v in voices if v.get("id") == voice_id), None)
+        return (hit or {}).get("engine") or ""
+
     # ------------------------------------------------------------ the models each key unlocks
 
     async def check_key(self, provider, key_row, secret=None):

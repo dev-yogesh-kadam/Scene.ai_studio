@@ -91,7 +91,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
       box.current?.focus();
     }
   };
-  const lines = chat.direction.split(/\n/).length;
   return (
     <div
       className={cx(s['agent-composer'], stopping && s.waiting, hidden && 'hidden')}
@@ -171,30 +170,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
         >
           {chat.status.text}
         </span>
-        <button
-          type="button"
-          className={cx('icon-btn', s['agent-compact'], !chat.runs.length && 'hidden')}
-          title={
-            chat.direction
-              ? `Direction kept (${lines} lines). Fold the conversation into it again.`
-              : 'Fold the conversation into short notes the agent keeps (Direction)'
-          }
-          aria-label="Compact the conversation"
-          onClick={() => void chat.compact()}
-        >
-          <Icon name="book" />
-        </button>
-        <button
-          type="button"
-          className={cx('icon-btn', s['agent-explain'], chat.explain && s.on)}
-          style={{ color: chat.explain ? 'var(--accent, #f5c542)' : undefined }}
-          aria-pressed={chat.explain}
-          title={chat.explain ? 'Explain more: on (replies teach the craft)' : 'Explain more: off (brief replies)'}
-          aria-label={chat.explain ? 'Explain more: on (replies teach the craft)' : 'Explain more: off (brief replies)'}
-          onClick={() => chat.toggleExplain()}
-        >
-          <Icon name="bulb" />
-        </button>
         <PinsPicker chat={chat} />
         <button
           ref={skillsButton}

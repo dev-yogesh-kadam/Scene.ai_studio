@@ -119,7 +119,8 @@ def test_the_providers_voices_are_listed_for_anyone_signed_in(client, monkeypatc
     fake.voices = [{"id": "v_warm", "name": "Warm narrator", "language": "en-US", "gender": "female", "extra": "x"},
                    {"id": "v_bright", "name": "Bright", "language": "hi-IN"}, {"name": "no id"}]
     found = client.get("/api/voices", params={"q": "warm"}).json()
-    assert found["voices"] == [{"id": "v_warm", "name": "Warm narrator", "language": "en-US", "gender": "female", "preview_url": ""}]
+    assert found["voices"] == [{"id": "v_warm", "name": "Warm narrator", "language": "en-US", "gender": "female", "engine": "",
+                                "preview_url": ""}]
     assert [c for c in fake.calls if c["path"] == "/v1/voices"][-1]["last4"] == "1234"
     fake.voices.append({"id": "v_late", "name": "Warm late"})
     assert len(client.get("/api/voices", params={"q": "warm"}).json()["voices"]) == 1   # kept 10 minutes
@@ -129,3 +130,13 @@ def test_the_agent_has_a_voices_tool():
     from scene import agent
     assert "voices" in agent.TOOLS and "voices" in agent_tools.TOOLS
     assert agent_tools.check() == []
+
+
+def test_a_voice_engine_is_read_from_the_voice_list():
+    import asyncio
+    from scene.providers.router import Router
+    router = Router.__new__(Router)
+    router._voices = {("", ""): (0, [{"id": "v_11", "engine": "elevenlabs"}, {"id": "v_g", "engine": "gemini"}], "")}
+    assert asyncio.run(router.voice_engine("v_11")) == "elevenlabs"
+    assert asyncio.run(router.voice_engine("v_g")) == "gemini"
+    assert asyncio.run(router.voice_engine("")) == ""

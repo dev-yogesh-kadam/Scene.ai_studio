@@ -322,8 +322,9 @@ TOOLS = {
             "op": _field(S, "The workflow's id, as the message lists it.")}}),
     "voices": (
         "Lists the voices of the voiceover model a provider offers (a workflow whose settings have a \"Voice id\"): each "
-        "voice's id, name, language and gender. Put the chosen id in that setting; without one the provider's default "
-        "voice speaks.",
+        "voice's id, name, language, gender and engine. Put the chosen id in that setting; without one the provider's "
+        "default voice speaks. Only a voice whose engine is \"gemini\" takes \"Style instructions\": for any other, "
+        "direct the delivery with [bracketed] cues in the text (style instructions sent with it are left out).",
         {"type": "object", "required": ["query"], "properties": {
             "query": _field(S, "Words to look for in the voices' names (\"warm\", \"narrator\", a name), or \"\" for all."),
             "language": _field(S, "A language and region (\"en-US\", \"hi-IN\"), or \"\" for any.")}}),
