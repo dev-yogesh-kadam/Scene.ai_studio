@@ -20,6 +20,8 @@ services:
     restart: unless-stopped
     logging: *logging
     networks: [default, scene-langfuse]
+    environment:
+      HOSTNAME: "0.0.0.0"
   langfuse-worker:
     ports: !reset []
     restart: unless-stopped
