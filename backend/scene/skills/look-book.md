@@ -1,8 +1,8 @@
-id: asset-designer
-title: Craft Asset Designer
+id: look-book
+title: Look Book
 version: 2
 desc: Reference sheets for every recurring character, location and prop in a script
-description: Use when a script, story or bible needs reference sheets for its recurring characters, creatures, groups, locations and props, so every later image and video shows them the same way. Writes one fixed look per subject, generates each missing sheet, views it and saves what it shows, then posts one CSV of every asset with its scenes and link. Craft skill: works inside any workflow and for any style. Never triggers on its own: load only when the user or another skill explicitly calls for it.
+description: Use when a script, story or bible needs reference sheets for its recurring characters, creatures, groups, locations and props, so every later image and video shows them the same way. Writes one fixed look per subject, generates each missing sheet, views it and saves what it shows, then posts one CSV of every asset with its scenes and link. Building block: works inside any workflow and for any style. Never triggers on its own: load only when the user or another skill explicitly calls for it.
 craft: true
 words: \b(asset list|asset sheets?|reference sheets? for (the|this|my) (script|story|film|cast)|sheets for (the|this|my) (script|story|film|cast)|design (the|my) (cast|assets) for)\b
 ---

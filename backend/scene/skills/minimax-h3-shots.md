@@ -1,5 +1,5 @@
-id: prompter-minimax-h3
-title: Craft MiniMax H3 Prompter
+id: minimax-h3-shots
+title: MiniMax H3 Shot Writer
 version: 1
 desc: Written scene → a MiniMax H3 video, assets tagged and settings set
 description: Use when a video must be generated on MiniMax H3 (`minimax_h3`, or `minimax_h3_max` when named): a written scene is given, or the user asks for an H3 generation. Owns the video_create_edit call: which assets go in, how they are tagged and bound in the prompt, and the call settings. Not for other video models, and not for edits or extensions (H3 has no V2V). Never triggers on its own: load only when the user or another skill explicitly calls for it.

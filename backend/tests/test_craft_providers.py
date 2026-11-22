@@ -13,11 +13,11 @@ from scene.comfy import workflows
 from scene.providers import workflows as provider_workflows
 from test_api import register
 
-TABLE_ROW = re.compile(r"^\| (`[^|]+`) \| (craft-prompter-[\w-]+) \| ([^|]+) \|$", re.M)
+TABLE_ROW = re.compile(r"^\| (`[^|]+`) \| ([\w-]+-shots) \| ([^|]+) \|$", re.M)
 
 
 def test_every_video_model_in_the_table_has_its_prompter_and_chain_only_where_v2_offers_it():
-    rows = TABLE_ROW.findall(skills.find("script-to-video")["text"])
+    rows = TABLE_ROW.findall(skills.find("story-to-screen")["text"])
     assert len(rows) == 4
     for models, prompter, methods in rows:
         found = skills.find(prompter)
@@ -25,7 +25,7 @@ def test_every_video_model_in_the_table_has_its_prompter_and_chain_only_where_v2
         ids = re.findall(r"`([\w.]+)`", models)
         assert all(i in found["text"] for i in ids[:1]), (prompter, ids)
         assert ("Chain" in methods) == (ids[0] in ("seedance_2_5", "wan_3_0")), (ids, methods)
-    for sid in ("prompter-seedance-2-5", "prompter-seedance-2", "prompter-wan-3"):
+    for sid in ("seedance-2-5-shots", "seedance-2-shots", "wan-3-shots"):
         assert "## Studio: " in skills.find(sid)["text"] and "reference audio slot" in skills.find(sid)["text"]
 
 

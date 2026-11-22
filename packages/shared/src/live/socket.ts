@@ -21,6 +21,9 @@ export type LiveHandlers = {
   pollJobs: () => Promise<unknown>; // the jobs fetched over HTTP: when the connection is down or went quiet
   pollStatus: () => Promise<unknown>; // the page version, fetched every STATUS ms
   page?: () => string; // the page this tab shows, for the admin's list of who is online
+  // The connection is open again after it was lost (a restart of the studio): what was said while it was down is not
+  // said again, so the page asks for what it follows (the jobs, a plan it still thinks is running)
+  onReconnect?: () => void;
   url?: string; // defaults to this site's /api/events
   WebSocketImpl?: typeof WebSocket; // for the tests
 };
@@ -33,9 +36,11 @@ export function startLive({
   pollStatus,
   page,
   url,
+  onReconnect,
   WebSocketImpl = WebSocket,
 }: LiveHandlers): Live {
   let socket: WebSocket | null = null;
+  let opened = 0; // how many times a connection opened
   let heard = 0; // when the connection last said anything
   let stopped = false;
   const timers: ReturnType<typeof setTimeout>[] = [];
@@ -50,7 +55,10 @@ export function startLive({
     if (stopped) return;
     socket = new WebSocketImpl(address);
     heard = Date.now();
-    socket.onopen = sayPage;
+    socket.onopen = () => {
+      sayPage();
+      if (opened++ > 0) onReconnect?.();
+    };
     socket.onmessage = (event) => {
       heard = Date.now();
       try {

@@ -1,8 +1,8 @@
-id: director
-title: Craft Director
+id: shot-planner
+title: Shot Planner
 version: 3
 desc: Plan every shot of a story before anything is generated
-description: Use when a story or script must be planned into shots before generation: episode, then scenes with a type and its camera grammar, then beats, then every shot's picture, who is in frame, motion, move, angle, size and length. Craft skill: works inside any workflow and for any video or image model. Loads on its own for multi-shot film and story work (a short film, a story or script, a scene of several shots, a music video); never for a single shot, an edit or motion graphics, and beside a long skill only when that skill calls for it.
+description: Use when a story or script must be planned into shots before generation: episode, then scenes with a type and its camera grammar, then beats, then every shot's picture, who is in frame, motion, move, angle, size and length. Building block: works inside any workflow and for any video or image model. Loads on its own for multi-shot film and story work (a short film, a story or script, a scene of several shots, a music video); never for a single shot, an edit or motion graphics, and beside a long skill only when that skill calls for it.
 craft: true
 auto: story
 words: \b(direct|director|directing|shot list|shot plan|break (it|this|the script) down|breakdown|coverage plan|storyboard (it|this))\b
@@ -13,7 +13,7 @@ Top down: episode → scenes → beats → shots. Save the episode and the scene
 
 **Inputs** (never ask for one):
 - `story`: the story or script, or its state path. Required.
-- `characters`, `locations`, `props`: their sheet paths, each with its saved look, layout and palette. Positions, entrances and angles use only what each location has. **Studio:** the sheets are NeuralCore entries (/cast: each with its "visual", looks, palette and relatives), or the paths craft-asset-designer kept.
+- `characters`, `locations`, `props`: their sheet paths, each with its saved look, layout and palette. Positions, entrances and angles use only what each location has. **Studio:** the sheets are NeuralCore entries (/cast: each with its "visual", looks, palette and relatives), or the paths look-book kept.
 - `style`: the style prompt. Missing: realistic.
 - `aspect_ratio`: Missing: 16:9.
 
@@ -126,7 +126,7 @@ Status is pushed only when the line or scene is about it, or at the peak of a Re
 ```
 
 ## Studio: on its own
-Inside script-to-video, its steps make the plan into clips. When this skill runs on its own:
+Inside story-to-screen, its steps make the plan into clips. When this skill runs on its own:
 1. Once the plan is saved, show it to the user as a short table (scene, shot, picture, in frame, size · angle · move, length), each scene's type and tier in one line, and ask with "question" whether to make it: "Make these shots" or "Change something". Nothing is generated before that.
 2. When they say go, plan the shots of the first scene (at most twelve steps), each a "generate" step with "save_to" "/videos/<scene>_<shot>", "check" naming what must not go wrong in it, the camera fields filled from the shot (shot_size, angle, move, end_state), the cast's NeuralCore entries in the looks the shot names, and the prompt in its workflow's prompt guide. Shots in the same place chain.
 3. After each scene is made, read the reviews; a shot that failed is retaken with a changed approach, not only new words. Then plan the next scene, carrying on from what was really made (read /videos/...).

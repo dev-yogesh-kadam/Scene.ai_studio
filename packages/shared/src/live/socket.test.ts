@@ -38,15 +38,17 @@ function start(page = () => '/home') {
   const heard: unknown[] = [];
   const pollJobs = vi.fn(() => Promise.resolve());
   const pollStatus = vi.fn(() => Promise.resolve());
+  const onReconnect = vi.fn();
   const live = startLive({
     onMessage: (m) => heard.push(m),
     pollJobs,
     pollStatus,
     page,
+    onReconnect,
     url: 'ws://studio/api/events',
     WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
   });
-  return { live, heard, pollJobs, pollStatus, socket: () => FakeSocket.made[FakeSocket.made.length - 1] };
+  return { live, heard, pollJobs, pollStatus, onReconnect, socket: () => FakeSocket.made[FakeSocket.made.length - 1] };
 }
 
 describe('startLive', () => {
@@ -55,6 +57,17 @@ describe('startLive', () => {
     FakeSocket.made = [];
   });
   afterEach(() => vi.useRealTimers());
+
+  it('says when it is back after a lost connection, not on the first one', () => {
+    const { live, onReconnect, socket } = start();
+    socket().open();
+    expect(onReconnect).not.toHaveBeenCalled();
+    socket().drop(); // the studio restarted
+    vi.advanceTimersByTime(RECONNECT);
+    socket().open();
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    live.stop();
+  });
 
   it('passes on what the studio says and tells it the page', () => {
     const { live, heard, socket } = start();

@@ -18,19 +18,32 @@ from test_api import register
 
 V2 = Path(__file__).resolve().parents[2] / "content" / "craft-skills" / "v2" / "craft skills"
 PORTED = {   # studio skill: its v2 file. Since 20 November (the providers' models) every v2 word is kept, models included
-    "script-to-video": "Header skills/script-to-video.md",
-    "script-writer": "script writer/craft-script-writer.md",
-    "asset-designer": "asset creation/craft-asset-designer.md",
-    "director": "director/craft-director.md",
-    "anchor": "continuity/craft-anchor.md",
-    "continuity-chain": "continuity/craft-continuity-chain.md",
-    "continuity-board": "continuity/craft-continuity-board.md",
-    "continuity-recall": "continuity/craft-continuity-recall.md",
-    "prompter-minimax-h3": "prompters/craft-prompter-minimax-h3.md",
-    "prompter-seedance-2-5": "prompters/craft-prompter-seedance-2-5.md",
-    "prompter-seedance-2": "prompters/craft-prompter-seedance-2.md",
-    "prompter-wan-3": "prompters/craft-prompter-wan-3.md",
+    "story-to-screen": "Header skills/script-to-video.md",
+    "narrative": "script writer/craft-script-writer.md",
+    "look-book": "asset creation/craft-asset-designer.md",
+    "shot-planner": "director/craft-director.md",
+    "blocking": "continuity/craft-anchor.md",
+    "clip-relay": "continuity/craft-continuity-chain.md",
+    "still-grid": "continuity/craft-continuity-board.md",
+    "callback-frames": "continuity/craft-continuity-recall.md",
+    "minimax-h3-shots": "prompters/craft-prompter-minimax-h3.md",
+    "seedance-2-5-shots": "prompters/craft-prompter-seedance-2-5.md",
+    "seedance-2-shots": "prompters/craft-prompter-seedance-2.md",
+    "wan-3-shots": "prompters/craft-prompter-wan-3.md",
 }
+# Renamed on 22 November (docs/skill-names.md): the v2 words are compared with these names and phrases swapped in.
+SWAPPED = [("Craft skill:", "Building block:"), ('"smart referencing"', '"callback frames"'),
+           ('"grid continuity"', '"still grid"'), ('"v2v continuity"', '"clip relay"'),
+           ("script-to-video       /s2v/input", "story-to-screen       /s2v/input")]
+
+
+def renamed(text):
+    """A v2 text with the skills' names as the studio has them now: craft-director is shot-planner."""
+    for old in sorted(skills.RENAMED, key=len, reverse=True):
+        text = re.sub(r"craft-" + re.escape(old) + r"(?![a-z0-9-])", skills.RENAMED[old], text)
+    for old, new in SWAPPED:
+        text = text.replace(old, new)
+    return text
 
 
 def words(text):
@@ -43,23 +56,24 @@ def test_a_ported_skill_keeps_every_v2_word(sid):
     source = PORTED[sid]
     raw = (V2 / source).read_text(encoding="utf-8").replace("\r\n", "\n")
     v2_body = raw[raw.index("\n---\n", 4) + 5:]
+    v2_body = renamed(v2_body)   # with the names the studio gives them now
     ours = skills.find(sid)
     gone = words(v2_body) - words(ours["text"])
     assert not gone, (sid, dict(gone))
-    assert ours["craft"] == (sid != "script-to-video") and ours["title"].startswith(("Craft ", "Script to Video"))
+    assert ours["craft"] == (sid != "story-to-screen") and not ours["title"].startswith(("Craft ", "Script to Video"))
 
 
 def test_the_studio_adds_its_own_lines_to_the_header_and_keeps_its_steps():
-    header = skills.find("script-to-video")["text"]
+    header = skills.find("story-to-screen")["text"]
     assert "## 0 — Is this a film? (Studio)" in header and "## 9 — The cut (Studio)" in header      # D3, D2
     assert "a fifth kind, Audio" in header and "480p (Default), 720p and 1080p" in header           # D1, D8
     assert "Chain puts the clip before in the model's Reference video slot (@Video1)" in header     # D4
-    assert "use `seedance_2_5` and `seedream-5-0-pro`." in header and "| `wan_3_0`, `wan_3_0_prime` | craft-prompter-wan-3 |" in header
+    assert "use `seedance_2_5` and `seedream-5-0-pro`." in header and "| `wan_3_0`, `wan_3_0_prime` | wan-3-shots |" in header
     assert "video/@lip_sync" in header and "h3_chunk" not in header and "FLUX.2" not in header       # the models are the providers'
     assert "audio/@speech" in header and "/s2v/setup/narrator_voice" in header                     # the narrator is voiced
-    assert "Nano Banana" not in skills.find("anchor")["text"] and "image/@seedream-5-0-pro" in skills.find("anchor")["text"]   # D7
-    assert "Studio: on its own" in skills.find("director")["text"]                                  # D5
-    assert not skills.find("script-to-video")["next"]   # the craft skills it loads are craft: no hand-off line after it
+    assert "Nano Banana" not in skills.find("blocking")["text"] and "image/@seedream-5-0-pro" in skills.find("blocking")["text"]   # D7
+    assert "Studio: on its own" in skills.find("shot-planner")["text"]                                  # D5
+    assert not skills.find("story-to-screen")["next"]   # the craft skills it loads are craft: no hand-off line after it
     guide = Path(skills.__file__).with_name("prompters") / "minimax-h3.md"
     assert "they count as asked for" in guide.read_text(encoding="utf-8")                          # D10
 
@@ -77,10 +91,11 @@ def test_the_script_writers_scene_recipes_are_read_whole_by_their_names():
     assert presets.RECIPES["scene-awakening"]["mixes"][:2] == ["scene-humiliation", "scene-trial"]
 
 
-def test_a_craft_skills_name_for_another_finds_it_here():
-    assert skills.find("craft-director")["id"] == "director" and skills.find("craft-prompter-minimax-h3")["id"] == "prompter-minimax-h3"
-    assert [s["id"] for s in skills.pick("x", force=["craft-anchor", "anchor"])] == ["anchor"]
-    assert skills.canonical("Craft-Script-Writer") == "script-writer" and skills.find("craft-nothing") is None
+def test_an_old_name_of_a_skill_finds_it_here():
+    assert skills.find("craft-director")["id"] == "shot-planner" and skills.find("craft-prompter-minimax-h3")["id"] == "minimax-h3-shots"
+    assert skills.find("director")["id"] == "shot-planner" and skills.find("script-to-video")["id"] == "story-to-screen"
+    assert [s["id"] for s in skills.pick("x", force=["craft-anchor", "blocking"])] == ["blocking"]
+    assert skills.canonical("Craft-Script-Writer") == "narrative" and skills.find("craft-nothing") is None
 
 
 def ready(monkeypatch, brain):
@@ -98,12 +113,12 @@ def test_a_craft_skill_comes_whole_in_one_read_and_is_not_sent_twice(client, mon
                   {"tool": "finish", "reply": "ok"})
     plan = client.post("/api/agent/plan", json={"instruction": "/script-to-video a story about a lighthouse", "run": "s2v-2"}).json()
     whole, again, given = [t.split(":\n", 1)[1] for t in told(seen) if t.startswith("Result of read_skill")]
-    director = skills.find("director")["text"]
+    director = skills.find("shot-planner")["text"]
     assert len(director) > agent.TOOL_RESULT and len(whole) <= agent.SKILL_RESULT    # more than any other tool's result, in one
-    assert whole.startswith("Craft Director (skill director") and director in whole and "Parts:" not in whole
+    assert whole.startswith("Shot Planner (skill shot-planner") and director in whole and "Parts:" not in whole
     assert "is loaded already" in again and "## 4. Shots" not in again                 # asked again: where it is, not a copy
     assert "is given to you whole" in given and "## " not in given                     # the skill in use is in the prompt
-    assert any(e["text"].startswith("“Craft Director” is loaded already") for e in plan["activity"])
+    assert any(e["text"].startswith("“Shot Planner” is loaded already") for e in plan["activity"])
 
 
 def test_a_skill_is_sent_once_to_a_claude_session_and_again_after_a_compaction(client, monkeypatch, tmp_path):
@@ -134,7 +149,7 @@ def test_a_skill_is_sent_once_to_a_claude_session_and_again_after_a_compaction(c
         reply = client.post("/api/agent/plan", json={"instruction": text, "project_id": film["id"], "run": "tab1", "tab": "Agent 1",
                                                      "model": "claude/sonnet", "history": list(history)}).json()["reply"]
         history.append({"instruction": text, "reply": reply})
-    director = skills.find("director")["text"]
+    director = skills.find("shot-planner")["text"]
     assert director in got[0]                                                 # whole, the first time
     assert "is loaded already" in got[1] and director not in got[1]          # the session has it: not sent again
     assert director in got[2]                                                 # compacted since: sent again, whole

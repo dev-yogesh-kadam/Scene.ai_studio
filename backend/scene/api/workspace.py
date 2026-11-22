@@ -823,7 +823,7 @@ async def _planning(request, user, body, instruction, project):
     instruction = re.sub(r"(@\d+)(?=/)", lambda m: m.group(1) + " ", instruction)   # a command typed straight after an attached file (@1/skill)
     for match in reversed(list(SLASH.finditer(instruction))):
         if skills.find(match.group(1)):
-            forced.insert(0, skills.find(match.group(1))["id"])   # /craft-director is director here
+            forced.insert(0, skills.find(match.group(1))["id"])   # /director (an old name) is shot-planner here
             # the /command is an instruction to the agent, not shot text
             instruction = (instruction[:match.start()] + " " + instruction[match.end():]).strip()
     instruction = re.sub(r"[ \t]{2,}", " ", instruction)
@@ -845,6 +845,7 @@ async def _planning(request, user, body, instruction, project):
         forced.append(skills.MOTION_DEFAULT)
         yield activity("skill", "No skill picked: “{}”, the default for a brand's motion graphics".format(
             skills.find(skills.MOTION_DEFAULT)["title"].split(" — ")[0]))
+    forced = [(skills.find(f) or {}).get("id", f) for f in forced]   # an old skill name (kept by a run) as it is now
     picked = skills.pick(instruction, body.get("history"), force=forced)
     # A long skill the user named is the whole procedure: no other skill picked by the message's words goes beside it.
     if any(s["id"] in forced and len(s["text"]) > CHECKED_SKILL for s in picked):

@@ -1,8 +1,8 @@
-id: continuity-recall
-title: Craft Continuity Recall
+id: callback-frames
+title: Callback Frames
 version: 3
 desc: Keeps returning characters, props and places consistent across clips
-description: Use when a multi-clip video needs things that return after several clips (a character, prop, or location) to look the same as when they were last seen, or the user asks for "smart referencing". Keeps one labelled keyframe per generated shot and, before each new clip, picks only the keyframes that clip needs. Craft skill: works inside any workflow and for any video model, alone or alongside craft-continuity-chain or craft-continuity-board. Never triggers on its own: load only when the user or another skill explicitly calls for it.
+description: Use when a multi-clip video needs things that return after several clips (a character, prop, or location) to look the same as when they were last seen, or the user asks for "callback frames". Keeps one labelled keyframe per generated shot and, before each new clip, picks only the keyframes that clip needs. Building block: works inside any workflow and for any video model, alone or alongside clip-relay or still-grid. Never triggers on its own: load only when the user or another skill explicitly calls for it.
 craft: true
 words: \b(continuity|smart referenc\w*|keep (her|him|them|it) the same|looks? different (now|again)|consistent (across|between)|same (face|outfit|place) (as|in) (before|shot))\b
 ---

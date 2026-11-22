@@ -158,7 +158,7 @@ def test_a_long_run_carries_its_skill_on_only_in_its_own_module(client, monkeypa
     hosted(monkeypatch, client, {"tool": "finish", "reply": "ok", "steps": []})
     client.post("/api/agent/plan", json={"instruction": "/script-to-video a film about a lighthouse", "project_id": a, "run": "tab9"})
     db = db_of(client)
-    assert runs.kept_skill(db, ada["id"], "tab9", a) == "script-to-video"
+    assert runs.kept_skill(db, ada["id"], "tab9", a) == "story-to-screen"   # the old name finds the skill by its new one
     hosted(monkeypatch, client, {"tool": "finish", "reply": "ok", "steps": []})
     plan = client.post("/api/agent/plan", json={"instruction": "go", "project_id": b, "run": "tab9"}).json()
     assert not any(e["text"].startswith("Carried on with") for e in plan["activity"])

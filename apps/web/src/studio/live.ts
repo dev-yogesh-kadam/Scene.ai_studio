@@ -18,6 +18,7 @@ export type StudioStatus = { page?: number };
 export const JOBS = ['jobs'] as const;
 export const STATUS = ['status'] as const;
 export const PLANS = ['plans'] as const; // the plans the studio carries out, as the live connection last said them
+export const RECONNECTED = ['live-reconnected'] as const; // when the live connection last came back (a studio restart)
 /** The build this page runs: its entry file's name, which carries the hash of its content. */
 const BUILD = new URL(import.meta.url).pathname.split('/').pop() || 'dev';
 
@@ -77,6 +78,14 @@ export function useStudioLive() {
           client.setQueryData<StudioStatus>(STATUS, { page: found.page });
         }),
       page: () => window.location.pathname.replace(/\/+$/, '') || '/',
+      // Back after a restart: a plan may have ended while no one could be told (its job failed with the restart), so
+      // the jobs are fetched and the agent tabs ask again about the plans they still think are running.
+      onReconnect: () => {
+        void fetchJobs()
+          .then(setJobs)
+          .catch(() => {});
+        client.setQueryData(RECONNECTED, Date.now());
+      },
     });
     void fetchJobs()
       .then(setJobs)

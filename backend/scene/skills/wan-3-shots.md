@@ -1,5 +1,5 @@
-id: prompter-wan-3
-title: Craft Wan 3 Prompter
+id: wan-3-shots
+title: Wan 3 Shot Writer
 version: 1
 desc: Written scene → a Wan 3.0 video, assets tagged and settings set
 description: Use when a video must be generated on Wan 3.0 (`wan_3_0`, or `wan_3_0_prime` when named): a written scene is given, or the user asks for a Wan generation. Owns the video_create_edit call: which assets go in, how they are tagged and bound in the prompt, and the call settings. Not for other video models. Never triggers on its own: load only when the user or another skill explicitly calls for it.

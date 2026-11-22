@@ -1,8 +1,8 @@
-id: script-writer
-title: Craft Script Writer
+id: narrative
+title: Narrative Draft
 version: 1
 desc: Turn an idea, brief or script into a detailed narrated story
-description: Use when an idea, a brief, a broken or partial script, or a full script needs to become a detailed narrator story, an audio-series episode: past-tense narration that talks to the listener, dialogue inline, every scene played out in full, each episode ending on a hook. Craft skill: works inside any workflow. Never triggers on its own: load only when the user or another skill explicitly calls for it.
+description: Use when an idea, a brief, a broken or partial script, or a full script needs to become a detailed narrator story, an audio-series episode: past-tense narration that talks to the listener, dialogue inline, every scene played out in full, each episode ending on a hook. Building block: works inside any workflow. Never triggers on its own: load only when the user or another skill explicitly calls for it.
 craft: true
 words: \b(script writer|write (the|a|my) (story|episode)|narrated (story|episode))\b
 ---

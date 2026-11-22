@@ -11,7 +11,7 @@ Each skill is a Markdown file in skills/ that starts with a few "key: value" lin
 
 A skill is given to the agent only when the user picks it (/<id>, or the panel), the run already follows it, or the
 skill in use hands on to it or calls for it. A message that asks for a video, with no skill picked, gets the default
-skill (DEFAULT, script-to-video), which hands on to the craft skills. "words" is a regular expression: the user naming
+skill (DEFAULT, story-to-screen), which hands on to the craft skills. "words" is a regular expression: the user naming
 a skill in words ("use the director skill") is found by it, and the console keeps it. The files are read on every
 message, so a change to one counts at once.
 
@@ -35,7 +35,7 @@ from pathlib import Path
 FOLDER = Path(__file__).parent / "skills"
 DRAFTS = "drafts"   # the folder under FOLDER where drafts wait for an admin
 MAX_CHARS = 150_000   # the most of one skill that goes to a hosted model (about 40,000 tokens); a longer one is cut here, and the agent says so
-DEFAULT = "script-to-video"   # the skill of a message that asks for a video when the user picked none
+DEFAULT = "story-to-screen"   # the skill of a message that asks for a video when the user picked none
 # A message that asks for a video to be made: a verb of making, then within a few words a video, film, reel... that is
 # not one already there ("make the video shorter" is an edit, not a new video).
 MAKES_VIDEO = re.compile(
@@ -173,12 +173,19 @@ def load(folder=FOLDER):
     return found
 
 
-CRAFT_PREFIX = "craft-"   # the craft skills name each other "craft-director", "craft-anchor": here they are director, anchor
+CRAFT_PREFIX = "craft-"   # how the skills once named each other ("craft-director"): read as the id after it
+# The skills renamed on 2026-11-22 (docs/skill-names.md), old id -> new id, so a run, a saved pick or a typed /command
+# from before still finds its skill.
+RENAMED = {"script-to-video": "story-to-screen", "script-writer": "narrative", "asset-designer": "look-book",
+           "director": "shot-planner", "anchor": "blocking", "continuity-board": "still-grid",
+           "continuity-chain": "clip-relay", "continuity-recall": "callback-frames",
+           "prompter-seedance-2": "seedance-2-shots", "prompter-seedance-2-5": "seedance-2-5-shots",
+           "prompter-wan-3": "wan-3-shots", "prompter-minimax-h3": "minimax-h3-shots"}
 
 
 def find(skill_id, folder=FOLDER):
-    """The one skill with this id, or None. Used when the user asks for a skill by name with /<id>. A craft skill's name
-    for another ("craft-director") finds it by its id here ("director") when no skill has that whole name."""
+    """The one skill with this id, or None. Used when the user asks for a skill by name with /<id>. An old name
+    ("director", "craft-director": RENAMED) finds the skill it became when no skill has that whole name."""
     found = load(folder)
     for wanted in (skill_id, canonical(skill_id)):
         for skill in found:
@@ -188,9 +195,10 @@ def find(skill_id, folder=FOLDER):
 
 
 def canonical(skill_id):
-    """A skill's id as this studio names it: "craft-anchor" is "anchor"."""
+    """A skill's id as this studio names it now: "craft-anchor" and "anchor" are "blocking" (RENAMED)."""
     said = str(skill_id or "").strip().lower()
-    return said[len(CRAFT_PREFIX):] if said.startswith(CRAFT_PREFIX) else said
+    said = said[len(CRAFT_PREFIX):] if said.startswith(CRAFT_PREFIX) else said
+    return RENAMED.get(said, said)
 
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")

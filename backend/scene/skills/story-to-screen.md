@@ -1,8 +1,8 @@
-id: script-to-video
-title: Script to Video
+id: story-to-screen
+title: Story to Screen
 version: 3
 desc: Script, idea or brief → video, images or a detailed script
-description: Use when the user wants a script, idea or brief turned into a video, a set of images or a detailed script ("script to video"). Runs the craft skills in order (craft-script-writer → craft-asset-designer → craft-director → craft-anchor → continuity → prompter) and owns every choice between them: the questions, the models, and what each skill is given. Not for a single image or one-off clip.
+description: Use when the user wants a script, idea or brief turned into a video, a set of images or a detailed script ("script to video"). Runs the craft skills in order (narrative → look-book → shot-planner → blocking → continuity → prompter) and owns every choice between them: the questions, the models, and what each skill is given. Not for a single image or one-off clip.
 words: \b(script[- ]to[- ]video|(turn|make|convert) (this|my|the) (script|story|audio|brief|idea|screenplay) (in)?to (a )?(video|film|movie|images|pictures|storyboard))\b
 ---
 # Script to Video
@@ -20,7 +20,7 @@ This skill is also given to a message that asks for a video when the user picked
 - Anything else (a script, an audio, a story, several scenes or people, longer than one clip): go on with step 1.
 
 ## 1 — Input
-First, before anything else, AskUserQuestion: "What are you starting from?" with the options Idea, Brief, Script, Broken script. Skip it when the message already carries the material; its kind is then read from it. Then take what they paste or upload, as given. Images the user attached go to craft-asset-designer as `characters`, `locations`, `props`. Voice samples they attach are saved per speaker.
+First, before anything else, AskUserQuestion: "What are you starting from?" with the options Idea, Brief, Script, Broken script. Skip it when the message already carries the material; its kind is then read from it. Then take what they paste or upload, as given. Images the user attached go to look-book as `characters`, `locations`, `props`. Voice samples they attach are saved per speaker.
 
 **Studio:** an attached sound is a fifth kind, Audio (an episode, a voiceover, a song with words), the studio's own. It is never an option of the question (a question here takes four): a message with a sound attached already carries its material. Transcribe it (Transcribe audio, on this PC: `audio/@transcribe`, speaker labels on; the script as SCRIPT when there is one), then transcript into /s2v/input/lines. The speakers take the script's names (transcript with "value"), anyone else a short working name, the narrator "narrator". The lines are the script, of kind Script, so step 3 keeps it word for word; the audio's length is the runtime (/s2v/input/runtime), and the audio is kept for the cut (/s2v/input/audio). A voice sample is kept as a NeuralCore entry of type voice ("Maya's voice").
 
@@ -31,10 +31,10 @@ The mode the user picked in the chat decides the models, and the models decide t
 
 | Video model | Prompter | Continuity |
 |---|---|---|
-| `seedance_2_5` | craft-prompter-seedance-2-5 | Board, Chain, Recall |
-| `seedance_2_0`, `seedance_2_0_fast`, `seedance_2_0_mini` | craft-prompter-seedance-2 | Board, Recall |
-| `wan_3_0`, `wan_3_0_prime` | craft-prompter-wan-3 | Board, Chain, Recall |
-| `minimax_h3`, `minimax_h3_max` | craft-prompter-minimax-h3 | Board, Recall |
+| `seedance_2_5` | seedance-2-5-shots | Board, Chain, Recall |
+| `seedance_2_0`, `seedance_2_0_fast`, `seedance_2_0_mini` | seedance-2-shots | Board, Recall |
+| `wan_3_0`, `wan_3_0_prime` | wan-3-shots | Board, Chain, Recall |
+| `minimax_h3`, `minimax_h3_max` | minimax-h3-shots | Board, Recall |
 
 A video model with no prompter: tell the user which models this skill supports and stop. Chain is left out where video-to-video is weak (Seedance 2.0) or missing (MiniMax).
 
@@ -53,10 +53,10 @@ A question left with one option is not asked; that option is used. Answers that 
 Save `/s2v/setup`: output, aspect_ratio, resolution, continuity, style_preset, style_prompt, video_model, image_model, prompter.
 
 ## 3 — Story
-A full script (`kind` Script) for Video or Images skips this step: save `/s2v/input/script` word for word at `/script/story`. Otherwise, AskUserQuestion: "How long should the story run?" with the options 1 min, 3 min (Default), 5 min, 8 min; skip it when the user already named a length. Save the answer as `/s2v/input/runtime`, then load **craft-script-writer** with `script`: `/s2v/input/script` and `runtime`: `/s2v/input/runtime`. It posts the story in chat and saves it at `/script/story`. Detailed script ends here.
+A full script (`kind` Script) for Video or Images skips this step: save `/s2v/input/script` word for word at `/script/story`. Otherwise, AskUserQuestion: "How long should the story run?" with the options 1 min, 3 min (Default), 5 min, 8 min; skip it when the user already named a length. Save the answer as `/s2v/input/runtime`, then load **narrative** with `script`: `/s2v/input/script` and `runtime`: `/s2v/input/runtime`. It posts the story in chat and saves it at `/script/story`. Detailed script ends here.
 
 ## 4 — Assets
-Load **craft-asset-designer** with:
+Load **look-book** with:
 - `script`: `/script/story`;
 - `style`: `/s2v/setup/style_preset` and `/s2v/setup/style_prompt`;
 - `characters`, `locations`, `props`: the user's images.
@@ -64,9 +64,9 @@ Load **craft-asset-designer** with:
 It asks the references question and saves the sheets at `/characters`, `/locations`, `/props`.
 
 ## 5 — Plan
-Load **craft-director** with:
+Load **shot-planner** with:
 - `story`: `/script/story`;
-- `characters`, `locations`, `props`: the sheet paths craft-asset-designer saved;
+- `characters`, `locations`, `props`: the sheet paths look-book saved;
 - `style`: `/s2v/setup/style_prompt`;
 - `aspect_ratio`: `/s2v/setup/aspect_ratio`.
 
@@ -92,7 +92,7 @@ Each clip is written with the prompter's field names, read off the plan and the 
 Save each at `/s2v/clips/<n>`.
 
 ## 7 — Anchors
-Video and Images. Load **craft-anchor** with `plan`: `/director/scenes`, `clips`: `/s2v/clips` (Images: no clips, so each shot is its own clip, `<scene>_<shot>`), and the sheet paths craft-asset-designer saved. It saves `/anchors/<k>`, each with the clips it serves.
+Video and Images. Load **blocking** with `plan`: `/director/scenes`, `clips`: `/s2v/clips` (Images: no clips, so each shot is its own clip, `<scene>_<shot>`), and the sheet paths look-book saved. It saves `/anchors/<k>`, each with the clips it serves.
 
 ## 8 — Generate
 **Images:** one `image_create_edit` per planned shot, all in one response, with `/s2v/setup/image_model`: the shot's picture frozen at the peak of its action, who is in frame and where, its size, lens, angle and tone, then `/s2v/setup/style_prompt` word for word, as the prompt; references: every `/anchors/<k>` whose `clips` holds `<scene>_<shot>` first, then the sheets of everyone and everything in frame, in the looks worn; the aspect ratio from `/s2v/setup`. With an anchor, the prompt opens "Keep the place, its light and where each figure stands from Image 1; the camera is this shot's." Save each at `/s2v/frames/<scene>_<shot>/image`. **Studio:** the image model is Seedream 5.0 Pro (`image/@seedream-5-0-pro`, up to 10 reference pictures) unless the chat chose another. Each frame is a "generate" step with "save_to" "/s2v/frames/<scene>_<shot>/image" (its library id is then at .../image/item), its references in the model's numbered reference pictures in that order, and Image 1 is named as the model's "references" say (image 1, image 2 …).
@@ -103,9 +103,9 @@ Video and Images. Load **craft-anchor** with `plan`: `/director/scenes`, `clips`
 
    | Method | A scene's first clip | A later clip of the same scene |
    |---|---|---|
-   | Chain | normal generation | craft-continuity-chain |
-   | Board | normal generation | craft-continuity-board |
-   | Recall | craft-continuity-recall | craft-continuity-recall |
+   | Chain | normal generation | clip-relay |
+   | Board | normal generation | still-grid |
+   | Recall | callback-frames | callback-frames |
 
    Load it with: clip `/s2v/clips/<n>`, the clip number n, previous video `/s2v/clips/<n-1>/video`, and Board's grid `/continuity/board/<scene>`. It saves its fields at `/continuity/clips/<n>`, and runs its own after-clip step before the next clip.
 
@@ -132,18 +132,18 @@ Under Chain and Board, a scene's first clip waits on nothing and can go out alon
 ## 9 — The cut (Studio)
 Video only, once every clip is kept: one "assemble" step with the kept clips in order (music only when the user wants it). With an audio input, the film tool's op film with the clips and /s2v/input/audio instead, so the recording plays under the pictures; subtitles if asked.
 
-**The narrator's voice.** A story with narration (craft-script-writer's narrated episode; no audio input) has its narrator voiced for the cut: pick one voice with the voices tool (the story's language, e.g. "hi-IN"; a "narrator" or warm voice) and keep it for the whole piece (/s2v/setup/narrator_voice). Each narration passage that plays over a clip is one "generate" step on Voiceover (`audio/@speech`) with its words word for word as the prompt and that voice in its "Voice id", saved at "/s2v/narration/<n>" (n: the clip it plays over). Once the "assemble" step has made the film, one ffmpeg call lays each passage in at its clip's start ("adelay") with the film's own sound ducked under it (ffmpeg-recipes: "A voice over music, the music ducked under it"), kept as the film; a clip shorter than its narration is held on its last shot, never the narration cut. It is voiced unless the user said not to; the reply says so in one line, with the voice's name, and a "no narrator" from the user leaves the cut without one.
+**The narrator's voice.** A story with narration (narrative's narrated episode; no audio input) has its narrator voiced for the cut: pick one voice with the voices tool (the story's language, e.g. "hi-IN"; a "narrator" or warm voice) and keep it for the whole piece (/s2v/setup/narrator_voice). Each narration passage that plays over a clip is one "generate" step on Voiceover (`audio/@speech`) with its words word for word as the prompt and that voice in its "Voice id", saved at "/s2v/narration/<n>" (n: the clip it plays over). Once the "assemble" step has made the film, one ffmpeg call lays each passage in at its clip's start ("adelay") with the film's own sound ducked under it (ffmpeg-recipes: "A voice over music, the music ducked under it"), kept as the film; a clip shorter than its narration is held on its last shot, never the narration cut. It is voiced unless the user said not to; the reply says so in one line, with the voice's name, and a "no narrator" from the user leaves the cut without one.
 
 ## State
 ```
-script-to-video       /s2v/input                 kind, script, runtime, voices/<name>
+story-to-screen       /s2v/input                 kind, script, runtime, voices/<name>
                       /s2v/setup                 output, aspect_ratio, resolution, continuity, style_preset, style_prompt, video_model, image_model, prompter
                       /s2v/clips/<n>             scene_n, goal, cast, location, opening, shots, end_state, locks, duration, video
                       /s2v/frames/<scene>_<shot>/image
-craft-script-writer   /script/story
-craft-asset-designer  /characters/<name>      /locations/<name>      /props/<name>
-craft-director        /director/episode       /director/scenes/<n>   /director/scenes/<n>/beats/<b>   /director/scenes/<n>/shots/<m>
-craft-anchor          /anchors/<k>
+narrative   /script/story
+look-book  /characters/<name>      /locations/<name>      /props/<name>
+shot-planner        /director/episode       /director/scenes/<n>   /director/scenes/<n>/beats/<b>   /director/scenes/<n>/shots/<m>
+blocking          /anchors/<k>
 continuity            /continuity/clips/<n>   /continuity/board/<scene>   /continuity/recall/keyframes/<k>
 ```
 **Studio:** an audio input adds /s2v/input/lines, runtime and audio; a voiced narrator adds /s2v/setup/narrator_voice and /s2v/narration/<n>. A result's library id is at <path>/item: /s2v/clips/<n>/video/item, /s2v/frames/<scene>_<shot>/image/item, /anchors/<k>/image/item.

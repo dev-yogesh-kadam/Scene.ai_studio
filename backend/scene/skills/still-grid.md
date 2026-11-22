@@ -1,10 +1,10 @@
-id: continuity-board
-title: Craft Continuity Board
+id: still-grid
+title: Still Grid
 version: 2
 desc: Keeps a multi-clip scene continuous using a grid of earlier stills
-description: Use when several clips must play as one unbroken scene but each clip should be generated on its own, with continuity carried by a numbered grid of stills from the scene so far, or the user asks for "grid continuity". Craft skill: works inside any workflow and for any video model. Never triggers on its own: load only when the user or another skill explicitly calls for it.
+description: Use when several clips must play as one unbroken scene but each clip should be generated on its own, with continuity carried by a numbered grid of stills from the scene so far, or the user asks for "still grid". Building block: works inside any workflow and for any video model. Never triggers on its own: load only when the user or another skill explicitly calls for it.
 craft: true
-words: \b(grid continuity|board continuity|continuity (board|grid|method)|staging grid|(one|same|unbroken|continuous) scene (in|across|over) (several|many|\d+) (clips|shots)|chain or board|board or (chain|recall))\b
+words: \b(still grid|grid continuity|board continuity|continuity (board|grid|method)|staging grid|(one|same|unbroken|continuous) scene (in|across|over) (several|many|\d+) (clips|shots)|chain or board|board or (chain|recall))\b
 ---
 # Continuity Board
 

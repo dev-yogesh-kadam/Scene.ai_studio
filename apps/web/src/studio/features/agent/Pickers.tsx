@@ -2,7 +2,7 @@
 // tab, and the image / video / audio models this chat is pinned to on the others), and whether a plan runs at once or
 // waits (PermissionPicker).
 
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../../common/components/Icon/Icon';
 import { popover, s as pop } from '../../../common/components/Popover';
 import { cx } from '../../../common/cx';
@@ -36,6 +36,16 @@ type Flyout = { name: string; top: number; side: boolean };
 function ChatPane({ chat, close }: { chat: AgentChat; close: () => void }) {
   const { models } = chat;
   const [fly, setFly] = useState<Flyout | null>(null);
+  const flyBox = useRef<HTMLDivElement>(null);
+  // beside the menu, the levels start level with their row but never run off the bottom (or top) of the window
+  useLayoutEffect(() => {
+    const node = flyBox.current;
+    if (!node || !fly?.side) return;
+    node.style.top = fly.top + 'px';
+    const r = node.getBoundingClientRect();
+    const over = r.bottom - (window.innerHeight - 8);
+    if (over > 0) node.style.top = fly.top - Math.min(over, r.top - 8) + 'px';
+  }, [fly]);
   /** Beside the menu when there is room on its left; else under the row, and only on a click (not on hover). */
   const openFly = (name: string, row: HTMLElement, hover = false) => {
     const box = row.closest(`.${s['model-pop']}`) as HTMLElement | null;
@@ -51,8 +61,8 @@ function ChatPane({ chat, close }: { chat: AgentChat; close: () => void }) {
     const effort = name === models.current ? chat.effortOf(name) : '';
     return (
       <div
+        ref={fly?.side ? flyBox : undefined}
         className={cx(s['effort-fly'], fly?.side && s.side)}
-        style={fly?.side ? { top: fly.top } : undefined}
         role="menu"
         aria-label={`Effort for ${models.shown(name)}`}
       >
@@ -267,11 +277,7 @@ function ModelMenu({ chat, tabs, close }: { chat: AgentChat; tabs: PinTab[]; clo
           );
         })}
       </div>
-      {tab ? (
-        <KindPane tab={tab} pins={pins} keep={keep} close={close} />
-      ) : (
-        <ChatPane chat={chat} close={close} />
-      )}
+      {tab ? <KindPane tab={tab} pins={pins} keep={keep} close={close} /> : <ChatPane chat={chat} close={close} />}
     </>
   );
 }
@@ -289,7 +295,13 @@ export function ModelPicker({ chat }: { chat: AgentChat }) {
       // no catalog: the Chat tab alone
     }
     if (!button.current) return;
-    popover(button.current, (close) => <ModelMenu chat={chat} tabs={tabs} close={close} />, cx(s['pin-pop'], s['model-pop']));
+    // centred over the message box, not pinned to the button at the right edge of the agent panel
+    popover(
+      button.current,
+      (close) => <ModelMenu chat={chat} tabs={tabs} close={close} />,
+      cx(s['pin-pop'], s['model-pop']),
+      { around: button.current.closest<HTMLElement>(`.${s['agent-composer']}`) },
+    );
   };
   const label =
     `Models: ${models.shown(models.current || '')}` +

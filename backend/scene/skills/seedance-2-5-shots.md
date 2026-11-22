@@ -1,5 +1,5 @@
-id: prompter-seedance-2-5
-title: Craft Seedance 2.5 Prompter
+id: seedance-2-5-shots
+title: Seedance 2.5 Shot Writer
 version: 1
 desc: Written scene → a Seedance 2.5 video, assets tagged and settings set
 description: Use when a video must be generated on Seedance 2.5 (`seedance_2_5`): a written scene is given, or the user asks for a Seedance 2.5 generation. Owns the video_create_edit call: which assets go in, how they are tagged and bound in the prompt, and the call settings. Not for other video models. Never triggers on its own: load only when the user or another skill explicitly calls for it.

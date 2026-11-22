@@ -510,8 +510,15 @@ things out (overflow visible) so a model's effort levels can open beside it on i
   color: var(--muted);
 }
 .model-tile :global(.icon) {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
+}
+/* a menu row's spans grow to fill it (Popover .pop-item > span): the tile keeps its size */
+.pin-row > .model-tile {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
 }
 .pin-text b {
   display: flex;
@@ -568,10 +575,40 @@ things out (overflow visible) so a model's effort levels can open beside it on i
     transform: translateX(6px);
   }
 }
-.effort-fly .model-tile {
-  width: 32px;
-  height: 32px;
+.effort-fly .pin-row > .model-tile {
+  flex-basis: 28px;
+  width: 28px;
+  height: 28px;
+}
+.effort-fly.side {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 .agent-model-btn .pin-count {
   flex: none;
+}
+
+/* A picture, video or file dragged over the message box: the box lights up and says what a drop does. */
+.agent-composer.dropping {
+  border-color: var(--agent);
+  box-shadow: 0 0 0 3px var(--agent-soft);
+}
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--raised) 88%, transparent);
+  color: var(--agent);
+  font: 600 14px/1 var(--sans);
+  pointer-events: none;
+  animation: fly-in 0.12s var(--ease);
+}
+.drop-hint :global(.icon) {
+  width: 18px;
+  height: 18px;
 }

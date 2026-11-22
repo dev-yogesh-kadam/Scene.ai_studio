@@ -122,7 +122,7 @@ def test_a_skill_under_way_is_not_left_for_another_unless_handed_on(client, monk
     client.post("/api/agent/plan", json={"instruction": "/script-to-video go"})
     results = [t for t in told(seen) if t.startswith("Result of read_skill")]
     assert "is in use" in results[0]
-    assert "Craft Director (skill director" in results[1]   # a craft skill the skill calls for is loaded
+    assert "Shot Planner (skill shot-planner" in results[1]   # a craft skill the skill calls for is loaded
 
 
 def test_a_video_with_no_skill_picked_runs_script_to_video_and_nothing_else_loads_by_itself(client, monkeypatch):
@@ -141,10 +141,10 @@ def test_a_video_with_no_skill_picked_runs_script_to_video_and_nothing_else_load
     seen = hosted(monkeypatch, client, {"tool": "read_skill", "op": "director", "query": "0"},
                   {"tool": "read_skill", "op": "product-ad", "query": "0"}, {"tool": "finish", "reply": "ok"})
     plan = client.post("/api/agent/plan", json={"instruction": "make a video from my script and this audio", "run": "s2v-1"}).json()
-    assert any(e["text"].startswith("No skill picked: “Script to Video") for e in plan["activity"])
+    assert any(e["text"].startswith("No skill picked: “Story to Screen") for e in plan["activity"])
     results = [t for t in told(seen) if t.startswith("Result of read_skill")]
-    assert "Craft Director (skill director" in results[0] and "is in use" in results[1]
-    assert runs.kept_skill(client.app.state.db, 1, "s2v-1", 0) == "script-to-video"
+    assert "Shot Planner (skill shot-planner" in results[0] and "is in use" in results[1]
+    assert runs.kept_skill(client.app.state.db, 1, "s2v-1", 0) == "story-to-screen"
     # a skill the user picked is not replaced by the default
     hosted(monkeypatch, client, {"tool": "finish", "reply": "ok"})
     plan = client.post("/api/agent/plan", json={"instruction": "/product-ad make a video for our shoes"}).json()

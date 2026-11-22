@@ -45,15 +45,21 @@ PLAIN = [
 ]
 
 
+OLD_TITLES = ("Script to Video", "Craft Script Writer", "Craft Asset Designer", "Craft Director", "Craft Anchor",
+              "Craft Continuity Board", "Craft Continuity Chain", "Craft Continuity Recall", "Craft Seedance 2.0 Prompter",
+              "Craft Seedance 2.5 Prompter", "Craft Wan 3 Prompter", "Craft MiniMax H3 Prompter")
+
+
 def _titles():
     """The names a skill goes by that never stand for anything else: its title in quotes, and its id when it has a
-    hyphen in it (script-to-video). A bare word ("director", "short film") is left alone: it is also plain English."""
+    hyphen in it (story-to-screen). A bare word ("director", "short film") is left alone: it is also plain English."""
     try:
         found = skills.load()
     except OSError:
         return None
-    titles = sorted({s["title"] for s in found if len(s["title"]) > 2}, key=len, reverse=True)
-    ids = sorted({s["id"] for s in found if "-" in s["id"]}, key=len, reverse=True)
+    # the old names too (skills.RENAMED, and their titles before 2026-11-22): logs kept from before still say them
+    titles = sorted({s["title"] for s in found if len(s["title"]) > 2} | set(OLD_TITLES), key=len, reverse=True)
+    ids = sorted({s["id"] for s in found if "-" in s["id"]} | {o for o in skills.RENAMED if "-" in o}, key=len, reverse=True)
     if not titles and not ids:
         return None
     quoted = r"[“\"‘']\s*(?:{})\s*[”\"’']".format("|".join(map(re.escape, titles))) if titles else None

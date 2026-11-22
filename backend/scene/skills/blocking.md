@@ -1,8 +1,8 @@
-id: anchor
-title: Craft Anchor
+id: blocking
+title: Blocking Frames
 version: 1
 desc: One staging image per place and moment, so every clip keeps who stands where
-description: Use when planned shots are about to become clips or stills and the people in a place must all stay present and where they stand across shots and clips: decides which staging states need an anchor image, writes and generates each one, and saves the camera and everyone's positions. Craft skill: works inside any workflow and for any video model. Never triggers on its own: load only when the user or another skill explicitly calls for it.
+description: Use when planned shots are about to become clips or stills and the people in a place must all stay present and where they stand across shots and clips: decides which staging states need an anchor image, writes and generates each one, and saves the camera and everyone's positions. Building block: works inside any workflow and for any video model. Never triggers on its own: load only when the user or another skill explicitly calls for it.
 craft: true
 words: \b(anchor (images?|pictures?|frames?|stills?)|staging (images?|pictures?|anchors?))\b
 ---

@@ -125,7 +125,12 @@ function MediaCard({ table, id, known, onPick }: { table: string; id: number; kn
     <figure className={cx(s['md-media'], s[`md-media-${known.kind}`])}>
       {view && <div className={s['md-media-view']}>{view}</div>}
       <figcaption>
-        <span className={s['md-media-name']} title={known.name}>
+        <span
+          className={cx(s['md-media-name'], table === 'item' && s['md-media-drag'])}
+          title={table === 'item' ? `${known.name} · drag into the message to attach` : known.name}
+          draggable={table === 'item'}
+          data-drag-item={table === 'item' ? id : undefined}
+        >
           {known.name}
         </span>
         <a

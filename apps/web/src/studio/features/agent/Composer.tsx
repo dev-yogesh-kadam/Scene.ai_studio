@@ -1,15 +1,18 @@
 // What is under the conversation: the message box, "+" to attach a file, the suggestion of what is selected, the
-// agent's status, and the buttons (fold the conversation, explain more, the workflows, skills, the model, the
-// permission) with Send, which becomes Stop while the agent is thinking or its plan is being made.
+// agent's status, and the buttons (skills, the model picker, the permission) with Send, which becomes Stop while the
+// agent is thinking or its plan is being made. A picture or video dragged in from the conversation, or a file from the
+// computer, is attached as a chip (dragMedia.ts).
 
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { uploadFile } from '@scene/shared/api/canvas';
+import { api } from '../../../common/api';
 import { Icon } from '../../../common/components/Icon/Icon';
 import { addMenu } from '../../../common/components/Popover';
 import { cx } from '../../../common/cx';
 import type { Item } from '../../../common/media/item';
 import { stopGeneration } from './actions';
 import { MessageBox, Suggest, type BoxHandle, type Slash } from './Attachments';
+import { droppedItemId, isMediaDrag, onMediaDragStart } from './dragMedia';
 import type { AgentChat } from './chat';
 import { pickLibraryItem } from './LibraryPick';
 import { ModelPicker, PermissionPicker } from './Pickers';
@@ -43,6 +46,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
   const [ids, setIds] = useState<number[]>([]);
   const [menu, setMenu] = useState<{ mode: 'box' | 'slash'; search: string; slash: Slash | null } | null>(null);
   const { send } = useAgentStream(chat);
+  const [dropping, setDropping] = useState(false);
+  const enters = useRef(0); // dragenter/dragleave fire for every child: count them to know when the drag really left
+  useEffect(() => {
+    document.addEventListener('dragstart', onMediaDragStart);
+    return () => document.removeEventListener('dragstart', onMediaDragStart);
+  }, []);
   useLayoutEffect(() => {
     chat.box = box.current;
   });
@@ -91,9 +100,44 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
       box.current?.focus();
     }
   };
+  /** A drop on the message box: files are uploaded, a studio picture or video goes in as a chip; a picture's own markup
+   * never goes in (the browser would put the full-size picture in the text). */
+  const dropIn = async (data: DataTransfer) => {
+    if (data.files.length) return uploadFiles([...data.files]);
+    const id = droppedItemId(data);
+    if (!id) return;
+    try {
+      attachAll([await api<Item>(`/api/library/${id}`)]);
+    } catch (error) {
+      chat.say((error as Error).message);
+    }
+  };
   return (
     <div
-      className={cx(s['agent-composer'], stopping && s.waiting, hidden && 'hidden')}
+      className={cx(s['agent-composer'], stopping && s.waiting, hidden && 'hidden', dropping && s.dropping)}
+      onDragEnter={(e) => {
+        if (!isMediaDrag(e.dataTransfer) || stopping) return;
+        enters.current += 1;
+        setDropping(true);
+      }}
+      onDragOver={(e) => {
+        if (!isMediaDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = stopping ? 'none' : 'copy';
+      }}
+      onDragLeave={() => {
+        enters.current = Math.max(0, enters.current - 1);
+        if (!enters.current) setDropping(false);
+      }}
+      onDrop={(e) => {
+        const data = e.dataTransfer;
+        enters.current = 0;
+        setDropping(false);
+        // words dragged in go in as words; a file, a studio item or a picture never goes in as the browser drops it
+        if (!data.files.length && !droppedItemId(data) && !/<(img|video)\b/i.test(data.getData('text/html'))) return;
+        e.preventDefault();
+        if (!stopping) void dropIn(data);
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) box.current?.focus();
       }}
@@ -102,6 +146,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
         if (stopping && !(e.target as Element).closest('button')) e.preventDefault();
       }}
     >
+      {dropping && (
+        <div className={s['drop-hint']} aria-hidden>
+          <Icon name="attachment" />
+          Drop to attach
+        </div>
+      )}
       {menu && (
         <SkillMenu
           mode={menu.mode}

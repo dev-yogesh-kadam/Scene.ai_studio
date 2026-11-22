@@ -297,3 +297,10 @@
 [data-said] .md-chip {
   margin: 0 2px;
 }
+/* a card's name can be dragged into the message box, to attach the file (its video cannot: its controls take the drag) */
+.md-media-drag {
+  cursor: grab;
+}
+.md-media-drag:active {
+  cursor: grabbing;
+}

@@ -12,28 +12,44 @@ export type Pop = { close: () => void };
 
 let openPop: Pop | null = null;
 
+/** Where a menu goes: `around`, a larger box it is centred over (the agent panel), instead of the button's left edge. */
+export type PopPlace = { around?: HTMLElement | null };
+
 function Menu({
   anchor,
   className,
   content,
   close,
+  place,
 }: {
   anchor: HTMLElement;
   className: string;
   content: (close: () => void) => ReactNode;
   close: () => void;
+  place: PopPlace;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const leave = useRef(close);
+  const side = useRef<'below' | 'above' | null>(null);
   useLayoutEffect(() => {
     leave.current = close;
     const node = box.current;
     if (!node) return;
     const at = anchor.getBoundingClientRect();
     const room = node.getBoundingClientRect();
-    const below = at.bottom + 6 + room.height < window.innerHeight;
-    node.style.left = Math.max(8, Math.min(at.left, window.innerWidth - room.width - 8)) + 'px';
-    node.style.top = (below ? at.bottom + 6 : Math.max(8, at.top - room.height - 6)) + 'px';
+    // the side is chosen once: a menu whose content grows (a new tab) grows away from its button, never off screen
+    side.current ??= at.bottom + 6 + room.height < window.innerHeight ? 'below' : 'above';
+    const around = place.around?.getBoundingClientRect();
+    const left = around ? around.left + (around.width - room.width) / 2 : at.left;
+    node.style.left = Math.max(8, Math.min(left, window.innerWidth - room.width - 8)) + 'px';
+    if (side.current === 'below') {
+      node.style.top = at.bottom + 6 + 'px';
+      node.style.bottom = '';
+    } else {
+      node.style.top = '';
+      node.style.bottom = window.innerHeight - at.top + 6 + 'px';
+      node.style.maxHeight = Math.max(160, at.top - 14) + 'px';
+    }
   });
   useEffect(() => {
     const outside = (e: PointerEvent) => {
@@ -59,7 +75,12 @@ function Menu({
   );
 }
 
-export function popover(anchor: HTMLElement, content: (close: () => void) => ReactNode, className = ''): Pop {
+export function popover(
+  anchor: HTMLElement,
+  content: (close: () => void) => ReactNode,
+  className = '',
+  place: PopPlace = {},
+): Pop {
   openPop?.close();
   let open = true;
   const pop: Pop = {
@@ -70,7 +91,9 @@ export function popover(anchor: HTMLElement, content: (close: () => void) => Rea
       take();
     },
   };
-  const take = showOverlay(<Menu anchor={anchor} className={className} content={content} close={pop.close} />);
+  const take = showOverlay(
+    <Menu anchor={anchor} className={className} content={content} close={pop.close} place={place} />,
+  );
   openPop = pop;
   return pop;
 }

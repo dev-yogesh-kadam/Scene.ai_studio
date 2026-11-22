@@ -520,7 +520,7 @@ Ad research (a brand's public ads and site; there is no ads account here):
   offer ideas of our own that learn from it without copying its words, its characters or its logo."""
 
 SKILL_RULES = """Skills, and handing on:
-- Only the user picks a skill (/<id>, or by its name), and a message asking for a video gets script-to-video when
+- Only the user picks a skill (/<id>, or by its name), and a message asking for a video gets story-to-screen when
   they picked none. The one exception is the studio's own: multi-shot film and story work comes with the director
   skill, given with the message; follow it for the shot plan. Never load a skill because a message fits it: with no
   skill given, do the work without one. Load
@@ -533,8 +533,8 @@ SKILL_RULES = """Skills, and handing on:
 - A skill comes whole and once: what read_skill gave you stays in this conversation, so when a step calls for that
   skill again, follow the copy you have. It is sent again only after the conversation was compacted.
 - The craft skills were written for another studio's tools; follow their words with ours. AskUserQuestion is "question"
-  (one) or "questions" (several at once, up to four). load_skill is read_skill, and a skill named "craft-<id>" is <id>
-  here (craft-director is director). image_create_edit is a "generate" step on a picture workflow and video_create_edit
+  (one) or "questions" (several at once, up to four). load_skill is read_skill, and a skill is named by its id (shot-planner,
+  look-book). image_create_edit is a "generate" step on a picture workflow and video_create_edit
   one on a video workflow, of those listed under Workflows (the chat's chosen workflows when it has some: the turn's
   note of "available models"); a model the skill names that is not listed is replaced as its "Studio:" lines say, and
   the call's settings are the step's fields (orientation, duration, resolution, shot_number, choices). view_image is
@@ -2138,7 +2138,7 @@ BRIEF_SAVE = ("The user answered the setup card, and /brief is still empty: writ
               "platform and shape, the tone and any reference or must-have to /brief with state_write, then go on.")
 CONCEPT_FIRST = ("Not written yet: before the shot plan, write the concept to /concept with state_write: one sentence, the idea "
                  "every shot serves (and say it to the user in one line). Then write {path} again.")
-# A skill's shot plan or shot list in its state (the director's episode and scenes, script-to-video's clips, a plan)
+# A skill's shot plan or shot list in its state (the director's episode and scenes, story-to-screen's clips, a plan)
 SHOT_PLAN = re.compile(r"^/(director/(episode|scenes)|s2v/(clips|plan)|plan/(shots|scenes)|shots?|shot_?list|shotplan|storyboard)(/|$)")
 # A skill that makes its key stills (anchors, a continuity board, frames) before any video: no stills-first hint in its run
 MAKES_STILLS = re.compile(r"\b(anchors?|continuity[- ]board|key stills?|frames? first|stills? first|storyboard)\b", re.IGNORECASE)
@@ -2153,7 +2153,7 @@ def brief_missing(questions):
 
 def makes_stills(picked):
     """Whether the skills of a run make their key stills before video themselves (anchors, a board, frames)."""
-    return any(MAKES_STILLS.search(s.get("text") or "") or any(n in ("anchor", "continuity-board") for n in s.get("next") or [])
+    return any(MAKES_STILLS.search(s.get("text") or "") or any(n in ("blocking", "still-grid") for n in s.get("next") or [])
                for s in picked or [])
 
 
