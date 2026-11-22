@@ -48,7 +48,9 @@ grep -v '^#' .env | grep -c '<'    # 0: nothing left to fill in
 Copy `SCENE_SECRET_KEY` somewhere safe, apart from the backups: without it the keys saved in the console can't be read.
 
 **3. Langfuse** (optional; the studio runs without it). Fill in its `.env` the same way: `.env.example` lists each
-value and how to make it.
+value and how to make it. `docker-compose.zoro.yml` sets `HOSTNAME: "0.0.0.0"` on `langfuse-web`: without it Langfuse
+listens on its first Docker network only, and the studio, which comes in on `scene-langfuse`, gets "Connection
+refused".
 
 ```sh
 cd ~/scene/Scene.ai/langfuse
@@ -110,6 +112,8 @@ custom-format `pg_dump` files (the console's checks confirm the newest one reads
 
 ## What is not here
 
-- **No GPU.** Nothing in the image uses CUDA. The transcription and voice-separation tools (faster-whisper, Demucs)
-  run from a Windows-only `.venv-audio` and are simply not offered on Zoro.
+- **No GPU.** Nothing in the image uses CUDA. Transcription (`transcribe`, `transcribe_video`) and voice separation
+  (`separate_voice`, also the lip sync's "clean voice") come from Studio_automation on LUFI, through its key in
+  **Servers & APIs → Providers**, as its other models do. "On this PC" (the Windows-only `.venv-audio` tools) is
+  switched off here (`SCENE_LOCAL_TOOLS: "off"` in `docker-compose.yml`), so it is not listed and raises no alert.
 - **No ComfyUI.** Generation goes through the providers set in the console.

@@ -9,6 +9,7 @@ import { reviewItem } from '@scene/shared/api/agent';
 import { api } from '../../../common/api';
 import type { Item } from '../../../common/media/item';
 import type { AgentChat } from './chat';
+import { redoOpen } from './RedoCard';
 import {
   CHECK_RESULTS,
   MAX_RETAKES,
@@ -106,6 +107,9 @@ export function carryOn(chat: AgentChat) {
   }
   if (run.state !== 'approved') return;
   if (!run.steps.every((s) => settled(chat, s))) return; // a shot still being checked, or waiting for Retake or Keep it
+  // Shots that failed are offered again first (the dock's Make again): the run goes on once they are made, or once
+  // the user puts that card away (Not now), and then says what was not made.
+  if (redoOpen(chat, run)) return;
   const lines: string[] = [];
   for (const step of run.steps) {
     if (step.skipped) {

@@ -185,7 +185,7 @@ def test_a_provider_problem_tries_the_next_provider_once_and_a_request_problem_n
         raise RequestProblem("Content refused.")
     with pytest.raises(RequestProblem):
         asyncio.run(router.run("seedance_2_5", refused))
-    assert tried == [first]   # never retried
+    assert tried == [second]   # never retried (on the key that just worked: ready, the first one never checked)
 
     with pytest.raises(NoProvider, match="No provider has a key for kling_4_0"):
         asyncio.run(router.run("kling_4_0", refused))
@@ -214,11 +214,12 @@ def test_adding_a_key_checks_it_first_and_never_gives_it_back(client, monkeypatc
     register(client)
     desk = console(client)
     listed = desk.get("/api/admin/providers").json()
-    assert "router" not in listed and [p["kind"] for p in listed["providers"]] == ["claude_local", "anthropic", "local_tools"]
+    # On this PC is not listed: the test studio has no tools' Python (conftest), as on Zoro
+    assert "router" not in listed and [p["kind"] for p in listed["providers"]] == ["claude_local", "anthropic"]
     bad = desk.post("/api/admin/providers/keys", json={"kind": "scene_provider_v1", "base_url": "http://fake-v1",
                                                        "secret": "sa_live_wrong0000"}).json()
     assert bad["saved"] is False and "not known" in bad["check"]["error"]
-    assert len(bad["providers"]) == 3   # nothing saved, not even the provider (On this PC is the third)
+    assert len(bad["providers"]) == 2   # nothing saved, not even the provider
     good = desk.post("/api/admin/providers/keys", json={"kind": "scene_provider_v1", "base_url": "fake-v1", "name": "Zoro",
                                                         "secret": "sa_live_alpha1234", "label": "studio A"}).json()
     assert good["saved"] and good["check"]["ok"] and good["check"]["models"] == 2 and good["check"]["credits"] == 91296

@@ -68,6 +68,9 @@ services:
       # with `python -m scene.manage create-admin` (README.md).
       SCENE_FIRST_ACCOUNT_LOCAL: "true"
       SCENE_TIME_ZONE: ${SCENE_TIME_ZONE:-Asia/Kolkata}
+      # "On this PC" (faster-whisper, Demucs from a Windows .venv-audio) is not here: left out quietly, never shown as
+      # a broken provider. Transcription and voice separation come from Studio_automation on LUFI (its key).
+      SCENE_LOCAL_TOOLS: "off"
     depends_on:
       db:
         condition: service_healthy
@@ -93,8 +96,8 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     logging: *logging
-    # No GPU: nothing in this image uses CUDA. The transcription and voice tools (faster-whisper, Demucs) run from
-    # .venv-audio on a Windows PC and are simply not offered here.
+    # No GPU: nothing in this image uses CUDA. Transcription and voice separation come from Studio_automation on LUFI
+    # (SCENE_LOCAL_TOOLS off above).
 
 networks:
   web:

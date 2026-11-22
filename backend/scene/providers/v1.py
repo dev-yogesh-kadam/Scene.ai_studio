@@ -111,9 +111,13 @@ def job_problem(body):
     return RequestProblem(message, request_id, code or "failed")
 
 
-def idempotency_key(job_id, clip=None):
-    """The Idempotency-Key of one studio job (one clip of a long video): the same on every retry of it."""
-    return "scene-job-{}".format(job_id) + ("-clip-{}".format(clip) if clip else "")
+def idempotency_key(job_id, clip=None, attempt=0):
+    """The Idempotency-Key of one studio job (one clip of a long video): the same on every retry of one send of it.
+    `attempt` is how many times the job was queued again because the provider was not ready (jobs._not_ready): the
+    provider's job of that earlier send ended failed and uncharged, and the new send uploads its files again (new file
+    ids, perhaps without its frames), so it is a new request with a key of its own. With the old key the provider
+    refused every re-try ("was used for another request ... with a different body")."""
+    return "scene-job-{}".format(job_id) + ("-clip-{}".format(clip) if clip else "") + ("-try-{}".format(attempt) if attempt else "")
 
 
 def problem_of(response):

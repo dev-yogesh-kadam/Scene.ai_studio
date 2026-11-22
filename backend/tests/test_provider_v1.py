@@ -5,6 +5,7 @@ once. Each job test adds its own provider (no_models): the test studio's is stud
 import asyncio
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -70,6 +71,9 @@ def test_a_retry_reuses_the_idempotency_key_and_never_pays_twice():
         posts = [c for c in fake.calls if c["path"] == "/v1/jobs"]
         assert [c["idempotency"] for c in posts] == ["scene-job-9", "scene-job-9"] and len(fake.jobs) == 1
         assert v1.idempotency_key(9, clip=2) == "scene-job-9-clip-2"
+        # queued again because the provider was not ready: a new request (new uploads), so a key of its own
+        assert v1.idempotency_key(9, attempt=1) == "scene-job-9-try-1"
+        assert v1.idempotency_key(9, clip=2, attempt=2) == "scene-job-9-clip-2-try-2"
         answer = await a.follow("sa_live_alpha1234", first["id"])
         assert answer["status"] == "succeeded" and answer["quote"]["source"] == "provider" and answer["cost"] == 65
     asyncio.run(go())
@@ -254,3 +258,74 @@ def test_a_long_video_is_chained_clip_by_clip_on_the_providers_model(client, mon
     item = db.one("SELECT * FROM generations WHERE job_id = ?", (ended["id"],))
     assert item["kind"] == "video" and item["filename"].endswith(".mp4")
     assert client.app.state.router.running == {}
+
+
+# ---------------------------------------------------------------- Studio_automation's sound tools: several outputs a job
+
+def sound_provider(client, monkeypatch):
+    from fake_v1 import SEPARATE_VOICE, SEEDANCE, SPEECH, TRANSCRIBE, TRANSCRIBE_VIDEO
+    fake = FakeV1(models=(SEEDANCE, SPEECH, TRANSCRIBE, TRANSCRIBE_VIDEO, SEPARATE_VOICE))
+    a_provider(client, monkeypatch, fake)
+    return fake
+
+
+def a_sound_job(client, workflow, name, data=b"a voice over music"):
+    from scene.references import keep_reference
+    me = client.get("/api/auth/me").json()["id"]
+    kept = asyncio.run(keep_reference(client.app.state.jobs.storage, "vo.wav", data, db=client.app.state.db, user_id=me))
+    schema = client.get("/api/workflows/" + workflow).json()
+    refs = {r["id"]: {"comfy_name": kept, "name": "vo"} for r in schema["refs"] if not r["optional"]}
+    made = client.post("/api/jobs", data={"settings": json.dumps({"workflow": workflow, "values": {}, "refs": refs, "name": name})})
+    assert made.status_code == 200, made.text
+    ended = wait_for(client, made.json()["id"])
+    assert ended["status"] == "done", ended
+    rows = client.app.state.db.all("SELECT * FROM generations WHERE job_id = ? ORDER BY id", (ended["id"],))
+    return ended, rows
+
+
+@pytest.mark.no_models
+def test_studio_automations_transcript_is_filed_as_text_twice_labelled_and_reads_as_on_this_pcs(client, monkeypatch):
+    from scene import film, transcript
+    fake = sound_provider(client, monkeypatch)
+    listed = {w["id"] for w in client.get("/api/workflows").json()["workflows"]}
+    assert {"audio/@transcribe", "audio/@transcribe_video", "audio/@separate_voice"} <= listed
+    ended, rows = a_sound_job(client, "audio/@transcribe", "VO")
+    sent = next(c for c in fake.calls if c["path"] == "/v1/jobs")
+    assert sent["body"]["model"] == "transcribe" and sent["body"]["input"]["audio"].startswith("file_")
+    provider_job = next(iter(fake.jobs))
+    assert b"a voice over music" in fake.files[sent["body"]["input"]["audio"]]   # the multipart body the fake keeps
+    assert [c["path"] for c in fake.calls if "/outputs/" in c["path"]] == [
+        "/v1/jobs/{}/outputs/{}".format(provider_job, n) for n in (0, 1)]
+    assert [(r["kind"], r["name"], Path(r["filename"]).suffix) for r in rows] == [
+        ("text", "VO · transcript", ".json"), ("text", "VO · subtitles", ".srt")]
+    assert [json.loads(r["context"])["output"] for r in rows] == ["transcript", "subtitles"]
+    # usable as On this PC's was: the agent's transcript tool and the subtitles read it (transcript.parse), and its
+    # words' times light the karaoke subtitles (film.words_for, the edits' words_from)
+    folder = client.app.state.outputs.folder(rows[0]["user_id"])
+    texts = [(folder / r["filename"]).read_text(encoding="utf-8") for r in rows]
+    from_json, from_srt = transcript.parse(texts[0]), transcript.parse(texts[1])
+    assert [l["text"] for l in from_json] == [l["text"] for l in from_srt] == ["Hello there"]
+    assert from_json[0]["end"] == from_srt[0]["end"] == 1.2 and from_json[0]["speaker"] == "SPEAKER_00"
+    assert film.words_for(from_json, texts[0])
+    assert client.app.state.router.running == {}
+
+
+@pytest.mark.no_models
+def test_studio_automations_voice_separation_files_the_voice_and_the_music_as_sounds(client, monkeypatch):
+    sound_provider(client, monkeypatch)
+    _, rows = a_sound_job(client, "audio/@separate_voice", "Street")
+    assert [(r["kind"], r["name"], Path(r["filename"]).suffix) for r in rows] == [
+        ("audio", "Street · voice", ".wav"), ("audio", "Street · music_fx", ".wav")]
+    folder = client.app.state.outputs.folder(rows[0]["user_id"])
+    assert [(folder / r["filename"]).read_bytes() for r in rows] == [b"just the voice", b"just the music"]
+
+
+def test_an_outputs_kind_ending_and_label_hold_without_its_name():
+    from scene import jobs
+    assert jobs._suffix_of_output({"mime": "application/json; charset=utf-8"}) == ".json"
+    assert jobs._suffix_of_output({"mime": "application/x-subrip"}) == ".srt"
+    assert jobs._suffix_of_output({"name": "Voice.WAV"}) == ".wav"
+    assert jobs._label_of_output({"name": "transcript.srt"}, ".srt") == "subtitles"
+    assert jobs._label_of_output({"name": "music_fx.wav"}, ".wav") == "music_fx"
+    assert jobs._label_of_output({"type": "audio"}, ".wav") == "audio"
+    assert jobs._kind_of_output({"type": "subtitles"}, ".srt") == "text"   # a type the studio does not know: by its ending

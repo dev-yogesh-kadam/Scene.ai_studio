@@ -33,6 +33,27 @@ SPEECH = {"id": "speech", "name": "Speech", "capability": "speech", "best_for": 
           "limits": {}, "pricing": {"unit": "job", "by": None, "credits": None}, "typical_seconds": 20, "can_cancel": False}
 KINDS = {"text_to_video": ("video", "video/mp4", ".mp4"), "speech": ("audio", "audio/mpeg", ".mp3"),
          "image": ("image", "image/png", ".png")}
+
+
+def _sound_model(model_id):
+    """Studio_automation's transcribe, transcribe_video and separate_voice: the same ids, capabilities and schemas as On
+    this PC's (providers/local.py), priced by the provider's quote."""
+    from scene.providers.local import MODELS
+    m = MODELS[model_id]
+    return {"id": model_id, "name": m["name"].replace(" (on this PC)", ""), "capability": m["capability"], "best_for": "",
+            "input_schema": m["input_schema"], "limits": {}, "pricing": {"unit": "job", "by": None, "credits": None},
+            "typical_seconds": m["typical_seconds"], "can_cancel": True}
+
+
+TRANSCRIBE, TRANSCRIBE_VIDEO, SEPARATE_VOICE = (_sound_model(m) for m in ("transcribe", "transcribe_video", "separate_voice"))
+TRANSCRIPT_JSON = (b'{"language": "en", "segments": [{"start": 0.0, "end": 1.2, "speaker": "SPEAKER_00", "text": "Hello there",'
+                   b' "words": [{"start": 0.0, "end": 0.5, "word": "Hello"}, {"start": 0.6, "end": 1.2, "word": "there"}]}]}')
+TRANSCRIPT_SRT = b"1\n00:00:00,000 --> 00:00:01,200\nHello there\n"
+# The outputs of a job by its capability, when it has several: (type, mime, name, the file).
+SEVERAL = {"transcribe": [("text", "application/json", "transcript.json", TRANSCRIPT_JSON),
+                          ("text", "application/x-subrip", "transcript.srt", TRANSCRIPT_SRT)],
+           "separate_voice": [("audio", "audio/wav", "voice.wav", b"just the voice"),
+                              ("audio", "audio/wav", "music_fx.wav", b"just the music")]}
 # One frame of a real MP4 is not needed: the studio probes it, and an unreadable file reads as 0 seconds.
 OUTPUT = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
 
@@ -125,6 +146,12 @@ class FakeV1:
                 return httpx.Response(200, json={"id": job["id"], "status": "cancelled", "charged": charged,
                                                  "message": "" if not charged else "The provider still finishes and charges it."})
             if found.group(3) is not None:
+                several = SEVERAL.get(self._capability(job))
+                if several:
+                    n = int(found.group(3))
+                    if n >= len(several):
+                        return error(404, "not_found", "No such output.")
+                    return httpx.Response(200, content=several[n][3], headers={"content-type": several[n][1]})
                 return httpx.Response(200, content=self.output, headers={"content-type": KINDS[self._capability(job)][1]})
             self._advance(job)
             return httpx.Response(200, json=self._public(job), headers={"X-Request-Id": "req_poll"})
@@ -143,6 +170,12 @@ class FakeV1:
         if job["test"]:
             job.update(status="failed", error={"code": "test_mode", "message": "A test key stops at the quote."},
                        quote={"credits": 65, "source": "provider"}, cost={"credits": 0})
+            return
+        several = SEVERAL.get(self._capability(job))
+        if several:
+            job.update(status="succeeded", quote={"credits": 2, "source": "provider"}, cost={"credits": 2},
+                       outputs=[{"type": kind, "url": "/v1/jobs/{}/outputs/{}".format(job["id"], n), "mime": mime, "name": name,
+                                 "bytes": len(data)} for n, (kind, mime, name, data) in enumerate(several)])
             return
         kind, mime, suffix = KINDS[self._capability(job)]
         job.update(status="succeeded", quote={"credits": 65, "source": "provider"}, cost={"credits": 65},

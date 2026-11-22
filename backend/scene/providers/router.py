@@ -5,7 +5,11 @@
    Servers & APIs → Providers"), and its credits come back.
 2. Of those, leave out keys in cooldown, at their most at once (max_concurrent, else what whoami said, else 1) and over
    their daily cap (studio credits of today's jobs on that key).
-3. The least busy (running ÷ allowed); ties by the provider's priority, then the key's (lower first), then age.
+3. A key that is ready first: its last check found it well (status "ok"), and for On this PC its tool was found
+   installed. So when On this PC and a Scene provider both offer a model (transcribe, separate_voice), the one that can
+   run it is picked. On this PC is not a candidate at all where it is not offered (local.offered: no Python there, as on
+   Zoro, or SCENE_LOCAL_TOOLS=off).
+4. Then the least busy (running ÷ allowed); ties by the provider's priority, then the key's (lower first), then age.
 
 What a call's problem means (base.py):
 - KeyProblem: the key is marked (status, cooldown_until: retry_after else 60 s; 1 h for no_credit; until fixed for
@@ -23,6 +27,7 @@ from ..db import as_everyone, offload
 from . import registry
 from .anthropic_api import Anthropic
 from .base import KeyProblem, ProviderProblem, RequestProblem
+from . import local
 from .local import LocalTools
 from .v1 import V1
 
@@ -42,7 +47,7 @@ def local_tools(settings):
         return LocalTools()
     storage = settings.path("storage_dir")
     return LocalTools(python=str(settings.path("local_tools_python")), work_dir=str(storage / "cache" / "local_tools"),
-                      models_dir=str(storage / "models"))
+                      models_dir=str(storage / "models"), switch=getattr(settings, "local_tools", "auto"))
 
 
 class NoProvider(Exception):
@@ -93,10 +98,12 @@ class Router:
         self._candidates.clear()
 
     def candidates(self, model_id):
-        """Every (provider, key, model) that could ever run this model: switched on, not invalid. Kept FRESH seconds."""
+        """Every (provider, key, model) that could ever run this model: switched on, not invalid, and not On this PC
+        where it is not offered (its models may still be cached from a database made elsewhere). Kept FRESH seconds."""
         kept = self._candidates.get(model_id)
         if kept and time.time() - kept[0] < FRESH:
             return kept[1]
+        here = local.offered_by(self.settings)
         with as_everyone():
             rows = self.db.all(
                 "SELECT m.model_id, m.name AS model_name, m.capability, m.typical_seconds, m.can_cancel, "
@@ -107,6 +114,8 @@ class Router:
                 "AND k.status <> 'invalid' ORDER BY p.priority, p.id, k.priority, k.id", (str(model_id),))
         found = []
         for r in rows:
+            if r["p_kind"] == LocalTools.kind and not here:
+                continue
             found.append(Choice(
                 provider={"id": r["p_id"], "kind": r["p_kind"], "name": r["p_name"], "base_url": r["p_url"], "priority": r["p_priority"]},
                 key={"id": r["k_id"], "label": r["k_label"], "priority": r["k_priority"], "max_concurrent": r["max_concurrent"],
@@ -158,6 +167,16 @@ class Router:
             return "over its daily cap"
         return ""
 
+    def ready(self, choice):
+        """Whether this key is ready to run its model: its last check found it well (status "ok": a key not checked yet
+        is "unknown"), and for On this PC its tool was found installed at the last look (local.ready_now)."""
+        if choice["key"].get("status") != "ok":
+            return False
+        if choice["provider"]["kind"] == LocalTools.kind:
+            python = str(self.settings.path("local_tools_python")) if self.settings is not None else ""
+            return local.ready_now(python, choice["model"]["model_id"])
+        return True
+
     def pick(self, model_id, skip_keys=(), skip_providers=()):
         """(Choice or None, problem). A Choice when a key can run it now; (None, "") when every key that could is busy,
         cooling down or over its cap (the job waits); (None, words) when none ever could (the job fails)."""
@@ -169,7 +188,7 @@ class Router:
                 and not self.why_not(c, now)]
         if not free:
             return None, ""
-        free.sort(key=lambda c: (self.busy(c["key"]["id"]) / self.allowed(c["key"]), c["provider"]["priority"],
+        free.sort(key=lambda c: (not self.ready(c), self.busy(c["key"]["id"]) / self.allowed(c["key"]), c["provider"]["priority"],
                                  c["provider"]["id"], c["key"]["priority"], c["key"]["id"]))
         return free[0], ""
 

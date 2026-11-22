@@ -70,6 +70,29 @@ _gate = {}
 _checked = {}          # python path -> (when, {"transcribe": {"ready", "why"}, ...})
 
 
+def offered(python, switch="auto"):
+    """Whether On this PC is offered here: never when switched "off" (SCENE_LOCAL_TOOLS=off), else only when its Python
+    is there. Not offered, it is left out quietly: not in the console's providers, no alert, no model, not routed to."""
+    if str(switch or "auto").strip().lower() in ("off", "0", "false", "no"):
+        return False
+    return bool(python) and Path(python).is_file()
+
+
+def offered_by(settings):
+    """offered() as the settings say. No settings (a test's database alone): offered, as before."""
+    if settings is None:
+        return True
+    return offered(str(settings.path("local_tools_python")), getattr(settings, "local_tools", "auto"))
+
+
+def ready_now(python, model):
+    """Whether the last look at what is installed (installed(), kept CHECK_FRESH seconds) found this model's tool ready,
+    without looking again: for the router, which prefers a provider that is ready."""
+    kept = _checked.get(str(python or ""))
+    tool = (MODELS.get(model) or {}).get("tool")
+    return bool(kept and tool and (kept[1].get(tool) or {}).get("ready"))
+
+
 def _lock():
     loop = asyncio.get_running_loop()
     if loop not in _gate:
@@ -80,9 +103,10 @@ def _lock():
 class LocalTools(Adapter):
     kind = KIND
 
-    def __init__(self, base_url="", python="", work_dir="", models_dir=""):
+    def __init__(self, base_url="", python="", work_dir="", models_dir="", switch="auto"):
         super().__init__("")
         self.python = str(python or "")
+        self.switch = str(switch or "auto")
         self.work_dir = Path(work_dir) if work_dir else Path.cwd() / "local_tools_work"
         self.models_dir = str(models_dir or "")
 
@@ -108,14 +132,23 @@ class LocalTools(Adapter):
         _checked[self.python] = (time.time(), found)
         return found
 
+    @property
+    def present(self):
+        """Offered here (offered()): switched on and its Python there."""
+        return offered(self.python, self.switch)
+
     async def whoami(self, key):
         found = await self.installed()
-        alerts = sorted({found[m["tool"]]["why"] for m in MODELS.values() if not (found.get(m["tool"]) or {}).get("ready")})
+        # Not offered here (no Python, as on a server, or switched off): quiet, with no alert; it has no models either.
+        alerts = sorted({found[m["tool"]]["why"] for m in MODELS.values()
+                         if not (found.get(m["tool"]) or {}).get("ready")}) if self.present else []
         return {"key": {"label": "This PC", "mode": "live", "max_concurrent": 1, "scopes": ["*"]},
                 "provider": {"name": NAME, "version": "1", "device": found.get("device") or ""},
                 "credits": {}, "alerts": alerts}
 
     async def models(self, key):
+        if not self.present:
+            return []
         found = await self.installed()
         return [{"id": mid, "name": m["name"], "capability": m["capability"], "best_for": m["best_for"], "input_schema": m["input_schema"],
                  "limits": {}, "pricing": {"unit": "job", "credits": 0}, "typical_seconds": m["typical_seconds"], "can_cancel": True}
@@ -157,6 +190,8 @@ class LocalTools(Adapter):
     async def start(self, key, model, input, metadata, idempotency_key):
         if model not in MODELS:
             raise RequestProblem("This PC has no tool called {}.".format(model))
+        if not self.present:   # a ProviderProblem: the router tries a Scene provider that offers it
+            raise ProviderProblem("The tools on this PC are not set up here.")
         tool = MODELS[model]["tool"]
         if not (((await self.installed()).get(tool)) or {}).get("ready"):
             raise ProviderProblem((await self.installed())[tool]["why"])

@@ -53,6 +53,12 @@ NOT_A_MODEL = ("{} was a ComfyUI workflow, which the studio no longer uses: make
 # A provider job cancelled before it reached the provider (the provider said it is not charged).
 PROVIDER_CANCELLED_FREE = "Cancelled before the provider made it: nothing was charged there, and your studio credits came back."
 OUTPUT_KINDS = {"video": "video", "image": "image", "audio": "audio", "text": "text"}
+# File endings of the outputs a provider may send with no name, by their mime (mimetypes knows no subtitles).
+OUTPUT_SUFFIXES = {"application/json": ".json", "application/x-subrip": ".srt", "text/srt": ".srt", "text/plain": ".txt",
+                   "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav", "video/mp4": ".mp4"}
+CLEAN_VOICE = "separate_voice"   # the model that takes a voice out of music and effects (On this PC's, Studio_automation's)
+NO_CLEAN_VOICE = ("The voice can't be taken out of the music: voice separation is not set up on this PC. Make it without "
+                  "that, or set it up (docs/servers.md).")
 
 
 # The plan and step being queued now (plans.py): JobManager.add writes them into the job's own row.
@@ -63,6 +69,23 @@ QUEUEING = contextvars.ContextVar("queueing", default=None)
 # (another module's video ran between them). Every other job where it was asked for. Ahead of both: what was put first.
 QUEUE_AT = "COALESCE((SELECT approved FROM agent_plans p WHERE p.id = jobs.plan_id), jobs.created)"
 QUEUE_ORDER = "priority DESC, {}, plan_step, created".format(QUEUE_AT)
+
+
+def _suffix_of_output(out):
+    """An output's file ending: its name's, else its mime's (without its parameters: "application/json; charset=utf-8")."""
+    suffix = Path(str(out.get("name") or "")).suffix
+    if suffix:
+        return suffix.lower()
+    mime = str(out.get("mime") or "").split(";")[0].strip().lower()
+    return OUTPUT_SUFFIXES.get(mime) or mimetypes.guess_extension(mime) or ""
+
+
+def _label_of_output(out, suffix):
+    """What one of a job's several files is, for its name in the library: its name's stem (voice, music_fx), except
+    subtitles, which share the transcript's stem (transcript.json, transcript.srt) and are called "subtitles"."""
+    if suffix == ".srt":
+        return "subtitles"
+    return Path(str(out.get("name") or "")).stem[:40] or str(out.get("type") or "")[:40]
 
 
 def _kind_of_output(out, suffix):
@@ -568,7 +591,7 @@ class JobManager:
         folder, stem = await offload(self._target, job)
         saved = 0
         for n, out in enumerate(outputs):
-            suffix = Path(str(out.get("name") or "")).suffix or mimetypes.guess_extension(str(out.get("mime") or "")) or ""
+            suffix = _suffix_of_output(out)
             kind = _kind_of_output(out, suffix)
             target = folder / "{}{}{}".format(stem, "_{}".format(saved + 1) if saved else "", suffix)
             await adapter.fetch_output(choice["secret"], started["id"], n, target, outputs)
@@ -581,7 +604,7 @@ class JobManager:
             if kind == "video":
                 made["fps"] = await media.frame_rate(target)
             # Several files of one job (a voice and the music, a transcript and its subtitles): each named by what it is
-            label = Path(str(out.get("name") or "")).stem[:40] if len(outputs) > 1 else ""
+            label = _label_of_output(out, suffix) if len(outputs) > 1 else ""
             await offload(self._record, job, kind, target, dict(made, output=label) if label else made,
                           name="{} · {}".format(job["name"], label)[:120] if label else None)
             saved += 1
@@ -599,10 +622,13 @@ class JobManager:
         live["node"] = "Sending it to the provider"
         self.notify(job["user_id"])
 
+        tries = int((job.get("settings") or {}).get("not_ready_tries") or 0) if isinstance(job.get("settings"), dict) else 0
+        key = provider_v1.idempotency_key(job["id"], clip, tries)   # a re-try after "not ready" is a new request
+
         async def attempt(choice):
             adapter = await offload(self.router.adapter, choice["provider"])
             sent = await self._provider_files(adapter, choice["secret"], inputs)
-            started = await adapter.start(choice["secret"], provider["model"], sent, metadata, provider_v1.idempotency_key(job["id"], clip))
+            started = await adapter.start(choice["secret"], provider["model"], sent, metadata, key)
             return adapter, started
 
         (adapter, started), choice = await self.router.run(provider["model"], attempt, job_id=job["id"], first=job.get("choice"))
@@ -705,9 +731,10 @@ class JobManager:
 
     async def _clean_voice_here(self, job, live, wf):
         """A provider's job (a lip sync) whose voice track has music, effects or other people under the voice, and asks
-        for it to be taken out ("clean_voice"): the voice is separated on this PC first (providers/local.py, Demucs)
-        and its voice track becomes the voice alone, kept as a reference file of its own. The job keeps its own
-        settings, so making it again cleans the original track again."""
+        for it to be taken out ("clean_voice"): the voice is separated first by whichever provider offers separate_voice
+        through the router (Studio_automation's key, or On this PC where it is set up), and its voice track becomes
+        the voice alone, kept as a reference file of its own. The job keeps its own settings, so making it again cleans
+        the original track again. None offers it: the job fails with NO_CLEAN_VOICE."""
         settings = job["settings"]
         slot = (workflows.describe(wf).get("slots") or {}).get("voice_track")
         given = (settings.get("refs") or {}).get(slot) if slot and settings.get("clean_voice") is True else None
@@ -716,20 +743,79 @@ class JobManager:
         name = given["comfy_name"]
         if not await offload(kept_reference, self.storage, name):
             raise provider_base.RequestProblem("The voice track {} is missing: add it to the job again.".format(name))
-        tool = provider_router.local_tools(getattr(self.router, "settings", None))
-        if not ((await tool.installed()).get("separate_voice") or {}).get("ready"):
-            raise provider_base.RequestProblem("The voice can't be taken out of the music: voice separation is not set up "
-                                               "on this PC. Make it without that, or set it up (docs/servers.md).")
-        live["node"] = "Taking the voice out of the music (on this PC)"
-        self.notify(job["user_id"])
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=self.tmp_dir) as tmp:
-            source = Path(tmp) / name
-            source.write_bytes(await offload(self.storage.read_bytes, REFERENCES, name))
-            made = await tool.run_now("separate_voice", {"audio": str(source)}, label="clean voice {}".format(job["id"]))
-            voice = await keep_reference(self.storage, "voice_" + Path(name).stem + ".wav", Path(made["voice.wav"]).read_bytes())
+        voice = await self._separate_voice(job, live, name)
         live["node"] = ""
         return dict(settings, refs=dict(settings["refs"], **{slot: {"comfy_name": voice, "name": "the voice of {}".format(given.get("name") or "the track")}}))
+
+    async def _separate_voice(self, job, live, name):
+        """The voice of the reference file `name`, separated by the provider the router picks for CLEAN_VOICE (its key
+        held for this step alone, then let go), and kept as a reference file of its own: its name. While every key
+        that offers it is busy it waits, as a queued job would."""
+        if self.router is None:
+            raise provider_base.RequestProblem(NO_CLEAN_VOICE)
+        holder = "{}-clean-voice".format(job["id"])   # what holds the key in the router's count: not the job's own key
+        own = (job.get("choice") or {}).get("key") or {}
+        first = None
+        while True:
+            choice, problem = await offload(self.router.pick, CLEAN_VOICE)
+            if problem:
+                raise provider_base.RequestProblem(NO_CLEAN_VOICE)
+            if choice is not None:
+                break
+            # Busy because this very job holds the key (one Studio_automation key for the lip sync and the separation,
+            # one job at a time): the separation runs on it, before the lip sync, without counting it twice.
+            first = next((c for c in await offload(self.router.candidates, CLEAN_VOICE) if own.get("id") is not None
+                          and c["key"]["id"] == own["id"] and self.router.why_not(c) == "full"), None)
+            if first is not None:
+                holder = None
+                break
+            if live.get("cancel"):
+                raise Cancelled()
+            live["node"] = "Waiting for voice separation"
+            self.notify(job["user_id"])
+            await asyncio.sleep(2)
+        data = await offload(self.storage.read_bytes, REFERENCES, name)
+        metadata = await offload(self._who, job)
+        tries = int((job.get("settings") or {}).get("not_ready_tries") or 0) if isinstance(job.get("settings"), dict) else 0
+        key = provider_v1.idempotency_key(job["id"], None, tries) + "-clean-voice"
+
+        async def attempt(armed):
+            adapter = await offload(self.router.adapter, armed["provider"])
+            sent = await adapter.upload(armed["secret"], name=name, data=data)
+            return adapter, await adapter.start(armed["secret"], CLEAN_VOICE, {"audio": sent}, metadata, key)
+
+        try:
+            (adapter, started), choice = await self.router.run(CLEAN_VOICE, attempt, job_id=holder, first=first)
+        except provider_router.NoProvider:
+            raise provider_base.RequestProblem(NO_CLEAN_VOICE)
+        try:
+            here = choice["provider"]["kind"] == provider_router.LocalTools.kind
+            live["node"] = "Taking the voice out of the music ({})".format("on this PC" if here else choice["provider"]["name"])
+            self.notify(job["user_id"])
+            print("Job {}: the voice taken out on {} (key {}), the provider's job {}.".format(
+                job["id"], choice["provider"]["name"], choice["key"]["label"], started["id"]))
+            answer = await adapter.follow(choice["secret"], started["id"], None, lambda: bool(live.get("cancel")), RENDER_MOST)
+            if answer.get("studio_cancelled"):
+                live["charged"] = bool(answer.get("charged", True))
+                raise Cancelled()
+            if answer.get("status") == "failed":
+                raise provider_v1.job_problem(answer)
+            if answer.get("status") != "succeeded":
+                raise provider_base.RequestProblem("The provider cancelled the voice separation.")
+            outputs = [o for o in answer.get("outputs") or [] if isinstance(o, dict)]
+            n = next((n for n, o in enumerate(outputs) if Path(str(o.get("name") or "")).stem == "voice"), None)
+            if n is None:   # no output named voice: the first sound (the contract's order is voice, then music_fx)
+                n = next((n for n, o in enumerate(outputs) if _kind_of_output(o, _suffix_of_output(o)) == "audio"), None)
+            if n is None:
+                raise provider_base.ProviderProblem("The voice separation finished but sent no voice.")
+            self.tmp_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=self.tmp_dir) as tmp:
+                target = Path(tmp) / ("voice" + (_suffix_of_output(outputs[n]) or ".wav"))
+                await adapter.fetch_output(choice["secret"], started["id"], n, target, outputs)
+                return await keep_reference(self.storage, "voice_" + Path(name).stem + target.suffix, target.read_bytes())
+        finally:
+            if holder is not None:
+                self.router.release(choice, holder)
 
     async def _provider_files(self, adapter, secret, inputs):
         """The job's `input` with each file ({"file": the studio's name}) uploaded to the provider and given as its

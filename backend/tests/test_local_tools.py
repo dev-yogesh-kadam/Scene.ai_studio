@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -60,13 +61,27 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def test_with_nothing_installed_no_tool_is_offered_and_whoami_says_why(tmp_path):
+def test_with_no_python_nothing_is_offered_and_nothing_is_said(tmp_path):
+    """Its Python not there (a server, Zoro) or switched off: no model, no alert, and a job is sent elsewhere."""
     local._checked.clear()
-    tools = LocalTools(python=str(tmp_path / "missing" / "python.exe"), work_dir=str(tmp_path / "work"))
-    assert run(tools.models("")) == []
-    said = run(tools.whoami(""))
-    assert said["key"]["max_concurrent"] == 1 and said["key"]["mode"] == "live"
-    assert said["alerts"] and "Tools on this PC" in said["alerts"][0]
+    for tools in (LocalTools(python=str(tmp_path / "missing" / "python.exe"), work_dir=str(tmp_path / "work")),
+                  LocalTools(python=sys.executable, work_dir=str(tmp_path / "work"), switch="off")):
+        assert not tools.present and run(tools.models("")) == []
+        said = run(tools.whoami(""))
+        assert said["key"]["max_concurrent"] == 1 and said["key"]["mode"] == "live" and said["alerts"] == []
+        with pytest.raises(ProviderProblem):   # a ProviderProblem: the router tries the next provider
+            run(tools.start("", "transcribe", {"audio": "local:x"}, {}, "scene-job-1"))
+
+
+def test_with_its_python_there_a_tool_not_installed_still_says_why(tmp_path, monkeypatch):
+    script = tmp_path / "check.py"
+    script.write_text('import json; print(json.dumps({"device": "cpu", "transcribe": {"ready": False, "why": "Install '
+                      'faster-whisper."}, "separate_voice": {"ready": True, "why": ""}}))', encoding="utf-8")
+    monkeypatch.setattr(local, "SCRIPT", script)
+    local._checked.clear()
+    tools = LocalTools(python=sys.executable, work_dir=str(tmp_path / "work"))
+    assert tools.present and run(tools.whoami(""))["alerts"] == ["Install faster-whisper."]
+    assert {m["id"] for m in run(tools.models(""))} == {"separate_voice"}
 
 
 def test_the_ready_tools_are_offered_free_each_with_one_required_file(tools):
@@ -198,3 +213,81 @@ def test_the_script_writes_subtitle_times_as_srt_wants_them():
     assert script._srt_time(0) == "00:00:00,000"
     assert script._srt_time(3661.5) == "01:01:01,500"
     assert script._r(1.23456) == 1.235
+
+
+# ---------------------------------------------------------------- On this PC beside a Scene provider (Zoro, LUFI)
+
+def settings_for(tmp_path, python, switch="auto"):
+    from scene.config import Settings
+    return Settings(storage_dir=str(tmp_path / "storage"), local_tools_python=str(python), local_tools=switch)
+
+
+def test_on_this_pc_is_offered_only_where_its_python_is_and_not_switched_off(tmp_path):
+    assert local.offered(sys.executable) and local.offered(sys.executable, "auto")
+    assert not local.offered(sys.executable, "off") and not local.offered(sys.executable, "OFF")
+    assert not local.offered(str(tmp_path / "none.exe")) and not local.offered("")
+    assert local.offered_by(settings_for(tmp_path, sys.executable))
+    assert not local.offered_by(settings_for(tmp_path, sys.executable, "off"))
+    assert not local.offered_by(settings_for(tmp_path, tmp_path / "none.exe"))
+
+
+def both_offer(database, model="transcribe"):
+    """On this PC and a Scene provider (Studio_automation) both offering `model`, each with its one key."""
+    registry.seed(database, None)
+    here = next(p for p in registry.providers(database) if p["kind"] == "local_tools")
+    here_key = registry.keys(database, here["id"])[0]["id"]
+    registry.save_models(database, here["id"], here_key, [{"id": model, "name": "Transcribe", "capability": "transcribe"}])
+    there = registry.add_provider(database, "scene_provider_v1", "Studio automation", "http://studio-automation:8189", 5)
+    there_key = registry.add_key(database, there, "sa_live_sound0001", "LUFI")
+    registry.save_models(database, there, there_key, [{"id": model, "name": "Transcribe", "capability": "transcribe"}])
+    return here_key, there_key
+
+
+def test_the_router_prefers_the_provider_that_is_ready(database, tmp_path, monkeypatch):
+    from scene.providers.router import Router
+    here_key, there_key = both_offer(database)
+    router = Router(database, settings_for(tmp_path, sys.executable))
+    python = str(router.settings.path("local_tools_python"))
+    database.run("UPDATE provider_keys SET status = 'ok' WHERE id IN (?, ?)", (here_key, there_key))
+    # On this PC's tool found not installed at the last look: Studio_automation runs it, though On this PC comes first
+    monkeypatch.setitem(local._checked, python, (time.time(), {"transcribe": {"ready": False, "why": "x"}}))
+    assert router.pick("transcribe")[0]["key"]["id"] == there_key
+    # installed: On this PC (first by priority) is ready too
+    monkeypatch.setitem(local._checked, python, (time.time(), {"transcribe": {"ready": True, "why": ""}}))
+    router.forget()
+    assert router.pick("transcribe")[0]["key"]["id"] == here_key
+    # Studio_automation's key not found well at its last check (status unknown): On this PC, which is ready
+    database.run("UPDATE provider_keys SET status = 'unknown' WHERE id = ?", (there_key,))
+    router.forget()
+    assert router.pick("transcribe")[0]["key"]["id"] == here_key
+
+
+def test_where_on_this_pc_is_not_offered_it_is_never_routed_listed_or_kept(database, tmp_path):
+    from scene.providers.router import Router
+    here_key, there_key = both_offer(database)
+    database.run("UPDATE provider_keys SET status = 'ok' WHERE id IN (?, ?)", (here_key, there_key))
+    for settings in (settings_for(tmp_path, tmp_path / "no-python" / "python"), settings_for(tmp_path, sys.executable, "off")):
+        router = Router(database, settings)
+        assert [c["key"]["id"] for c in router.candidates("transcribe")] == [there_key]
+        assert router.pick("transcribe")[0]["key"]["id"] == there_key
+        assert "local_tools" not in [p["kind"] for p in registry.listing(database, settings)]   # never a broken provider
+    # with its Python there, it is listed and routed again
+    shown = settings_for(tmp_path, sys.executable)
+    assert "local_tools" in [p["kind"] for p in registry.listing(database, shown)]
+    assert len(Router(database, shown).candidates("transcribe")) == 2
+    # at start where it is not offered, its models cached elsewhere (a database copied from LUFI) and its alerts go
+    registry.mark(database, here_key, error="The tools' Python is not there", info={"alerts": ["The tools' Python is not there"]})
+    registry.seed(database, settings_for(tmp_path, sys.executable, "off"))
+    assert registry.models(database, key_id=here_key) == [] and registry.models(database, key_id=there_key)
+    row = registry.key(database, here_key)
+    assert row["last_error"] == "" and registry.shown_key(row)["alerts"] == []
+
+
+def test_checking_on_this_pc_where_it_is_not_offered_says_nothing(database, tmp_path):
+    from scene.providers.router import Router
+    registry.seed(database, None)
+    here = next(p for p in registry.providers(database) if p["kind"] == "local_tools")
+    key_row = registry.keys(database, here["id"])[0]
+    router = Router(database, settings_for(tmp_path, sys.executable, "off"))
+    said = run(router.check_key(here, key_row))
+    assert said["ok"] and said["models"] == 0 and said["alerts"] == []

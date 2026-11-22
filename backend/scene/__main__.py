@@ -37,11 +37,21 @@ def stop_langfuse():
     if not Path(docker).is_file():
         return
     print("Stopping Langfuse...", flush=True)
+    # Its own process group, away from this console: a second Ctrl+C (or "Terminate batch job? Y") used to reach docker
+    # too and kill it half-way (web and worker stopped, postgres, clickhouse, redis and minio left running).
+    flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == "nt" else 0
     try:
-        subprocess.run([docker, "compose", "stop"], cwd=folder, timeout=120,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError, KeyboardInterrupt):
+        stopping = subprocess.Popen([docker, "compose", "stop"], cwd=folder, creationflags=flags,
+                                    start_new_session=os.name != "nt", stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
         print("Langfuse could not be stopped: stop it with \"docker compose stop\" in {}.".format(folder))
+        return
+    try:
+        stopping.wait(timeout=120)
+        print("Langfuse stopped.")
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        print("Langfuse keeps stopping in the background.")
 
 
 settings = load_settings()

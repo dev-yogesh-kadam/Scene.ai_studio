@@ -9,12 +9,31 @@ import { Icon } from '../../../common/components/Icon/Icon';
 import { cx } from '../../../common/cx';
 import { approve } from './actions';
 import type { AgentChat } from './chat';
-import type { Run } from './types';
+import { takesOf } from './shots';
+import type { Run, Step } from './types';
 import s from './Ask.module.css';
 
-/** Whether a plan has steps that were not made and nothing is running: the dock offers them again. */
-export const unfinished = (run: Run | undefined) =>
-  !!run && run.state === 'approved' && run.steps.some((step) => !step.job && !step.made && !step.skipped);
+const ENDED_BADLY = ['failed', 'cancelled'];
+
+/** A step of an approved plan that was not made: never queued, or its job failed or was cancelled (a provider that
+ *  refused the clip). A step with a take made (a retake) is made. */
+export const notMade = (chat: AgentChat, step: Step) =>
+  !step.skipped &&
+  !takesOf(step).some((take) => take.made) &&
+  (!step.job || ENDED_BADLY.includes(chat.jobOf(step.job)?.status ?? ''));
+
+/** Whether a plan has steps that were not made and nothing of it is still being made: the dock offers them again.
+ *  (A failed shot keeps its failed job, so "no job" alone missed every shot the provider refused.) */
+export const unfinished = (chat: AgentChat, run: Run | undefined) =>
+  !!run && run.state === 'approved' && !chat.generating() && run.steps.some((step) => notMade(chat, step));
+
+/** Make the steps not made again: their failed jobs are let go (as a shot's own Try again does) and the plan resumes,
+ *  the same plan, so a cut that waits on them still follows. */
+export function makeAgain(chat: AgentChat, run: Run) {
+  for (const step of run.steps)
+    if (notMade(chat, step) && step.job) chat.patch(step, { job: null, queuedAt: null, error: null });
+  return approve(chat, run);
+}
 
 export const redoOpen = (chat: AgentChat, run: Run | undefined) =>
   !!run &&
@@ -23,7 +42,7 @@ export const redoOpen = (chat: AgentChat, run: Run | undefined) =>
   !chat.working &&
   !chat.pending &&
   !run.ui.redoClosed &&
-  unfinished(run);
+  unfinished(chat, run);
 
 export function RedoCard({ chat, run }: { chat: AgentChat; run: Run }) {
   const [found, setFound] = useState<PlanRedo | null>(null);
@@ -43,7 +62,7 @@ export function RedoCard({ chat, run }: { chat: AgentChat; run: Run }) {
   const short = !!found && found.total > chat.credits;
   const go = () => {
     if (!found || chat.working || short) return;
-    void approve(chat, run);
+    void makeAgain(chat, run);
   };
   const keys = (e: ReactKeyboardEvent) => {
     if (e.key === 'Enter') {

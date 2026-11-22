@@ -4,6 +4,7 @@ test that wants them says they are ready (on_this_pc)."""
 
 import asyncio
 import json
+import sys
 import time
 
 from scene import agent, runs
@@ -19,13 +20,16 @@ NEW = ["video/@lip_sync", "upscaler/@upscale_video"] + ON_THIS_PC
 
 
 def on_this_pc(client):
-    """On this PC's models, as if .venv-audio had transcription and voice separation ready."""
+    """On this PC's models, as if .venv-audio had transcription and voice separation ready: its Python there (this
+    one, so it is offered: local.offered) and its tools found installed."""
     db = client.app.state.db
+    client.app.state.settings.local_tools_python = sys.executable
     row = next(p for p in registry.providers(db) if p["kind"] == local.KIND)
     key = registry.keys(db, row["id"])[0]
     ready = {"ready": True, "why": ""}
-    local._checked["tests-python"] = (time.time(), {"device": "cpu", "transcribe": ready, "separate_voice": ready})
-    registry.save_models(db, row["id"], key["id"], asyncio.run(LocalTools(python="tests-python").models("")))
+    local._checked[sys.executable] = (time.time(), {"device": "cpu", "transcribe": ready, "separate_voice": ready})
+    registry.save_models(db, row["id"], key["id"], asyncio.run(LocalTools(python=sys.executable).models("")))
+    client.app.state.router.forget()
     client.app.state.catalog.providers.read_at = 0.0   # read again on the next look
 
 

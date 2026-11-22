@@ -77,6 +77,8 @@ def test_several_keys_are_checked_saved_and_labelled_and_never_given_back(client
 
 
 def test_on_this_pc_and_claude_keys_are_not_pasted_in_bulk(client):
+    import sys
+    client.app.state.settings.local_tools_python = sys.executable   # its Python there: On this PC is listed
     register(client)
     desk = console(client)
     kinds = {p["kind"]: p for p in desk.get("/api/admin/providers").json()["providers"]}

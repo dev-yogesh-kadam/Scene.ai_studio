@@ -8,7 +8,7 @@ import { approve, revise, storyboard } from './actions';
 import type { AgentChat } from './chat';
 import { Fold } from './Fold';
 import { PlanStep } from './PlanStep';
-import { redoOpen, unfinished } from './RedoCard';
+import { makeAgain, redoOpen, unfinished } from './RedoCard';
 import { allMade, checking } from './checks';
 import { AnimateBar, readyToAnimate } from './Storyboard';
 import { CHECK_RESULTS, eligible, flagged, planCount } from './shots';
@@ -190,10 +190,10 @@ export function PlanView({ chat, run }: { chat: AgentChat; run: Run }) {
       {/* an approved plan with steps still to carry out (it was interrupted, or a step failed): they are offered again
           for approval in the dock; once that card is put away (Not now), Resume here */}
       {redoOpen(chat, run) && <Waiting words="Waiting for your approval · the steps not made" />}
-      {!redoOpen(chat, run) && unfinished(run) && !chat.working && (
+      {!redoOpen(chat, run) && unfinished(chat, run) && !chat.working && (
         <div className={s['agent-approve']}>
           <span className={css('slate-text')}>Not every step was carried out.</span>
-          <button className="btn small primary" onClick={() => void approve(chat, run)}>
+          <button className="btn small primary" onClick={() => void makeAgain(chat, run)}>
             Resume
           </button>
         </div>

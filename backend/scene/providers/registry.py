@@ -18,6 +18,7 @@ import time
 
 from .. import vault
 from ..db import as_everyone
+from .local import offered_by as local_offered
 from .base import AGENT_LLM, BUILT_IN, CAPABILITY_FOLDERS, CAPABILITY_WORDS, CLAUDE_KINDS, KEYLESS, KINDS, MODEL_KINDS, SELF_HOSTED, STATUSES, last4
 
 AGENT_PROVIDER = "agent_provider"
@@ -120,7 +121,8 @@ def models(db, provider_id=None, key_id=None):
 
 
 def listing(db, settings):
-    """Every provider with its keys (shown), its models count and kinds, for the console."""
+    """Every provider with its keys (shown), its models count and kinds, for the console. On this PC is left out where
+    it is not offered (local.offered: no Python there, or SCENE_LOCAL_TOOLS=off): never a broken provider there."""
     agent = agent_provider_id(db)
     every_key = keys(db)
     counts, opened = {}, unlocks(db)
@@ -128,7 +130,10 @@ def listing(db, settings):
         for r in db.all("SELECT provider_id, COUNT(DISTINCT model_id) AS n FROM provider_models GROUP BY provider_id"):
             counts[r["provider_id"]] = r["n"]
     found = []
+    here = local_offered(settings)
     for row in providers(db):
+        if row["kind"] == "local_tools" and not here:
+            continue
         own = fixed_keys(settings, row) + [k for k in every_key if k["provider_id"] == row["id"]]
         shown = [dict(shown_key(k), unlocks=opened.get(k["id"], []) if row["kind"] in MODEL_KINDS else []) for k in own]
         found.append({"id": row["id"], "kind": row["kind"], "kind_name": KINDS.get(row["kind"], row["kind"]),
@@ -514,6 +519,10 @@ def seed(db, settings):
         db.run("INSERT INTO provider_keys (provider_id, label, secret, last4, active, priority, max_concurrent, status) "
                "SELECT p.id, 'This PC', '', '', 1, 0, 1, 'unknown' FROM providers p WHERE p.kind = 'local_tools' "
                "AND NOT EXISTS (SELECT 1 FROM provider_keys k WHERE k.provider_id = p.id)")
+        if not local_offered(settings):   # not offered here: its models cached elsewhere (a database copied in) go
+            db.run("DELETE FROM provider_models WHERE provider_id IN (SELECT id FROM providers WHERE kind = 'local_tools')")
+            db.run("UPDATE provider_keys SET last_error = '', info = NULL WHERE provider_id IN "
+                   "(SELECT id FROM providers WHERE kind = 'local_tools')")
     if agent_provider_id(db) is None or provider(db, agent_provider_id(db)) is None:
         mode = db.setting("claude_connection") or getattr(settings, "claude_connection", "this_pc")
         wanted = KIND_OF.get(mode, "claude_local")

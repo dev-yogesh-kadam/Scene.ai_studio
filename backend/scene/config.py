@@ -39,6 +39,10 @@ class Settings:
     # kept apart from the studio's own because it holds PyTorch (docs/servers.md, "Tools on this PC"). Missing: those
     # tools are simply not offered.
     local_tools_python: str = ".venv-audio/Scripts/python.exe"
+    # Whether "On this PC" is offered at all: "auto" when its Python above is there (else it is left out quietly, as
+    # on a server with none: no provider shown, no alert), "off" never (deploy/zoro sets SCENE_LOCAL_TOOLS=off). Its
+    # models then come from a Scene provider that offers them (Studio_automation).
+    local_tools: str = "auto"
     # PostgreSQL, the only database, as postgresql://<account>:<password>@localhost:5432/scene: the account the app works
     # as, which only reads and writes rows. The owner account makes and changes the tables, through the migrations
     # (scripts/migrate.py), never when the app starts.

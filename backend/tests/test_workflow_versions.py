@@ -46,7 +46,8 @@ def test_a_workflow_can_be_tried_by_admins_before_users_see_it(client):
 def offer_a_new_model(client, model_id):
     """The provider's key now offers one more model (its models read again, as every 10 minutes)."""
     db = client.app.state.db
-    key = db.one("SELECT id, provider_id FROM provider_keys ORDER BY id LIMIT 1")
+    key = db.one("SELECT k.id, k.provider_id FROM provider_keys k JOIN providers p ON p.id = k.provider_id "
+                 "WHERE p.kind = 'scene_provider_v1' ORDER BY k.id LIMIT 1")   # the test provider's (not On this PC's)
     model = dict(next(m for m in studio_models.MODELS if m["id"] == "seedream_5"), id=model_id, name="Seedream 6")
     client.provider.models.append(model)
     registry.save_models(db, key["provider_id"], key["id"], client.provider.models)

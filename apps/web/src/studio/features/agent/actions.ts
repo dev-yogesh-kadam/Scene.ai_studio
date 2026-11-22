@@ -25,7 +25,8 @@ export function applyPlan(chat: AgentChat, run: Run, plan: ServerPlan) {
   plan.steps.forEach((shown, i) => {
     const step = run.steps[i];
     if (!step) return;
-    if (shown.job && !step.job) {
+    // a step queued again (a resume after its job failed) has a new job: the server's is the one to follow
+    if (shown.job && shown.job !== step.job) {
       step.job = shown.job;
       step.queuedAt = step.queuedAt || Date.now();
       chat.work(run, 'queue', `Queued “${step.name}”`);
