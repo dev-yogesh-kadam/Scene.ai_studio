@@ -561,18 +561,32 @@ class PlanRunner:
     async def _cut(self, plan_id, steps, i, cut, project_id):
         """The finished cut: its shots (the take chosen of each) in order, a fade where a new place starts, and the music."""
         clips = list(cut.get("clips") or [])
-        last = None
+        last, missing = None, []
         for index in cut.get("steps") or []:
             shot = steps[index] if isinstance(index, int) and 0 <= index < len(steps) else None
             if not shot or shot.get("skipped"):
                 continue
-            made = await self._result(plan_id, steps, index, i)
+            try:
+                made = await self._result(plan_id, steps, index, i)
+            except Refused:   # every shot is waited for first, so the message names all that are not made
+                missing.append(str(shot.get("name") or "Shot {}".format(index + 1)))
+                continue
             fade = bool(last and shot.get("place") and last.get("place") and shot["place"] != last["place"])
             clips.append({"id": made, "start": 0, "end": 0, "fade": fade})
             last = shot
+        if missing:
+            raise Refused(cut_not_ready(missing))
         music = await self._result(plan_id, steps, cut["music_step"], i) if cut.get("music_step") is not None else cut.get("music")
         return {"name": cut.get("name"), "clips": clips, "music": music, "title": cut.get("title"), "end": cut.get("end"),
                 "look": cut.get("look"), "shape": cut.get("shape"), "project_id": project_id}
+
+
+def cut_not_ready(names):
+    """Why the final cut can't be made yet: the shots it needs that are not made, by name."""
+    names = [n for n in names if n]
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return "Can't make the final cut yet: {} {} made. Make {} again, then the cut.".format(
+        listed, "isn't" if len(names) == 1 else "aren't", "it" if len(names) == 1 else "them")
 
 
 def filled_slots(step):

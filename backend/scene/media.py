@@ -51,8 +51,20 @@ async def _ffmpeg(*args, check=True, cwd=None, limit=FFMPEG_LIMIT):
         raise MediaError("ffmpeg stopped responding and was stopped after {:.0f} seconds.".format(limit))
     text = stderr.decode("utf-8", "replace")
     if check and process.returncode != 0:
-        raise MediaError("ffmpeg failed: " + text.strip()[-400:])
+        raise MediaError("ffmpeg failed: " + ffmpeg_said(text))
     return text
+
+
+ERROR_WORDS = re.compile(r"error|fail|invalid|cannot|could not|no such|not found|unable|mismatch", re.I)
+
+
+def ffmpeg_said(text, most=1500):
+    """What a failed ffmpeg said, for the job's error (the admin console shows it whole): the lines that name a problem
+    first, as ffmpeg's cause comes before the lines that only say each part stopped, then the end of what it said."""
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    first = [line for line in lines if ERROR_WORDS.search(line) and "Terminating thread" not in line][:6]
+    tail = [line for line in lines[-4:] if line not in first]
+    return "\n".join(first + (["…"] if first and tail else []) + tail)[:most]
 
 
 async def probe(path):
@@ -386,12 +398,15 @@ async def sequence(parts, target, fades=()):
         args += ["-i", path]
         filters.append(
             "[{i}:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS,fps={fps},"
-            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[v{i}]"
+            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,"
+            "settb=1/{fps}[v{i}]"
             .format(i=i, s=start, e=end, fps=FPS, w=width, h=height))
         if with_audio:
-            sound = ("[{i}:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS,".format(i=i, s=start, e=end)
+            # apad: a clip whose sound is shorter than its picture is filled out with silence, or a crossfade or join
+            # waiting on its sound gets none and ffmpeg stops ("received no packets")
+            sound = ("[{i}:a]apad,atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS,".format(i=i, s=start, e=end)
                      if info["audio"] else "anullsrc=r=48000:cl=stereo,atrim=duration={:.3f},".format(end - start))
-            filters.append(sound + "aresample=48000,aformat=channel_layouts=stereo[a{}]".format(i))
+            filters.append(sound + "aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a{}]".format(i))
     # Clips joined one at a time onto what is joined so far: a crossfade overlaps the two, a cut puts them end to end.
     video, sound, total = "[v0]", "[a0]", lengths[0]
     for i in range(1, len(parts)):
@@ -399,7 +414,8 @@ async def sequence(parts, target, fades=()):
         if fade:
             filters.append("{}[v{}]xfade=transition=fade:duration={}:offset={:.3f}[jv{}]".format(video, i, FADE, total - FADE, i))
         else:
-            filters.append("{}[v{}]concat=n=2:v=1:a=0[jv{}]".format(video, i, i))
+            # xfade takes two pictures of one time base only: a join's own is put back to the clips'
+            filters.append("{}[v{}]concat=n=2:v=1:a=0,settb=1/{}[jv{}]".format(video, i, FPS, i))
         if with_audio:
             filters.append("{}[a{}]{}[ja{}]".format(sound, i, "acrossfade=d={}".format(FADE) if fade else "concat=n=2:v=0:a=1", i))
         video, sound, total = "[jv{}]".format(i), "[ja{}]".format(i), total + lengths[i] - (FADE if fade else 0)

@@ -50,6 +50,32 @@ def local_tools(settings):
                       models_dir=str(storage / "models"), switch=getattr(settings, "local_tools", "auto"))
 
 
+# A language as a person or a model writes it -> the tag a voiceover takes (language and region). India first: the
+# studio's voices are mostly Indian English and Indian languages.
+LANGUAGE_TAGS = {"english": "en-IN", "en": "en-IN", "indian english": "en-IN", "american english": "en-US",
+                 "british english": "en-GB", "hindi": "hi-IN", "hi": "hi-IN", "marathi": "mr-IN", "mr": "mr-IN",
+                 "tamil": "ta-IN", "ta": "ta-IN", "telugu": "te-IN", "te": "te-IN", "bengali": "bn-IN", "bangla": "bn-IN",
+                 "bn": "bn-IN", "spanish": "es-ES", "es": "es-ES", "french": "fr-FR", "fr": "fr-FR", "german": "de-DE",
+                 "de": "de-DE", "portuguese": "pt-BR", "pt": "pt-BR", "italian": "it-IT", "it": "it-IT",
+                 "japanese": "ja-JP", "ja": "ja-JP", "korean": "ko-KR", "ko": "ko-KR", "chinese": "zh-CN",
+                 "mandarin": "zh-CN", "zh": "zh-CN", "arabic": "ar-SA", "ar": "ar-SA"}
+
+
+def language_tag(value):
+    """A language as a voiceover takes it: "English" or "en" -> "en-IN", "en_us" -> "en-US"; a tag stays as it is;
+    "" for nothing; anything unknown is passed on as written (the provider says what it can't take)."""
+    text = " ".join(str(value or "").replace("_", "-").split())
+    if not text:
+        return ""
+    known = LANGUAGE_TAGS.get(text.lower())
+    if known:
+        return known
+    head, _, region = text.partition("-")
+    if len(head) in (2, 3) and head.isalpha() and len(region) == 2 and region.isalpha():
+        return "{}-{}".format(head.lower(), region.upper())
+    return text
+
+
 class NoProvider(Exception):
     """No provider could ever run it (no key at all, or only broken ones): the job fails at once with these words."""
 
@@ -302,6 +328,23 @@ class Router:
         if found or not words.startswith("The voices could not"):
             self._voices[wanted] = (time.time(), found, words)
         return found, words
+
+    async def default_voice(self, language=""):
+        """A voice for a voiceover that names none (the provider may have no default): the first of its library in
+        the line's language (en-IN, or its language alone: en; "English" is read as en-IN), else the first; "" when
+        there is no list."""
+        try:
+            voices, _ = await self.voices()
+        except Exception:
+            return ""
+        language = language_tag(language).lower()
+        for fits in (lambda v: language and v.get("language", "").lower() == language,
+                     lambda v: language and v.get("language", "").lower().split("-")[0] == language.split("-")[0],
+                     lambda v: True):
+            hit = next((v for v in voices if fits(v)), None)
+            if hit:
+                return hit["id"]
+        return ""
 
     async def voice_engine(self, voice_id):
         """The engine of a voice of the speech model ("gemini", "elevenlabs" ...), or "" when it is not known: from a

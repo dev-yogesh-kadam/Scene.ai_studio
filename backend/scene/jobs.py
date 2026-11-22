@@ -36,6 +36,9 @@ AUDIO_TYPES = {".mp3", ".flac", ".wav", ".opus", ".ogg", ".m4a"}
 TEXT_TYPES = {".json", ".srt", ".txt"}   # a transcript, a list of times: filed as "text"
 STYLED_ENGINE = "gemini"   # the speech model's only voices that take style_instructions
 STYLE_REFUSED = "style_instructions_not_supported"   # the provider's code when a voice takes none
+NO_VOICE = ("No voice is chosen for this voiceover, and the provider has no voice to pick from. Pick one in its "
+            "Voice id setting (the agent's voices tool lists them), or set a default voice on the generation server.")
+VOICES_LOOKED_AT = 20   # this module's latest voiceovers looked at for the voice they were made with
 CLIP_BREAK = re.compile(r"^\s*-{3,}\s*$", re.M)  # a line of dashes separates per-clip prompts
 JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever came after it (the canvas waits for its result)
 PROVIDER = "The provider"
@@ -627,10 +630,41 @@ class JobManager:
             print("Job {}: the voice takes no style instructions; asked again without them.".format(job["id"]))
             return await self._provider_clip_once(job, live, wf, settings, clip, plain=True)
 
+    def _voice_before(self, job, wf):
+        """The voice the latest voiceover of this job's module (its user's, on the same model) was made with, or "".
+        Each earlier job's settings are built again as they were sent, so it is the voice the provider was given."""
+        if not job.get("project_id"):
+            return ""
+        with as_everyone():
+            rows = self.db.all("SELECT settings FROM jobs WHERE user_id = ? AND project_id = ? AND workflow = ? AND id <> ? "
+                               "AND status = 'done' ORDER BY created DESC LIMIT ?",
+                               (job["user_id"], job["project_id"], job["workflow"], job["id"], VOICES_LOOKED_AT))
+        for row in rows:
+            try:
+                earlier = json.loads(row["settings"]) if isinstance(row["settings"], str) else row["settings"]
+                graph, _ = workflows.build_prompt(wf, dict(earlier or {}, clips=1))
+                voice = str(provider_workflows.provider_input(wf, graph).get("voice_id") or "").strip()
+            except Exception:   # a job of an older shape of this model: looked past
+                continue
+            if voice:
+                return voice
+        return ""
+
     async def _provider_clip_once(self, job, live, wf, settings, clip=None, plain=False):
         provider = wf["profile"]["provider"]
         graph, ctx = workflows.build_prompt(wf, dict(settings, clips=1))
         inputs = provider_workflows.provider_input(wf, graph)
+        if "language_code" in inputs:   # "English", "en" -> en-IN: the provider takes a language and region
+            inputs["language_code"] = provider_router.language_tag(inputs["language_code"])
+            if not inputs["language_code"]:
+                inputs.pop("language_code")
+        if "voice_id" in inputs and not str(inputs.get("voice_id") or "").strip():
+            # A voiceover with no voice chosen (the provider may have no default of its own): the voice this module's
+            # last voiceover was made with, so a retake sounds the same, else the provider's first in its language.
+            picked = await offload(self._voice_before, job, wf) or await self.router.default_voice(inputs.get("language_code"))
+            if not picked:
+                raise provider_base.RequestProblem(NO_VOICE)
+            inputs["voice_id"] = picked
         if str(inputs.get("style_instructions") or "").strip() and (plain or inputs.get("voice_id")):
             engine = "" if plain else await self.router.voice_engine(inputs["voice_id"])
             if plain or (engine and engine != STYLED_ENGINE):
