@@ -121,9 +121,11 @@ Decided by the reference video. One mode per call.
   name or noun in parentheses — `@Image1 (Lee) walks towards @Image3 (Sue)`, never `@Image1 walks`
   or `@Image2 location is…`. A tag straight before a verb, number, or position word gets misread
   as a count.
-- **Identity text stays minimal**: age + build + unique visible features + action-critical
-  details, then `100% matches the reference`. Long appearance text fights the image. Small text,
-  logos, and key colors are stated in words too — the model drops them otherwise.
+- **Identity text stays minimal and generic**: age + build + unique visible features + action-critical
+  details, then `as in @ImageN`. Never `100% matches the reference` (it trips the provider's content
+  filter) and never a real person's, a famous character's or a brand's name. Long appearance text
+  fights the image. Small text, logos, and key colors are stated in words too — the model drops them
+  otherwise.
 - **One image, one subject.** A single-character sheet never defines two on-screen characters.
   Several views of one subject: say they jointly define one entity.
 - **Several people facing camera**: pin each by screen side and a visible trait ("the character

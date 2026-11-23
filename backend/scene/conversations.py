@@ -35,10 +35,52 @@ def read(db, user_id, project_id, tab):
     return data
 
 
+class Stale(Exception):
+    """The page's copy is older than the one kept (another window, the phone, or a save that arrived late): it is
+    not written over the newer one. `rev` and `writer` are the kept copy's."""
+
+    def __init__(self, rev, writer):
+        super().__init__("This conversation was changed in another window.")
+        self.rev, self.writer = rev, writer
+
+
+def clean(value):
+    """The JSON without NUL characters: PostgreSQL's jsonb refuses "\\u0000", and the whole save would fail."""
+    if isinstance(value, str):
+        return value.replace("\x00", "") if "\x00" in value else value
+    if isinstance(value, list):
+        return [clean(v) for v in value]
+    if isinstance(value, dict):
+        return {clean(k): clean(v) for k, v in value.items()}
+    return value
+
+
+def _rev(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def write(db, user_id, project_id, tab, data):
     """Keep the conversation the page sent (its whole JSON), in one statement: its own keys, and its turns in place of
-    the ones before. A page reading at the same moment sees the one before or this one, never half of each."""
-    with _one_at_a_time(user_id, project_id, tab):
+    the ones before. A page reading at the same moment sees the one before or this one, never half of each.
+
+    Each save carries `rev`, one more than the copy the page loaded or last saved, and `writer`, the page's own id.
+    A save that is not newer than the kept copy raises Stale, so an old copy (a window left open at the first turn)
+    never takes the place of the whole conversation; the same save sent twice (a retry) is kept once. The
+    conversation's row is locked for the check, so this holds across processes too."""
+    data = clean(data)
+    rev, writer = _rev(data.get("rev")), data.get("writer")
+    with _one_at_a_time(user_id, project_id, tab), db.transaction():
+        kept = db.one("SELECT meta->>'rev' AS rev, meta->>'writer' AS writer FROM conversations WHERE " + WHERE + " FOR UPDATE",
+                      (user_id, project_id or 0, tab))
+        kept_rev = _rev(kept["rev"]) if kept else None
+        if kept_rev is not None:
+            if rev is not None and rev == kept_rev and writer and writer == kept["writer"]:
+                return   # this very save, sent again
+            if rev is None or rev <= kept_rev:
+                raise Stale(kept_rev, kept["writer"])
         _write(db, user_id, project_id, tab, data)
 
 

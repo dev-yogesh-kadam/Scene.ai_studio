@@ -44,7 +44,8 @@ Identity, wardrobe, counts, props, screen direction, "cuts only where stated", n
 none; with recorded lines: "Use the attached @Audio clips strictly as-is — same pronunciation and voice."
 
 Rules:
-- Identity in words stays short: age, build, the features that tell people apart, then "100% matches the reference".
+- Identity in words stays short and generic: age, build, the features that tell people apart, then "as in @ImageN".
+  Never "100% matches the reference" (it trips the content filter), and no real person's, famous character's or brand's name.
   Small text, logos and key colours are said in words too.
 - A first or last frame is its own slot ("start_from" and the last frame slot) or a reference picture with "Use @ImageN
   as the first frame."; describe the motion from it, not the picture again.

@@ -38,6 +38,14 @@ STYLED_ENGINE = "gemini"   # the speech model's only voices that take style_inst
 STYLE_REFUSED = "style_instructions_not_supported"   # the provider's code when a voice takes none
 NO_VOICE = ("No voice is chosen for this voiceover, and the provider has no voice to pick from. Pick one in its "
             "Voice id setting (the agent's voices tool lists them), or set a default voice on the generation server.")
+# A clip the provider's content filter flags (often passing on another try: Seedance 2.5 with sound and spoken lines,
+# 22 Nov 2026): the tries after the first, in order. "same" as it was, "no_sound" without its sound (its lines then go
+# on as a voiceover), "stand_in" on another model (FILTER_STAND_IN). After the last the job fails and says why.
+FILTER_LADDER = ("same", "same", "no_sound", "stand_in")
+FILTER_STAND_IN = {"seedance_2_5": ("seedance_2_0", "kling_4.0"), "seedance_2_5_flash": ("seedance_2_0", "kling_4.0"),
+                   "seedance_2_0": ("kling_4.0",), "seedance_2_0_fast": ("seedance_2_0", "kling_4.0"),
+                   "seedance_2_0_mini": ("seedance_2_0", "kling_4.0")}
+FLAGGED = ("flagged by the content filter", "content_filter", "content filter")
 VOICES_LOOKED_AT = 20   # this module's latest voiceovers looked at for the voice they were made with
 CLIP_BREAK = re.compile(r"^\s*-{3,}\s*$", re.M)  # a line of dashes separates per-clip prompts
 JUST_FINISHED = 300  # seconds a finished job stays in its owner's list whatever came after it (the canvas waits for its result)
@@ -99,6 +107,35 @@ def _kind_of_output(out, suffix):
     if kind:
         return kind
     return "video" if suffix in VIDEO_TYPES else "image" if suffix in IMAGE_TYPES else "audio" if suffix in AUDIO_TYPES else "text"
+
+def flagged(error):
+    """Whether a provider's refusal is its content filter's (a flag on what was made, not on the request)."""
+    said = "{} {}".format(getattr(error, "code", "") or "", error).lower()
+    return any(words in said for words in FLAGGED)
+
+
+def made_how(sound_off, model):
+    """What a clip made past the content filter gave up, in words kept with it ("" for nothing)."""
+    parts = []
+    if sound_off:
+        parts.append("made without its sound after the content filter flagged it: lay its lines on as a voiceover "
+                     "(and lip sync them if a face speaks)")
+    if model:
+        parts.append("made on {} after the content filter flagged it on its own model".format(model))
+    return "; ".join(parts)
+
+
+def filter_gave_up(name, rung, sound_off, model):
+    """Why a clip the content filter kept flagging failed, for the user: what was tried, and what to change."""
+    tried = ["{} tries as it was".format(1 + sum(1 for r in FILTER_LADDER[:rung] if r == "same"))]
+    if sound_off:
+        tried.append("one without sound")
+    if model:
+        tried.append("one on {}".format(model))
+    return ("The provider's content filter flagged “{}” on every try ({}). Change what happens in it (an animal in "
+            "distress, a hit, a fall, a real person's or a brand's name), then make it again.").format(
+        name or "this clip", ", ".join(tried))
+
 
 class Cancelled(Exception):
     pass
@@ -621,14 +658,90 @@ class JobManager:
         router picks (the job's own while it holds one), followed until it ended well. Returns ((adapter, Choice,
         started, last answer), context). The job's provider note says what ran it; a chain's lists every clip.
         Only Gemini voices take style instructions: a voice the provider refuses them for is asked once more without
-        them (the [bracketed] cues in the text still direct the delivery)."""
-        try:
-            return await self._provider_clip_once(job, live, wf, settings, clip)
-        except (provider_base.ProviderError, provider_base.RequestProblem) as error:
-            if STYLE_REFUSED not in str(error) and getattr(error, "code", "") != STYLE_REFUSED:
-                raise
-            print("Job {}: the voice takes no style instructions; asked again without them.".format(job["id"]))
-            return await self._provider_clip_once(job, live, wf, settings, clip, plain=True)
+        them (the [bracketed] cues in the text still direct the delivery).
+        A clip the provider's content filter flags goes up the ladder (FILTER_LADDER): the same twice more (it often
+        passes), then without its sound, then on a stand-in model (FILTER_STAND_IN); after that it fails and says so."""
+        plain, rung, sound_off, model = False, 0, False, None
+        while True:
+            try:
+                found = await self._provider_clip_once(job, live, wf, settings, clip, plain=plain, rung=rung,
+                                                       sound_off=sound_off, model=model)
+            except (provider_base.ProviderError, provider_base.RequestProblem) as error:
+                if not plain and (STYLE_REFUSED in str(error) or getattr(error, "code", "") == STYLE_REFUSED):
+                    print("Job {}: the voice takes no style instructions; asked again without them.".format(job["id"]))
+                    plain = True
+                    continue
+                if not flagged(error):
+                    raise
+                if live.get("cancel"):
+                    raise Cancelled()
+                step = await self._next_rung(job, wf, rung, sound_off, model, settings)
+                if step is None:
+                    raise provider_base.RequestProblem(filter_gave_up(job.get("name"), rung, sound_off, model)) from error
+                rung, sound_off, model, said = step
+                print("Job {}{}: flagged by the content filter; {}.".format(job["id"], " clip {}".format(clip) if clip else "", said))
+                live["node"] = "Flagged by the content filter: {}".format(said)
+                self.notify(job["user_id"])
+                continue
+            if sound_off or model:   # what was given up to get it made, kept with it for the agent and the user
+                found[1]["content_filter"] = made_how(sound_off, model)
+            return found
+
+    async def _next_rung(self, job, wf, rung, sound_off, model, settings):
+        """The next try after a content filter's flag: (rung, sound_off, model, what it does in words), or None when
+        the ladder is done. A rung that changes nothing (no sound to turn off, no stand-in offered) is passed over."""
+        provider = wf["profile"]["provider"]
+        while True:
+            rung += 1
+            if rung > len(FILTER_LADDER):
+                return None
+            what = FILTER_LADDER[rung - 1]
+            if what == "same":
+                return rung, sound_off, model, "trying again as it was ({} of {})".format(rung, len(FILTER_LADDER))
+            if what == "no_sound":
+                graph, _ = workflows.build_prompt(wf, dict(settings, clips=1))
+                if provider_workflows.provider_input(wf, graph).get("sound") is True:
+                    return rung, True, model, "trying again without sound (the lines can be laid on as a voiceover)"
+                continue
+            if what == "stand_in":
+                stand_in = await self._stand_in(provider["model"], provider.get("capability"))
+                if stand_in:
+                    return rung, sound_off, stand_in, "trying on {} instead".format(stand_in)
+                continue
+
+    async def _inputs_for(self, model_id, capability, inputs):
+        """The job's inputs as a stand-in model takes them: only the settings it has, a choice only when it offers it
+        (else its default), and no more reference files than it takes."""
+        other = await self.catalog.load(provider_workflows.workflow_id(capability, model_id))
+        node = other["nodes"][provider_workflows.PROVIDER_NODE]["inputs"]
+        names = {name.partition("#")[0] for name in node}
+        refs = (other["profile"].get("refs") or {})
+        if refs.get("target_input"):
+            names.add(refs["target_input"].partition("#")[0])
+        offered = {o["id"]: {c["id"] for c in o["choices"]} for o in other["profile"].get("options") or []}
+        names |= set(offered)   # a choice (sound, shape, resolution) is written into the node by a rule, not linked
+        most = refs.get("max")
+        kept = {}
+        for name, value in inputs.items():
+            if name not in names:
+                continue
+            if name in offered and provider_workflows._choice_id(value) not in offered[name]:
+                continue
+            if isinstance(value, list) and isinstance(most, int) and refs.get("target_input", "").startswith(name + "#"):
+                value = value[:most]
+            kept[name] = value
+        return kept
+
+    async def _stand_in(self, model_id, capability):
+        """The first of FILTER_STAND_IN's models for this one that a key offers now, or None."""
+        for other in FILTER_STAND_IN.get(model_id, ()):
+            wid = provider_workflows.workflow_id(capability, other)
+            try:
+                if wid and await self.catalog.load(wid):
+                    return other
+            except Exception:   # not offered now: the next one
+                continue
+        return None
 
     def _voice_before(self, job, wf):
         """The voice the latest voiceover of this job's module (its user's, on the same model) was made with, or "".
@@ -650,7 +763,9 @@ class JobManager:
                 return voice
         return ""
 
-    async def _provider_clip_once(self, job, live, wf, settings, clip=None, plain=False):
+    async def _provider_clip_once(self, job, live, wf, settings, clip=None, plain=False, rung=0, sound_off=False, model=None):
+        """One try (see _provider_clip): rung, the try of the content filter's ladder (each a request of its own);
+        sound_off, the clip asked without its sound; model, a stand-in model asked instead of the job's own."""
         provider = wf["profile"]["provider"]
         graph, ctx = workflows.build_prompt(wf, dict(settings, clips=1))
         inputs = provider_workflows.provider_input(wf, graph)
@@ -674,15 +789,21 @@ class JobManager:
         self.notify(job["user_id"])
 
         tries = int((job.get("settings") or {}).get("not_ready_tries") or 0) if isinstance(job.get("settings"), dict) else 0
-        key = provider_v1.idempotency_key(job["id"], clip, tries + (1000 if plain else 0))   # a re-try is a new request
+        key = provider_v1.idempotency_key(job["id"], clip, tries + (1000 if plain else 0) + 100 * rung)   # a re-try is a new request
+        if sound_off and "sound" in inputs:
+            inputs["sound"] = False
+        model_id = provider["model"]
+        if model:   # the stand-in takes what it has a setting for, with values it offers; the rest is its own default
+            inputs = await self._inputs_for(model, provider.get("capability"), inputs)
+            model_id = model
 
         async def attempt(choice):
             adapter = await offload(self.router.adapter, choice["provider"])
             sent = await self._provider_files(adapter, choice["secret"], inputs)
-            started = await adapter.start(choice["secret"], provider["model"], sent, metadata, key)
+            started = await adapter.start(choice["secret"], model_id, sent, metadata, key)
             return adapter, started
 
-        (adapter, started), choice = await self.router.run(provider["model"], attempt, job_id=job["id"], first=job.get("choice"))
+        (adapter, started), choice = await self.router.run(model_id, attempt, job_id=job["id"], first=None if model else job.get("choice"))
         job["choice"] = choice
         note = dict(choice.described(), job=started["id"], request_id=started.get("request_id") or "",
                     quote=started.get("quote"), test=bool(started.get("test")))
@@ -693,7 +814,7 @@ class JobManager:
         await self.db.arun("UPDATE jobs SET provider_key = ?, provider = ?, server = ? WHERE id = ?",
                            (choice["key"]["id"] if choice["key"]["id"] > 0 else None, json.dumps(note), choice["provider"]["name"], job["id"]))
         print("Job {}{}: {} on {} (key {}), the provider's job {}, request {}.".format(
-            job["id"], " clip {}".format(clip) if clip else "", provider["model"], choice["provider"]["name"], choice["key"]["label"],
+            job["id"], " clip {}".format(clip) if clip else "", model_id, choice["provider"]["name"], choice["key"]["label"],
             started["id"], note["request_id"] or "-"))
         live["node"] = "Waiting for the provider"
         self.notify(job["user_id"])

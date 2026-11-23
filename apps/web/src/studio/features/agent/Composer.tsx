@@ -214,11 +214,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ ch
         <span style={{ flex: 1 }} />
         <span
           className={css(
-            cx(s['agent-status'], 'slate-text', chat.status.hidden && 'hidden', chat.status.error && 'error'),
+            cx(
+              s['agent-status'],
+              'slate-text',
+              !chat.saveProblem && chat.status.hidden && 'hidden',
+              (chat.saveProblem || chat.status.error) && 'error',
+            ),
           )}
-          title={chat.status.title}
+          title={
+            chat.saveProblem
+              ? 'The studio did not keep the latest turns. It tries again with the next change.'
+              : chat.status.title
+          }
+          role={chat.saveProblem ? 'alert' : undefined}
         >
-          {chat.status.text}
+          {chat.saveProblem || chat.status.text}
         </span>
         <button
           ref={skillsButton}

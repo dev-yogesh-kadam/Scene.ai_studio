@@ -247,3 +247,15 @@ dialog.viewer[data-flying] .viewer-panel {
     transform: scale(0.97);
   }
 }
+
+/* A video the browser could not play: why, and the file to open or keep. */
+.viewer-missing {
+  max-width: 420px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-2, #c9c9c9);
+}
+.viewer-missing a {
+  color: inherit;
+  text-decoration: underline;
+}

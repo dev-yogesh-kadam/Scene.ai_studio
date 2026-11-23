@@ -124,3 +124,30 @@ def test_two_saves_of_one_tab_at_once_keep_one_of_them_never_both(client):
         saver.join(10)
     turns = conversations.read(db, me["id"], 0, "race")["runs"]
     assert not failed and turns in ([{"n": 1}, {"n": 1}], [{"n": 2}, {"n": 2}])
+
+
+def test_an_older_copy_never_writes_over_a_newer_one(client):
+    """A window left open at the first turn (or a save that arrived late) is refused (409, with the kept version), so
+    the conversation is not lost; the same save sent again (a retry) is kept once; an old page without a version is
+    refused once there is one."""
+    register(client)
+    first = dict(CONVERSATION, runs=CONVERSATION["runs"][:1], rev=1, writer="studio-a")
+    assert client.put("/api/boards/" + TAB, json={"project": 0, "data": first}).json() == {"ok": True}
+    whole = dict(CONVERSATION, rev=2, writer="studio-a")
+    assert client.put("/api/boards/" + TAB, json={"project": 0, "data": whole}).json() == {"ok": True}
+    assert client.put("/api/boards/" + TAB, json={"project": 0, "data": whole}).json() == {"ok": True}   # retried
+
+    stale = dict(first, rev=2, writer="phone-b")   # loaded at rev 1 elsewhere: its next save is 2 as well
+    answer = client.put("/api/boards/" + TAB, json={"project": 0, "data": stale})
+    assert answer.status_code == 409 and answer.json()["rev"] == 2 and answer.json()["writer"] == "studio-a"
+    unversioned = client.put("/api/boards/" + TAB, json={"project": 0, "data": CONVERSATION["runs"] and {"runs": []}})
+    assert unversioned.status_code == 409
+    assert board(client) == whole
+
+
+def test_a_nul_character_in_a_turn_does_not_stop_the_save(client):
+    """PostgreSQL's jsonb refuses \u0000: it is left out, and the rest is kept."""
+    register(client)
+    data = dict(CONVERSATION, runs=[dict(CONVERSATION["runs"][0], reply="ffmpeg said: a\x00b")], rev=1, writer="w")
+    assert client.put("/api/boards/" + TAB, json={"project": 0, "data": data}).json() == {"ok": True}
+    assert board(client)["runs"][0]["reply"] == "ffmpeg said: ab"

@@ -18,7 +18,7 @@ PLAIN_ERRORS = [
 def explain(error):
     if not error:
         return ""
-    if error.startswith("The provider: "):   # written for people (jobs._finish)
+    if error.startswith(("The provider: ", "Can't make the final cut yet")):   # written for people (jobs._finish, plans)
         return error
     low = error.lower()
     for words, meaning in PLAIN_ERRORS:

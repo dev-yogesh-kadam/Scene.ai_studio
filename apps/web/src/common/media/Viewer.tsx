@@ -40,6 +40,9 @@ type Options = {
 let viewing = false; // one viewer at a time: a quick second double click must not open another over the first
 
 export function openViewer(item: Item, options: Options = {}) {
+  // One left marked open with no viewer on the page (it went with the page, e.g. the browser's Back while it was
+  // open) must not stop every double click after it.
+  if (viewing && !document.querySelector('dialog[aria-label="Viewer"][open]')) viewing = false;
   if (viewing) return;
   viewing = true;
   const source = pressedPicture();
@@ -274,10 +277,66 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function Media({ item, url }: { item: Item; url: string }) {
-  if (item.kind === 'video') return <video src={url} controls autoPlay loop />;
+  if (item.kind === 'video') return <VideoMedia url={url} name={item.name} />;
   if (item.kind === 'audio') return <audio src={url} controls autoPlay />;
   if (item.kind === 'text') return <TextFile url={url} />;
   return <img src={url} alt={item.name} />;
+}
+
+/** A video plays at once, with its controls. One the browser cannot play says so, with the file to open or keep,
+ *  instead of a black box; one whose start was refused (autoplay) starts muted. */
+function VideoMedia({ url, name }: { url: string; name: string }) {
+  const [failed, setFailed] = useState('');
+  if (failed)
+    return (
+      <div className={css('viewer-missing')} role="alert">
+        <p>{failed}</p>
+        <p>
+          <a href={url} target="_blank" rel="noopener">
+            Open the file
+          </a>
+          {' · '}
+          <a href={url + '?download=true'} download>
+            Download
+          </a>
+        </p>
+      </div>
+    );
+  return (
+    <video
+      src={url}
+      controls
+      autoPlay
+      loop
+      playsInline
+      preload="auto"
+      aria-label={name}
+      onCanPlay={(e) => {
+        const video = e.currentTarget;
+        if (video.paused)
+          video.play().catch(() => {
+            video.muted = true; // the browser allows a muted start
+            void video.play().catch(() => {});
+          });
+      }}
+      onError={(e) => {
+        const code = e.currentTarget.error?.code;
+        void fetch(url, { headers: { Range: 'bytes=0-0' } })
+          .then((r) =>
+            setFailed(
+              r.ok
+                ? code === 4
+                  ? 'This browser cannot play this video.'
+                  : 'The video stopped loading.'
+                : r.status === 404
+                  ? 'The video file is missing from storage.'
+                  : `The studio could not send the video (${r.status}).`,
+            ),
+          )
+          .catch(() => setFailed('The studio could not be reached.'));
+      }}
+    />
+  );
 }
 
 /** A text is shown as it is: its first 200,000 characters. */

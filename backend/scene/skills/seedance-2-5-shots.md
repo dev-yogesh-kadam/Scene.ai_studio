@@ -116,9 +116,11 @@ Decided by the reference video. One mode per call.
   <Location> references @Image4; use only spatial layout, architecture, and lighting; do not use the people in the image.
   @Video1 is used for <action / camera movement / pacing>; do not use its characters, clothing, or scene.
   ```
-- **Identity text stays minimal**: age + build + unique visible features + action-critical
-  details, then `100% matches the reference`. Long appearance text fights the image. Small text,
-  logos, and key colors are stated in words too — the model drops them otherwise.
+- **Identity text stays minimal and generic**: age + build + unique visible features + action-critical
+  details, then `as in @ImageN`. Never `100% matches the reference` (it trips the provider's content
+  filter) and never a real person's, a famous character's or a brand's name. Long appearance text
+  fights the image. Small text, logos, and key colors are stated in words too — the model drops them
+  otherwise.
 - **One image, one subject.** A single-character sheet never defines two on-screen characters.
   Several views of one subject: say they jointly define one entity.
 - **Keyframes** go inside `reference_image_urls` at their tag position. Use these exact

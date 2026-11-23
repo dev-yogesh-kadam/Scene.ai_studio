@@ -69,15 +69,21 @@ async def assemble(body: dict, request: Request, user: dict = Depends(current_us
     if not 1 <= len(clips) <= MAX_CLIPS:
         raise HTTPException(400, "Put between 1 and {} clips in the cut.".format(MAX_CLIPS))
     folder = await offload(state.outputs.folder, user["id"])
-    parts = []
-    for clip in clips:
-        row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (clip.get("id") if isinstance(clip, dict) else None, user["id"]))
+    parts, missing = [], []
+    for n, clip in enumerate(clips):
+        clip = clip if isinstance(clip, dict) else {}
+        row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'video'", (clip.get("id"), user["id"]))
         if row is None or not (folder / row["filename"]).is_file():
-            raise HTTPException(404, "A shot of the cut is no longer in your library.")
+            missing.append(str(clip.get("name") or "Clip {}".format(n + 1)))   # every clip looked at: all are named
+            continue
         try:
-            parts.append({"id": row["id"], "start": float(clip.get("start") or 0), "end": float(clip.get("end") or 0), "fade": clip.get("fade") is True})
+            parts.append({"id": row["id"], "start": float(clip.get("start") or 0), "end": float(clip.get("end") or 0), "fade": clip.get("fade") is True,
+                          "name": str(clip.get("name") or row["name"] or "")[:80]})
         except (TypeError, ValueError):
             raise HTTPException(400, "The start and end of {} must be numbers.".format(row["name"]))
+    if missing:
+        from ..plans import cut_not_ready
+        raise HTTPException(404, cut_not_ready(missing))
     music = None
     if body.get("music"):
         row = await state.db.aone("SELECT * FROM generations WHERE id = ? AND user_id = ? AND kind = 'audio'", (body["music"], user["id"]))

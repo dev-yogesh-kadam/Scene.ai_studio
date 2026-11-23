@@ -192,12 +192,25 @@ class PlanRunner:
                 raise HTTPException(400, "“{}” can't be priced: {}".format(step.get("name") or "A step", e))
         return total
 
-    async def _again(self, progress):
+    def _finished(self, plan_id, step):
+        """(job, item) of the latest job of this plan's step that finished with a result in the library, or None. A
+        step can have one its progress does not point at (a Try again, a restart while it was made): it is made."""
+        found = self.db.one("SELECT j.id AS job, g.id AS item FROM jobs j JOIN generations g ON g.job_id = j.id "
+                            "WHERE j.plan_id = ? AND j.plan_step = ? AND j.status = 'done' ORDER BY j.created DESC, g.id LIMIT 1",
+                            (plan_id, step))
+        return (found["job"], found["item"]) if found else None
+
+    async def _again(self, progress, plan_id=None):
         """The steps a resume tries again: not made, and whose job failed or was cancelled, or that failed before one was
-        queued. (A job's end may not have been told to the plan yet: job_ended runs after the job is shown ended.)"""
+        queued. (A job's end may not have been told to the plan yet: job_ended runs after the job is shown ended.)
+        A step with a finished job of its own is never made again: it is marked made here (in `progress`)."""
         found = []
         for i, p in enumerate(progress):
             if p.get("made") or p.get("skipped"):
+                continue
+            done = await offload(self._finished, plan_id, i) if plan_id is not None else None
+            if done:
+                p.update(job=done[0], made=done[1], error="")
                 continue
             job = p.get("job") and await self.db.aone("SELECT status FROM jobs WHERE id = ?", (p["job"],))
             if (bool(job) and job["status"] in ("failed", "cancelled")) or (p.get("error") and not job):
@@ -212,7 +225,7 @@ class PlanRunner:
         from .comfy import workflows
         row = await offload(self.get, user, plan_id)
         steps, progress = json.loads(row["steps"]), json.loads(row["progress"])
-        again = set(await self._again(progress))
+        again = set(await self._again(progress, plan_id))
         for i in again:
             progress[i] = dict(progress[i], error="", job=None)
         found = []
@@ -250,7 +263,7 @@ class PlanRunner:
         try:
             steps, progress = json.loads(row["steps"]), json.loads(row["progress"])
             if again:   # what failed is tried again: a step not queued, or whose job failed or was cancelled
-                for i in await self._again(progress):
+                for i in await self._again(progress, plan_id):
                     progress[i].update(error="", job=None)
             total = await self.price(user, steps, progress)
             problem = await offload(guardrails.plan_problem, self.db, user, total)   # the studio's stop, the plan limit
@@ -401,6 +414,10 @@ class PlanRunner:
             progress = json.loads(row["progress"])
             p = progress[i]
             if p.get("skipped") or p.get("made"):
+                continue
+            done = await offload(self._finished, plan_id, i)   # made already, by a job its progress lost: never again
+            if done:
+                await offload(self._set_step, plan_id, i, job=done[0], made=done[1], error="", waiting=False)
                 continue
             job = p.get("job") or await offload(self._queued, plan_id, i)   # queued before, even before a restart: never again
             if job:
@@ -572,7 +589,7 @@ class PlanRunner:
                 missing.append(str(shot.get("name") or "Shot {}".format(index + 1)))
                 continue
             fade = bool(last and shot.get("place") and last.get("place") and shot["place"] != last["place"])
-            clips.append({"id": made, "start": 0, "end": 0, "fade": fade})
+            clips.append({"id": made, "start": 0, "end": 0, "fade": fade, "name": str(shot.get("name") or "")[:80]})
             last = shot
         if missing:
             raise Refused(cut_not_ready(missing))

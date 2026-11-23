@@ -10,7 +10,7 @@ import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import aftercare, agent, camera, guardrails, claude, conversations, content_check, core, craft_library, credits, edits, internals, kit, media, memory, motion, phonetic, preferences, presets, recall, review, \
     pages, runs, placement, sessions, sharing, skills, traces, web
@@ -39,7 +39,8 @@ AGENT_TAB = re.compile(r"^agent-[a-z0-9]{1,16}$")
 def _board_kind(kind):
     if kind not in KINDS and not AGENT_TAB.match(kind):
         raise HTTPException(404, "No such board.")   # the lengths a shot can be given on an approval card, in seconds
-MAX_BOARD_BYTES = 2_000_000   # an agent tab keeps its whole conversation
+MAX_BOARD_BYTES = 2_000_000   # a canvas layout or a tab index
+MAX_TAB_BYTES = 16_000_000    # an agent tab keeps its whole conversation (a film's plans, prompts and checks): kept per turn
 CHECKED_SKILL = 4_000        # a skill longer than this, or one the user named with /command, is checked before the agent plans
 STATE_PAGE = 25          # leaves of a run's state the agent is given at a time
 LIVE_EVERY = 1.0         # seconds between looks at what the agent's tools did while it works
@@ -108,12 +109,15 @@ async def get_board(kind: str, request: Request, project: int = 0, user: dict = 
 @router.put("/boards/{kind}")
 async def save_board(kind: str, body: dict, request: Request, user: dict = Depends(current_user)):
     _board_kind(kind)
-    data = json.dumps(body.get("data") or {})
-    if len(data) > MAX_BOARD_BYTES:
-        raise HTTPException(400, "This is too large to save.")
+    data = json.dumps(conversations.clean(body.get("data") or {}))
+    if len(data) > (MAX_TAB_BYTES if AGENT_TAB.match(kind) else MAX_BOARD_BYTES):
+        raise HTTPException(413, "This conversation is too large to save. Fold it (/compact) or start a new one.")
     project_id, owner = await offload(_board_owner, request, user, body.get("project"), kind, "creator")
     if AGENT_TAB.match(kind):
-        await offload(conversations.write, request.app.state.db, owner, project_id, kind[len("agent-"):], body.get("data") or {})
+        try:
+            await offload(conversations.write, request.app.state.db, owner, project_id, kind[len("agent-"):], body.get("data") or {})
+        except conversations.Stale as stale:   # an older copy: the page loads the kept one instead (409)
+            return JSONResponse({"detail": str(stale), "rev": stale.rev, "writer": stale.writer}, status_code=409)
         return {"ok": True}
     with as_everyone():
         await request.app.state.db.arun(

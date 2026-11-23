@@ -129,13 +129,20 @@ export async function loadConversation(project: number, tab: string): Promise<Co
   };
 }
 
+const WRITER = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); // this page's copy
+
+/** Each save is one version newer than the copy loaded (`rev`): the studio keeps only a newer one than it has, so a
+ *  phone left open on an old copy never writes over what the studio did since (a refused save leaves it as it is). */
 export function saveConversation(project: number, tab: string, convo: Conversation) {
   const drop = Math.max(0, convo.runs.length - KEPT);
+  convo.rev = (Number(convo.rev) || 0) + 1;
   return keep(project, 'agent-' + tab, {
     runs: convo.runs.slice(-KEPT),
     direction: convo.direction,
     folded: Math.max(0, convo.folded - drop),
     workflows: convo.workflows,
+    rev: convo.rev,
+    writer: WRITER,
   }).catch(() => undefined);
 }
 

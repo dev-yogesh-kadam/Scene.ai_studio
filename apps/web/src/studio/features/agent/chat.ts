@@ -3,6 +3,7 @@
 // (`changed`), and the components draw from here (useConversation). Nothing here touches the page.
 
 import { compactDirection, setAgentPreferences } from '@scene/shared/api/agent';
+import { ApiError } from '@scene/shared/api/client';
 import { putBoard } from '@scene/shared/api/canvas';
 import type { IconName } from '../../../common/components/Icon/Icon';
 import type { Item } from '../../../common/media/item';
@@ -42,6 +43,7 @@ export type ChatEnv = {
   onUploaded: () => void;
   setBalance: (credits: number) => void; // what a message cost, as its answer says
   queued: () => void; // jobs were added: look at the queue now
+  onStale: () => void; // a newer copy of the conversation is kept: load it
 };
 
 /** The message box, as the conversation needs it. */
@@ -73,6 +75,13 @@ export class AgentChat {
   status = { text: 'checking…', hidden: false, error: false, title: '' }; // the model's name, or why it is offline
   models: Models = { list: [], current: null, prices: {}, byTokens: [], efforts: {}, shown: (name) => name };
   version = 0;
+  // Saving: `rev` is the copy's version, one more at every save, and the studio keeps only a newer one than it has, so
+  // a copy left open elsewhere never writes over the conversation. Saves go one at a time, in order.
+  rev = 0;
+  readonly writer = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); // this page's copy
+  saveProblem = ''; // the last save did not reach the studio: said under the message box until one does
+  private saving: Promise<void> | null = null;
+  private saveAgain = false;
   box: Box | null = null;
   follow = 0; // something new arrived: the log goes to its end when this changes
   private listeners = new Set<() => void>();
@@ -94,6 +103,7 @@ export class AgentChat {
       onUploaded: () => {},
       setBalance: () => {},
       queued: () => {},
+      onStale: () => {},
     };
     this.send = (typed) => send(this, typed);
     this.talk = session ? 'agent-' + session : 'agent';
@@ -146,16 +156,66 @@ export class AgentChat {
     return (ui[key] ??= made()) as NonNullable<Run['ui'][K]>;
   }
 
-  save() {
+  /** Keep the conversation on the studio. Saves asked for while one is on its way become one more after it, with the
+   *  conversation as it is then; it never fails, but a save that cannot be made is said (saveProblem). */
+  save(): Promise<void> {
+    this.saveAgain = true;
+    if (!this.saving) {
+      this.saving = (async () => {
+        while (this.saveAgain) {
+          this.saveAgain = false;
+          await this.saveOnce();
+        }
+      })().finally(() => {
+        this.saving = null;
+      });
+    }
+    return this.saving;
+  }
+
+  private async saveOnce() {
     this.env.onSaved({ spent: spentBy(this.runs, this.jobs), updated: Date.now() });
     const drop = Math.max(0, this.runs.length - KEPT);
     const project = this.env.project() || null;
-    return putBoard(this.talk, project, {
+    this.rev += 1;
+    const data = {
       runs: this.runs.slice(-KEPT),
       direction: this.direction,
       folded: Math.max(0, this.folded - drop),
       workflows: this.chatWorkflows,
-    }).catch(() => {});
+      rev: this.rev,
+      writer: this.writer,
+    };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await putBoard(this.talk, project, data);
+        this.problem('');
+        return;
+      } catch (e) {
+        const status = e instanceof ApiError ? e.status : 0;
+        if (status === 409) {
+          // A newer copy is kept (another window, the phone): it is loaded in place of this one, never written over.
+          this.saveAgain = false;
+          this.problem('');
+          this.say('This conversation changed in another window: showing the latest.');
+          this.env.onStale();
+          return;
+        }
+        // The studio unreachable or busy for a moment: twice more, a little later. A refusal (too large) is not.
+        if ((status === 0 || status >= 500) && attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+          continue;
+        }
+        this.problem(`Not saved: ${(e as Error).message || 'the studio did not answer'}`);
+        return;
+      }
+    }
+  }
+
+  private problem(text: string) {
+    if (this.saveProblem === text) return;
+    this.saveProblem = text;
+    this.changed();
   }
 
   /** A short word in the place of the model's name, then the name again. */

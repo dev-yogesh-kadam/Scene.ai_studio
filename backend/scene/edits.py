@@ -148,6 +148,15 @@ async def _assemble(settings, item, target, node_path, tmp_dir):
         await motion.render_sequence([scene], settings["look"], settings["shape"], path, node_path, tmp_dir)
         return path
 
+    missing = []   # every clip is looked for before anything is drawn or joined: the message names all that are gone
+    for n, clip in enumerate(settings["clips"]):
+        try:
+            await offload(item, clip["id"])
+        except media.MediaError:
+            missing.append(clip.get("name") or "Clip {}".format(n + 1))
+    if missing:
+        from .plans import cut_not_ready
+        raise media.MediaError(cut_not_ready(missing))
     try:
         parts, fades = [], set()
         if settings.get("title"):

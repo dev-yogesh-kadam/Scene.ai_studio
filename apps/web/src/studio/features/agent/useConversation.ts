@@ -29,7 +29,7 @@ export type ConversationProps = {
   onUploaded: () => void;
 };
 
-type Saved = { runs?: Run[]; direction?: string; folded?: number; workflows?: unknown[] };
+type Saved = { runs?: Run[]; direction?: string; folded?: number; workflows?: unknown[]; rev?: number };
 
 async function load(chat: AgentChat) {
   const project = chat.env.project();
@@ -37,6 +37,7 @@ async function load(chat: AgentChat) {
     const [saved, state] = await Promise.all([getBoard<Saved>(chat.talk, project), agentStatus()]);
     const data = saved.data ?? {};
     chat.runs = data.runs || [];
+    chat.rev = Number(data.rev) || 0; // the next save is one newer than the copy kept
     chat.direction = data.direction || '';
     chat.folded = Math.min(data.folded || 0, chat.runs.length);
     chat.chatWorkflows = Array.isArray(data.workflows)
@@ -106,6 +107,10 @@ export function useConversation(props: ConversationProps) {
       onUploaded: props.onUploaded,
       setBalance: (credits) => setUser((was) => ({ ...was, credits })),
       queued: () => void client.invalidateQueries({ queryKey: JOBS }),
+      // A newer copy was kept by another window: it takes this one's place (once nothing is being answered here).
+      onStale: () => {
+        if (!chat.busy) void load(chat);
+      },
     });
   });
   useSyncExternalStore(chat.subscribe, chat.getVersion);
